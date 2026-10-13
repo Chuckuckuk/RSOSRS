@@ -4,10 +4,10 @@
 
 use super::{Player, ServerLink, Textures, PLAYER_CLIPS};
 use bevy::prelude::*;
-use osrs_cache::anim::{Animations, Clip};
+use osrs_cache::anim::{Animations, Clip, HeldItem};
 use osrs_cache::config::Configs;
 use osrs_cache::item::{ids_by_name, ItemDef};
-use osrs_cache::kit::{build_player, Appearance, WornPart};
+use osrs_cache::kit::{build_player, Appearance, WornPart, SLOT_SHIELD, SLOT_WEAPON};
 use osrs_cache::scene::LocMesh;
 use osrs_cache::Cache;
 use osrs_render::AnimatedModel;
@@ -18,13 +18,23 @@ use std::thread;
 type Built = Result<(LocMesh, Vec<Clip>), String>;
 
 /// What the character is asked to look like and be able to do: the worn items (by name, in the
-/// snapshot's slot order) and the sequences its own attack and block play.
+/// snapshot's slot order), the sequences its own attack and block play, and the one it loops at a
+/// task while it is at one. Meanwhile the hands hold what that sequence says (a woodcutter's
+/// axe) instead of what is worn there.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LookKey {
     worn: Vec<String>,
     attack: u32,
     defend: u32,
+    action: Option<u32>,
 }
+
+/// The wear slots a sequence's left and right hand items replace, in that order.
+const HAND_SLOTS: [u8; 2] = [SLOT_SHIELD, SLOT_WEAPON];
+
+/// How many finished looks the builder keeps, so going back to one (starting and stopping a
+/// task swaps between two) costs nothing.
+const KEPT_LOOKS: usize = 4;
 
 /// The thread that builds characters, and what has been asked of it.
 pub struct PlayerLooks {
@@ -40,15 +50,24 @@ impl PlayerLooks {
         let (result_tx, result_rx) = mpsc::channel();
         thread::spawn(move || {
             let prepared = Prepared::open();
+            // the newest last
+            let mut kept: Vec<(LookKey, Built)> = Vec::new();
             while let Ok(mut key) = request_rx.recv() {
                 // only the newest request matters: skip what a later one has replaced
                 while let Ok(newer) = request_rx.try_recv() {
                     key = newer;
                 }
-                let built = match &prepared {
-                    Ok(p) => p.build(&key),
-                    Err(why) => Err(why.clone()),
+                let built = match kept.iter().position(|(k, _)| *k == key) {
+                    Some(at) => kept.remove(at).1,
+                    None => match &prepared {
+                        Ok(p) => p.build(&key),
+                        Err(why) => Err(why.clone()),
+                    },
                 };
+                kept.push((key, built.clone()));
+                if kept.len() > KEPT_LOOKS {
+                    let _ = kept.remove(0);
+                }
                 if result_tx.send(built).is_err() {
                     return;
                 }
@@ -77,7 +96,7 @@ impl Prepared {
     }
 
     fn build(&self, key: &LookKey) -> Built {
-        let worn: Vec<WornPart> = key
+        let mut worn: Vec<WornPart> = key
             .worn
             .iter()
             .filter_map(|name| {
@@ -86,17 +105,32 @@ impl Prepared {
                 WornPart::of(self.items.get(id)?, false)
             })
             .collect();
+        let mut animations = Animations::new(&self.cache).map_err(|e| e.to_string())?;
+        if let Some(action) = key.action {
+            // the action's sequence says what the hands hold while it plays
+            let held = animations.sequence(action).map(|s| s.held_items()).unwrap_or_default();
+            for (hand, slot) in held.into_iter().zip(HAND_SLOTS) {
+                let Some(hand) = hand else { continue };
+                worn.retain(|part| part.slot != slot);
+                if let HeldItem::Item(item) = hand {
+                    if let Some(part) = self.items.get(&item).and_then(|def| WornPart::of(def, false)) {
+                        worn.push(WornPart { slot, ..part });
+                    }
+                }
+            }
+        }
         let mesh = build_player(&self.cache, &Appearance::default_male(), &worn, &self.texture_hsl)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "the character has no models".to_owned())?;
         let rig = mesh.rig.as_ref().ok_or_else(|| "the character has no rig".to_owned())?;
-        let mut animations = Animations::new(&self.cache).map_err(|e| e.to_string())?;
         let mut clips = Vec::new();
         for (index, (_, sequence)) in PLAYER_CLIPS.into_iter().enumerate() {
-            // the attack and block are the wielded weapon's; if one cannot be baked the fists' stay
+            // the attack and block are the wielded weapon's and the action the task's; if one
+            // cannot be baked the default stays
             let wanted = match index {
                 super::CLIP_ATTACK => key.attack,
                 super::CLIP_BLOCK => key.defend,
+                super::CLIP_ACTION => key.action.unwrap_or(sequence),
                 _ => sequence,
             };
             let clip = Clip::bake(&mut animations, wanted, rig)
@@ -128,14 +162,20 @@ fn refresh_player_look(
     mut players: Query<(Entity, &mut AnimatedModel), With<Player>>,
 ) {
     if let Some(snapshot) = &server.latest {
+        // nothing to do while it is how the scene was first built: bare hands and fists
+        let initial = LookKey {
+            worn: Vec::new(),
+            attack: PLAYER_CLIPS[super::CLIP_ATTACK].1,
+            defend: PLAYER_CLIPS[super::CLIP_BLOCK].1,
+            action: None,
+        };
+        let current = looks.wanted.clone().unwrap_or(initial);
         let key = LookKey {
             worn: snapshot.player.equipped.iter().map(|(_, item)| item.name.clone()).collect(),
             attack: snapshot.player.animations.attack,
             defend: snapshot.player.animations.defend,
+            action: snapshot.player.action_animation,
         };
-        // nothing to do while it is how the scene was first built: bare hands and fists
-        let initial = LookKey { worn: Vec::new(), attack: PLAYER_CLIPS[super::CLIP_ATTACK].1, defend: PLAYER_CLIPS[super::CLIP_BLOCK].1 };
-        let current = looks.wanted.clone().unwrap_or(initial);
         if key != current {
             looks.wanted = Some(key.clone());
             let _ = looks.requests.send(key);

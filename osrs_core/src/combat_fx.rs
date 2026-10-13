@@ -348,6 +348,8 @@ fn apply_events(
                     sounds.0.push(super::sound_fx::PendingSound { sound, from: e, at: now + delay_ticks as f32 * TICK_SECONDS });
                 }
             }
+            // experience drops and level-up fireworks are not drawn yet
+            WorldEvent::Experience { .. } | WorldEvent::LevelUp { .. } => {}
             WorldEvent::Died { who } => {
                 let Some(e) = entity_of(who) else { continue };
                 if let Ok(mut fighter) = fighters.get_mut(e) {

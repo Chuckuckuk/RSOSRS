@@ -6,12 +6,15 @@
 //! walk on.
 
 use super::ground_click::GroundPicker;
+use super::scenery_swaps::SwapMeshes;
 use super::{GridOverlay, Player, Textures};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use osrs_render::streaming::{square_of, square_offset, Loaded, SquareData, SquareStream, StreamedWorld};
-use osrs_render::world::{square_tile_grid_mesh, MaterialCache, ScrollingTextures, TileGrid};
+use osrs_render::pick::Picker;
+use osrs_render::world::{spawn_parts, square_tile_grid_mesh, tile_under, MaterialCache, ObjectScene, ScrollingTextures, TileGrid};
 use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
 
 /// Squares kept loaded in each direction around the player's square: 1 is a 3x3 block, which is
 /// 192 tiles across, always at least 64 tiles of map in every direction.
@@ -73,6 +76,32 @@ impl SquareSpawner<'_, '_> {
         self.world.attach(data.square, entity);
     }
 
+    /// Spawns the objects of `scene` (positions in world render space) as part of `square`, so
+    /// they leave with it, clickable under `owner`. Returns their entities.
+    pub fn spawn_objects(&mut self, square: (i32, i32), owner: (i32, i32), scene: &Arc<ObjectScene>) -> Vec<Entity> {
+        let entities = spawn_parts(
+            &mut self.commands,
+            &mut self.meshes,
+            &mut self.materials,
+            &mut self.images,
+            &mut self.scrolling,
+            &mut self.shared,
+            &self.textures.0,
+            &[],
+            scene,
+            Vec3::ZERO,
+        );
+        for entity in &entities {
+            self.world.attach(square, *entity);
+        }
+        self.picker.0.add(owner, scene, Vec3::ZERO);
+        entities
+    }
+
+    pub fn picker(&mut self) -> &mut Picker {
+        &mut self.picker.0
+    }
+
     pub fn despawn(&mut self, square: (i32, i32)) {
         for entity in self.world.remove(square) {
             self.commands.entity(entity).despawn();
@@ -90,7 +119,8 @@ pub struct Pending {
 
 /// The square of the world tile `transform` is standing on.
 fn square_under(transform: &Transform) -> (i32, i32) {
-    square_of(transform.translation.x.floor() as i32, (-transform.translation.z).floor() as i32)
+    let (x, z) = tile_under(transform.translation);
+    square_of(x, z)
 }
 
 fn near(square: (i32, i32), focus: (i32, i32), radius: i32) -> bool {
@@ -104,6 +134,7 @@ pub fn stream_map(
     radius: Res<StreamRadius>,
     stream: NonSend<SquareStream>,
     mut pending: Local<Pending>,
+    mut swaps: ResMut<SwapMeshes>,
     players: Query<&Transform, With<Player>>,
     mut spawner: SquareSpawner,
 ) {
@@ -134,6 +165,10 @@ pub fn stream_map(
             Loaded::Failed(square, why) => {
                 pending.requested.remove(&square);
                 eprintln!("[client] could not load map square ({}, {}): {why}", square.0, square.1);
+            }
+            // a replacement object's mesh (see `scenery_swaps`)
+            Loaded::Object { id, kind, orientation, mesh } => {
+                swaps.ready.insert((id, kind, orientation), mesh);
             }
         }
     }

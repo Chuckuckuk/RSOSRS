@@ -104,6 +104,11 @@ impl Appearance {
     }
 }
 
+/// The wear slot of what is held in the right hand (the weapon).
+pub const SLOT_WEAPON: u8 = 3;
+/// The wear slot of what is held in the left hand (the shield).
+pub const SLOT_SHIELD: u8 = 5;
+
 /// Something worn: the body slot it takes, its models and colours, and the slots it covers.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WornPart {

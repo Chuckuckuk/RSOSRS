@@ -113,6 +113,19 @@ pub struct Sequence {
     pub loop_offset: Option<u16>,
     pub max_loops: u8,
     pub priority: u8,
+    /// What the left (shield) hand holds while this plays: see [`Sequence::held_item`].
+    pub left_hand: Option<u16>,
+    /// What the right (weapon) hand holds while this plays.
+    pub right_hand: Option<u16>,
+}
+
+/// What a sequence puts in one hand while it plays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldItem {
+    /// Nothing: whatever is worn there is put away (a woodcutter's weapon).
+    Empty,
+    /// This item (a woodcutter's axe).
+    Item(u32),
 }
 
 impl Sequence {
@@ -139,9 +152,8 @@ impl Sequence {
                 5 | 9 | 11 => {
                     b.u8();
                 }
-                6 | 7 => {
-                    b.u16();
-                }
+                6 => s.left_hand = Some(b.u16()),
+                7 => s.right_hand = Some(b.u16()),
                 8 => s.max_loops = b.u8(),
                 10 => s.priority = b.u8(),
                 12 => {
@@ -160,6 +172,19 @@ impl Sequence {
             }
         }
         s
+    }
+
+    /// What the left and right hand hold while this plays, where it says: the client stores an
+    /// item as its id plus 512, and 0 for an empty hand.
+    pub fn held_items(&self) -> [Option<HeldItem>; 2] {
+        let held = |raw: Option<u16>| {
+            raw.and_then(|v| match v {
+                0 => Some(HeldItem::Empty),
+                512.. => Some(HeldItem::Item(v as u32 - 512)),
+                _ => None,
+            })
+        };
+        [held(self.left_hand), held(self.right_hand)]
     }
 
     /// Total length in client ticks.

@@ -57,6 +57,20 @@ pub struct TextureStore(pub HashMap<u32, Texture>);
 /// placement whose mesh is bent onto the terrain under it (contoured ground, e.g. steps on a slope).
 pub type ObjectKey = (u32, u8, u8, u8, u32);
 
+/// Marks every entity spawned for a placed scenery object: which object it is and the world tile
+/// under its middle (inside its footprint, whatever its size), so one placement can be found
+/// again among the thousands of a square, to hide it or put something in its place.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlacedLoc {
+    pub id: u32,
+    pub tile: (i32, i32),
+}
+
+/// The world tile under a render-space point (an object instance's middle).
+pub fn tile_under(point: Vec3) -> (i32, i32) {
+    (point.x.floor() as i32, (-point.z).floor() as i32)
+}
+
 /// Unique object meshes plus where each is placed.
 #[derive(Resource, Default, Clone)]
 pub struct ObjectScene {
@@ -67,6 +81,19 @@ pub struct ObjectScene {
     pub left_click: HashMap<u32, String>,
     /// Object names by id, for logging what was clicked.
     pub names: HashMap<u32, String>,
+}
+
+impl ObjectScene {
+    /// A scene of one object: `mesh` placed with its middle at `origin` on `plane` (a stump put
+    /// where a tree was).
+    pub fn single(key: ObjectKey, mesh: LocMesh, origin: Vec3, plane: u8) -> ObjectScene {
+        ObjectScene {
+            meshes: HashMap::from([(key, mesh)]),
+            instances: vec![(key, origin, plane)],
+            left_click: HashMap::new(),
+            names: HashMap::new(),
+        }
+    }
 }
 
 /// Everything decoded for a block of map squares, ready to spawn.
@@ -184,15 +211,7 @@ pub(crate) fn load_objects(
     let t0 = std::time::Instant::now();
     let square = osrs_cache::squares::SQUARE;
 
-    let mut load_model = |id: u32| -> Option<Rc<Model>> {
-        model_cache
-            .entry(id)
-            .or_insert_with(|| {
-                let data = cache.read_group(idx::MODELS, id).ok()?;
-                Model::decode(id, &data).ok().map(Rc::new)
-            })
-            .clone()
-    };
+    let mut load_model = model_loader(cache, model_cache);
 
     let mut scene = ObjectScene::default();
     if with_info {
@@ -269,6 +288,23 @@ pub(crate) fn load_objects(
         t0.elapsed()
     );
     Ok(scene)
+}
+
+/// Decodes models by id from `cache`, keeping each in `models` so it is decoded once (`None`: it
+/// does not decode).
+pub(crate) fn model_loader<'a>(
+    cache: &'a Cache,
+    models: &'a mut HashMap<u32, Option<Rc<Model>>>,
+) -> impl FnMut(u32) -> Option<Rc<Model>> + 'a {
+    move |id| {
+        models
+            .entry(id)
+            .or_insert_with(|| {
+                let data = cache.read_group(idx::MODELS, id).ok()?;
+                Model::decode(id, &data).ok().map(Rc::new)
+            })
+            .clone()
+    }
 }
 
 /// Materials shared by everything spawned into one world, so that spawning map square after map
@@ -421,6 +457,7 @@ pub fn spawn_parts(
     }
     for (key, pos, plane) in &objects.instances {
         let pos = *pos + offset;
+        let placed = PlacedLoc { id: key.0, tile: tile_under(pos) };
         let (o, tx) = &handles[key];
         for (mat, h) in tx {
             spawned.push(
@@ -430,6 +467,7 @@ pub fn spawn_parts(
                         MeshMaterial3d(mat.clone()),
                         Transform::from_translation(pos),
                         OnPlane(*plane),
+                        placed,
                     ))
                     .id(),
             );
@@ -442,6 +480,7 @@ pub fn spawn_parts(
                         MeshMaterial3d(opaque_mat.clone()),
                         Transform::from_translation(pos),
                         OnPlane(*plane),
+                        placed,
                     ))
                     .id(),
             );
@@ -465,6 +504,7 @@ pub fn spawn_parts(
                         Transform::from_translation(pos),
                         OnPlane(*plane),
                         SortedFaces { faces, origin: pos, last_eye: None },
+                        placed,
                     ))
                     .id(),
             );

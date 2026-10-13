@@ -1,6 +1,8 @@
 {
   "items": [
     { "id": "vial", "name": "Vial", "weight_kg": 0.004, "notes": "Left when the last dose of a potion is drunk. No slot: carried, never worn." },
+    { "id": "logs", "name": "Logs", "weight_kg": 2.0, "notes": "Cache item 1511. Cut from regular trees (data/gathering.json). No slot: carried, never worn." },
+    { "id": "beaver", "name": "Beaver", "notes": "Cache item 13322. The Woodcutting pet (data/gathering.json). Followers are not modelled yet, so it is only ever an item." },
     {
       "id": "abyssal_whip", "name": "Abyssal whip", "slot": "weapon", "weight_kg": 0.453,
       "bonuses": { "attack": { "slash": 82 }, "melee_strength": 82 },

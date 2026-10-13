@@ -77,6 +77,15 @@ impl Neighbourhood {
         !self.grid.missing.contains(&self.square)
     }
 
+    /// The placements of the middle square alone, each with its world tile `(x, z)`.
+    pub fn middle_placements(&self) -> impl Iterator<Item = ((i32, i32), &crate::locs::Placement)> {
+        let (wx0, wz0) = (self.square.0 * SQUARE, self.square.1 * SQUARE);
+        self.placed.placements.iter().filter_map(move |(gx, gz, p)| {
+            let (lx, lz) = (gx - SQUARE, gz - SQUARE);
+            ((0..SQUARE).contains(&lx) && (0..SQUARE).contains(&lz)).then_some(((wx0 + lx, wz0 + lz), p))
+        })
+    }
+
     /// Collision flags of the middle square: `64 * 64`, index `z * 64 + x`. A square that is not
     /// in the cache is solid.
     pub fn collision(&self, defs: &HashMap<u32, ObjectDef>) -> Vec<u32> {

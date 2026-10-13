@@ -505,9 +505,9 @@ to 0 (facing north).
 and the stat it stands for (enum 681), whose icon is enum 255. The icon sits 25x25 at `(3 + nudge, 4)`
 inside a 62x30 cell, with the frame in two 36 px halves behind it and the two levels drawn over: the
 *current* level above left of the cell's diagonal and the *base* level below right (the game's
-"85/85" look). `PlayerSnapshot.skills` has seven skills; every other cell shows 1 (10 for
-Hitpoints is the server's), and the total is the sum of all 24 base levels. There is no XP in the
-snapshot, so the hover tooltip and "Toggle XP" are left out.
+"85/85" look). `PlayerSnapshot.skills` has every skill, in the game's stat order, so a cell's
+stat number is the `Skill` index; the total is the sum of all 24 base levels. The snapshot carries
+each skill's XP, but the hover tooltip and "Toggle XP" are not drawn yet.
 
 **The Combat Options tab** (`panes/combat.rs`). The attack styles of each weapon type are in the
 cache's database table 78 (`osrs_cache::dbtable` reads config group 38; `bin/db_dump` lists a
@@ -569,7 +569,8 @@ from a contact sheet (`FRAMES=1 sprite_sheet`).
 | Module | What it does |
 |---|---|
 | [`map_stream.rs`](../osrs_core/src/map_stream.rs) | Keeps the 3x3 block of squares around the player loaded (`RADIUS = 1`). Requests missing squares from the loading thread, nearest first; spawns **at most one** arrived square per frame (spawning is expensive and must not stall frames); despawns squares more than 2 away (one ring of slack so walking along a border does not thrash). `SquareSpawner` is a `SystemParam` bundling everything needed to spawn a square, its click boxes and its tile-grid overlay. |
-| [`player_look.rs`](../osrs_core/src/player_look.rs) | When the snapshot's worn items or the attack/block animation ids change, sends a `LookKey` to a worker thread that rebuilds the character with the worn items' models and re-bakes all ten clips (using the weapon's attack and block). Only the newest request is built. `osrs_render::replace_animated` swaps the new mesh into the existing entity, keeping its position and current clip. |
+| [`player_look.rs`](../osrs_core/src/player_look.rs) | When the snapshot's worn items, the attack/block animation ids or the action animation change, sends a `LookKey` to a worker thread that rebuilds the character with the worn items' models and re-bakes all eleven clips (using the weapon's attack and block, and the last action sequence the server named). While the player is at an action, the hands hold what that sequence says (`Sequence::held_items`: a chop holds its axe and empties the weapon hand), as the game draws it. Only the newest request is built. `osrs_render::replace_animated` swaps the new mesh into the existing entity, keeping its position and current clip. |
+| [`scenery_swaps.rs`](../osrs_core/src/scenery_swaps.rs) | Diffs `Snapshot::scenery` against what is on screen. For a change, hides the original's entities (found by their `PlacedLoc` tag) and click box, and spawns the replacement at the same spot. Its mesh is built once on the loading thread (`SquareStream::request_object`) and attached to the square so it leaves with it. When the server stops listing the change, the replacement goes and the original comes back. A square that comes back in has its changes applied again. |
 | [`route.rs`](../osrs_core/src/route.rs) | `lay_route` and `follow_route`, shared by player and NPCs (7.3). |
 | [`chat.rs`](../osrs_core/src/chat.rs) | `ChatLog` keeps the last 100 messages; the interface draws the newest lines inside the chatbox (`panes::chat`). |
 | [`panes/`](../osrs_core/src/panes/mod.rs) | The ports of the game's interface scripts (7.8): one file per pane. |

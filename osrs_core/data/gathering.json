@@ -1,0 +1,37 @@
+{
+  "gathering": [
+    {
+      "id": "regular_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 1276, "depleted": 1342 },
+        { "loc": 1278, "depleted": 1342 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 1, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 250,
+      "product": "logs",
+      "chances": {
+        "bronze_axe":  [64, 200],
+        "iron_axe":    [96, 300],
+        "steel_axe":   [128, 400],
+        "black_axe":   [144, 450],
+        "mithril_axe": [160, 500],
+        "adamant_axe": [192, 600],
+        "rune_axe":    [224, 700],
+        "dragon_axe":  [240, 750],
+        "crystal_axe": [250, 800]
+      },
+      "depletion": "every_success",
+      "respawn_ticks": [59, 98],
+      "pet": { "item": "beaver", "base_chance": 317647 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some logs."
+    }
+  ]
+}

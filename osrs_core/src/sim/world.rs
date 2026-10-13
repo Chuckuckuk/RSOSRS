@@ -6,6 +6,7 @@ use super::entity::{Behavior, BossState, Entity};
 use super::events::{Combatant, WorldEvent};
 use super::inventory::ItemStack;
 use super::player::Player;
+use super::scenery::{Loc, LocChange, SceneryIndex, SceneryState};
 use super::sounds;
 use crate::actors::{ActorKind, EntityId, MovementPolicy, StationaryMovementPolicy};
 use crate::collision::{CollisionFlag, CollisionMap};
@@ -15,8 +16,9 @@ use crate::combat::{
     CombatState, HomingPulseOrb, NpcCombatState,
 };
 use crate::encounters::{EncounterContext, Phase, TriggerAction, TriggerBinding};
-use crate::model::ConditionContext;
+use crate::model::{ConditionContext, Skill};
 use crate::pathfinding::{BfsPathfinder, TargetSpec};
+use crate::rng::DotNetRandom;
 use crate::tick::{TickPhase, TickRegistrar, TickScheduler};
 use crate::tiles::TileCoord;
 
@@ -70,6 +72,10 @@ pub struct World {
     /// Consecutive ticks the player has spent within reach of an aggressive monster that is
     /// subject to tolerance; reset the moment they leave.
     aggro_region_ticks: i32,
+    /// Which scenery object is on which tile, as far as the map has been loaded.
+    pub(super) scenery: SceneryIndex,
+    /// Scenery temporarily shown as something else (felled trees) and resources' despawn timers.
+    pub(super) scenery_state: SceneryState,
 }
 
 fn slot_index(id: EntityId) -> Option<usize> {
@@ -143,7 +149,9 @@ impl World {
     /// Builds a world around `map` with the player standing on `player_start`. The player and
     /// the encounter clock are registered first.
     pub fn new(mut map: CollisionMap, encounter_seed: i32, player_start: TileCoord, player_config: PlayerConfig) -> Self {
-        let player = Player::new(player_start, &player_config, &mut map);
+        let mut player = Player::new(player_start, &player_config, &mut map);
+        // its own stream, derived from the seed, so the same seed gathers the same way
+        player.skilling_rng = DotNetRandom::new(encounter_seed ^ 0x5EED_5C11);
 
         let mut scheduler = TickScheduler::new();
         scheduler.register(TickPhase::Regen, ENCOUNTER_CLOCK_ID);
@@ -166,7 +174,22 @@ impl World {
             dead: HashSet::new(),
             registry: Rc::new(Registry::new()),
             aggro_region_ticks: 0,
+            scenery: SceneryIndex::new(),
+            scenery_state: SceneryState::new(),
         }
+    }
+
+    // ---- scenery ----
+
+    /// Records a scenery object placed on the map (the server's map loader calls this for every
+    /// object of every square it loads).
+    pub fn add_scenery(&mut self, loc: Loc) {
+        self.scenery.add(loc);
+    }
+
+    /// The scenery currently shown as something else (felled trees as stumps), in a fixed order.
+    pub fn scenery_changes(&self) -> impl Iterator<Item = &LocChange> {
+        self.scenery_state.changes()
     }
 
     // ---- data ----
@@ -476,9 +499,30 @@ impl World {
 
     /// A line the player reads in the chatbox (rejections, what an item did). Combat results are
     /// not among them: those go to the developer log (`log`) and, as events, to the client.
-    fn game_message(&mut self, message: String) {
+    pub(super) fn game_message(&mut self, message: String) {
         self.log.push(message.clone());
         self.messages.push(message);
+    }
+
+    /// Gives the player `tenths` of experience in `skill` (the one way experience is earned),
+    /// reporting it as an `Experience` event and any level gained as a `LevelUp` event and the
+    /// game's congratulation.
+    pub fn grant_xp(&mut self, skill: Skill, tenths: i32) {
+        if tenths <= 0 {
+            return;
+        }
+        let gained = self.player.skills.add_xp(skill, tenths);
+        self.events.push(WorldEvent::Experience { skill, gained_tenths: tenths });
+        if let Some(level) = gained {
+            self.events.push(WorldEvent::LevelUp { skill, level });
+            self.game_message(format!(
+                "Congratulations, you've just advanced {} {} level. You are now level {level}.",
+                crate::model::article(skill.name()),
+                skill.name()
+            ));
+            let registry = Rc::clone(&self.registry);
+            self.player.refresh_stats(&registry);
+        }
     }
 
     /// The player's messages since this was last called.
@@ -552,6 +596,7 @@ impl World {
             if phase == TickPhase::Regen {
                 self.encounter.advance_tick();
                 self.update_aggro_region();
+                self.advance_scenery();
             }
             return;
         }
@@ -604,6 +649,10 @@ impl World {
         if self.player.attack_cooldown > 0 {
             self.player.attack_cooldown -= 1;
         }
+        // the skill clock runs the same way, gathering or not
+        if self.player.skill_clock > 0 {
+            self.player.skill_clock -= 1;
+        }
         // set again below if the player is still walking up to what it clicked
         self.player.approaching_target = false;
 
@@ -636,6 +685,10 @@ impl World {
                 }
                 _ => self.player.interact_target = None,
             }
+        }
+
+        if self.player_run_action() {
+            return;
         }
 
         let Some(click) = self.player.pending_click.take() else { return };

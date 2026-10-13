@@ -321,3 +321,17 @@ fn a_worn_helmet_and_weapon_change_the_character() {
     assert!(count(&dressed) != count(&bare), "dressed {} vs bare {}", count(&dressed), count(&bare));
     assert!(dressed.rig.is_some(), "a dressed character still has a rig to animate");
 }
+
+/// A woodcutting sequence holds its axe in the left hand and empties the right (the weapon).
+#[test]
+fn chopping_sequences_say_which_axe_is_held() {
+    use osrs_cache::anim::{Animations, HeldItem};
+    let Some(c) = cache() else { return };
+    let animations = Animations::new(&c).unwrap();
+    for (sequence, axe) in [(879, 1351), (867, 1359)] {
+        let held = animations.sequence(sequence).unwrap().held_items();
+        assert_eq!(held, [Some(HeldItem::Item(axe)), Some(HeldItem::Empty)], "sequence {sequence}");
+    }
+    // walking holds whatever is worn
+    assert_eq!(animations.sequence(819).unwrap().held_items(), [None, None]);
+}

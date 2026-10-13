@@ -120,6 +120,11 @@ impl Rng for DotNetRandom {
     }
 }
 
+/// A "1 in `denominator`" roll: a draw of 0 from `0..denominator`.
+pub fn one_in(rng: &mut dyn Rng, denominator: i32) -> bool {
+    rng.next_range(0, denominator.max(1)) == 0
+}
+
 /// Test RNG that replays fixed values. Panics when a sequence runs out (the C# helper throws an
 /// index-out-of-range), which is what a test wants: an unexpected extra roll should fail loudly.
 #[derive(Debug, Clone, Default)]

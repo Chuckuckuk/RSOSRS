@@ -1,0 +1,13 @@
+{
+  "tools": [
+    { "item": "bronze_axe",  "category": "axe", "skill": "woodcutting", "level": 1,  "animation": 879 },
+    { "item": "iron_axe",    "category": "axe", "skill": "woodcutting", "level": 1,  "animation": 877 },
+    { "item": "steel_axe",   "category": "axe", "skill": "woodcutting", "level": 6,  "animation": 875 },
+    { "item": "black_axe",   "category": "axe", "skill": "woodcutting", "level": 11, "animation": 873 },
+    { "item": "mithril_axe", "category": "axe", "skill": "woodcutting", "level": 21, "animation": 871 },
+    { "item": "adamant_axe", "category": "axe", "skill": "woodcutting", "level": 31, "animation": 869 },
+    { "item": "rune_axe",    "category": "axe", "skill": "woodcutting", "level": 41, "animation": 867 },
+    { "item": "dragon_axe",  "category": "axe", "skill": "woodcutting", "level": 61, "animation": 2846 },
+    { "item": "crystal_axe", "category": "axe", "skill": "woodcutting", "level": 71, "animation": 8324 }
+  ]
+}

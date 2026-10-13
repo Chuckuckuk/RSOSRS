@@ -15,6 +15,7 @@ use crate::data::CombatAnimations;
 use super::animations::PlayerAnimations;
 use super::events::{Combatant, WorldEvent};
 use super::examine::ExamineTexts;
+use super::scenery::{Loc, LocChange, SceneryIndex};
 use super::tick_driver::TickDriver;
 use super::world::World;
 use crate::actors::EntityId;
@@ -72,6 +73,9 @@ pub enum ClientCommand {
     /// "Examine" on a scenery object: the server answers with a message. Only the id travels;
     /// what the object is and what it says are the server's to know.
     ExamineObject { id: u32 },
+    /// Choose `action` ("Chop down", ...) on the scenery object `id` covering `tile`. The server
+    /// finds the object itself and decides what, if anything, the option does.
+    InteractObject { id: u32, tile: TileCoord, action: String },
     /// "Examine" on an NPC.
     ExamineNpc { target: EntityId },
 }
@@ -81,6 +85,8 @@ pub struct SkillSnapshot {
     pub skill: Skill,
     pub base: i32,
     pub current: i32,
+    /// Experience in tenths of a point.
+    pub xp_tenths: i32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -100,6 +106,11 @@ pub struct PlayerSnapshot {
     /// What the player's body is turned toward: its attack target, else the NPC it is
     /// interacting with.
     pub face_target: Option<EntityId>,
+    /// The scenery object the player is turned toward (a tree it is chopping).
+    pub facing_loc: Option<Loc>,
+    /// A sequence the player loops while it stands doing something (an axe's chopping
+    /// animation), until this goes back to `None`.
+    pub action_animation: Option<u32>,
     pub is_running: bool,
     /// Cache sequences the player's own attack and block play (by what is wielded and the stance).
     pub animations: PlayerAnimations,
@@ -184,6 +195,9 @@ pub struct Snapshot {
     /// What the server wants the player to read since the last snapshot: rejected commands and the
     /// combat log lines of the ticks that ran.
     pub messages: Vec<String>,
+    /// Every scenery object currently shown as another (felled trees as stumps). The whole set
+    /// each time, so a client that loads a map square again knows what to show in it.
+    pub scenery: Vec<LocChange>,
 }
 
 /// A player that has entered the world.
@@ -208,8 +222,9 @@ pub struct Server {
     object_names: std::collections::HashMap<u32, String>,
 }
 
-/// Called before each tick with the world's map and the tile the player stands on.
-type MapStreamer = Box<dyn FnMut(&mut CollisionMap, TileCoord)>;
+/// Called before each tick with the world's map, its scenery index and the tile the player
+/// stands on.
+type MapStreamer = Box<dyn FnMut(&mut CollisionMap, &mut SceneryIndex, TileCoord)>;
 
 impl Server {
     pub fn new(world: World, driver: TickDriver) -> Self {
@@ -231,11 +246,11 @@ impl Server {
     }
 
     /// Lets the server load the map as the player moves through it: `streamer` runs before every
-    /// tick with the collision map and the player's tile, and merges in whatever squares are
-    /// needed around that tile (see `CollisionMap::merge`). A server that has the whole map loaded
-    /// up front does not need one.
-    pub fn set_map_streamer(&mut self, mut streamer: impl FnMut(&mut CollisionMap, TileCoord) + 'static) {
-        streamer(&mut self.world.map, self.world.player.tile());
+    /// tick with the collision map, the scenery index and the player's tile, and merges in
+    /// whatever squares are needed around that tile (see `CollisionMap::merge`, `SceneryIndex::add`).
+    /// A server that has the whole map loaded up front does not need one.
+    pub fn set_map_streamer(&mut self, mut streamer: impl FnMut(&mut CollisionMap, &mut SceneryIndex, TileCoord) + 'static) {
+        streamer(&mut self.world.map, &mut self.world.scenery, self.world.player.tile());
         self.map_streamer = Some(Box::new(streamer));
     }
 
@@ -310,6 +325,7 @@ impl Server {
                 }
                 Ok(())
             }
+            ClientCommand::InteractObject { id, tile, action } => self.world.player_interact_object(id, tile, &action),
             ClientCommand::InteractNpc { target } => {
                 if self.world.entity(target).is_some_and(|entity| !entity.is_dead()) {
                     self.world.player_set_interact_target(target);
@@ -359,7 +375,7 @@ impl Server {
         let Self { world, driver, map_streamer, .. } = self;
         let ran = driver.update(dt, || {
             if let Some(streamer) = map_streamer {
-                streamer(&mut world.map, world.player.tile());
+                streamer(&mut world.map, &mut world.scenery, world.player.tile());
             }
             world.run_tick()
         });
@@ -390,6 +406,8 @@ impl Server {
                 max_prayer: player.prayer.max(),
                 attack_target: player.attack_target(),
                 face_target: player.face_target(),
+                facing_loc: self.world.player_facing_loc(),
+                action_animation: self.world.player_action_animation(),
                 is_running: player.is_running,
                 animations: {
                     let weapon = player.loadout.item_id_in(EquipSlot::Weapon).and_then(|id| registry.item(id));
@@ -405,7 +423,12 @@ impl Server {
                 combat_level: player.combat_level(),
                 skills: Skill::ALL
                     .into_iter()
-                    .map(|skill| SkillSnapshot { skill, base: player.skills.base(skill), current: player.skills.current(skill) })
+                    .map(|skill| SkillSnapshot {
+                        skill,
+                        base: player.skills.base(skill),
+                        current: player.skills.current(skill),
+                        xp_tenths: player.skills.xp_tenths(skill),
+                    })
                     .collect(),
                 equipment: player.loadout.slots().map(|(slot, id)| (slot, id.to_owned())).collect(),
                 inventory: player
@@ -450,6 +473,7 @@ impl Server {
                 .collect(),
             events: self.world.take_events(),
             messages,
+            scenery: self.world.scenery_changes().copied().collect(),
         }
     }
 }
@@ -764,7 +788,7 @@ mod tests {
         let mut server = server();
         let floor_width = server.world().map.width();
         let log = Rc::clone(&seen);
-        server.set_map_streamer(move |map, tile| {
+        server.set_map_streamer(move |map, _scenery, tile| {
             log.borrow_mut().push(tile);
             // the first time it is asked, open a block just east of the floor
             if map.width() == floor_width {
@@ -1233,6 +1257,56 @@ mod tests {
 
         server.handle_command(ClientCommand::RequestSingleStep);
         assert_eq!(server.advance(0.0).map(|s| s.tick), Some(1));
+    }
+
+    /// A server with one regular tree three tiles east of a player carrying a bronze axe, whose
+    /// attempts all succeed (`sure`) or all fail, so nothing depends on how the seed rolls.
+    fn woodcutting_server(sure: bool) -> (Server, Loc) {
+        let mut registry = Registry::builtin();
+        let chance = if sure { super::super::gathering::SURE } else { super::super::gathering::HOPELESS };
+        registry.insert_gathering_node_for_test(super::super::gathering::regular_tree_with_chance(chance));
+        let mut world = dev_open_floor_world(15, 1, TileCoord::new(0, 0), PlayerConfig::default());
+        world.set_registry(Rc::new(registry));
+        let loc = Loc { id: 1276, tile: TileCoord::new(3, 0), kind: 10, orientation: 0, size: (1, 1) };
+        world.add_scenery(loc);
+        world.give_item("bronze_axe", 1).unwrap();
+        let mut server = Server::new(world, TickDriver::default());
+        server.advance(0.0);
+        server.handle_command(ClientCommand::InteractObject { id: 1276, tile: loc.tile, action: "Chop down".into() });
+        (server, loc)
+    }
+
+    #[test]
+    fn a_player_chopping_is_reported_with_the_axes_animation_and_the_tree_it_faces() {
+        let (mut server, tree) = woodcutting_server(false);
+
+        let snapshot = (0..10).filter_map(|_| server.advance(0.6)).find(|s| s.player.action_animation.is_some()).unwrap();
+
+        assert_eq!(snapshot.player.action_animation, Some(879));
+        assert_eq!(snapshot.player.facing_loc, Some(tree));
+        assert!(snapshot.scenery.is_empty());
+    }
+
+    #[test]
+    fn chopping_a_tree_reports_the_stump_and_the_experience_in_snapshots() {
+        let (mut server, tree) = woodcutting_server(true);
+
+        let snapshot = (0..10).filter_map(|_| server.advance(0.6)).find(|s| !s.scenery.is_empty()).unwrap();
+
+        assert_eq!(snapshot.scenery.len(), 1);
+        assert_eq!((snapshot.scenery[0].loc, snapshot.scenery[0].replacement), (tree, 1342));
+        let woodcutting = snapshot.player.skills.iter().find(|s| s.skill == Skill::Woodcutting).unwrap();
+        assert_eq!(woodcutting.xp_tenths, 250);
+        assert_eq!(snapshot.player.action_animation, None);
+        assert_eq!(snapshot.player.facing_loc, None);
+    }
+
+    #[test]
+    fn an_option_on_an_object_the_server_does_not_handle_is_answered() {
+        let mut server = data_server();
+        server.handle_command(ClientCommand::InteractObject { id: 1530, tile: TileCoord::new(3, 3), action: "Open".into() });
+
+        assert_eq!(server.snapshot().messages, vec!["Nothing interesting happens.".to_owned()]);
     }
 
     #[test]

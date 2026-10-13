@@ -479,12 +479,58 @@ Once per tick for a living player:
 
 ### Skills and inventory
 
-* [`Skills`](../osrs_core/src/sim/skills.rs) keeps base and current levels in two `[i32; 7]`
-  arrays. Boosts never lower a stat; drains floor at 1; restores stop at base; `combat_level()`
-  uses base levels.
+* [`Skill`](../osrs_core/src/model/skill.rs) lists every skill in the game's own stat order, so
+  `index()` is the stat number the client's scripts use (Woodcutting is 8).
+* [`Skills`](../osrs_core/src/sim/skills.rs) keeps base and current levels and experience for
+  every skill (`[i32; Skill::COUNT]`). Experience is in **tenths** of a point, as the game keeps
+  it (an oak log's 37.5 XP is 375). Setting a level sets the experience to that level's threshold
+  (`rules::xp_tenths_for_level`); `add_xp` raises the level when a threshold is crossed. Boosts
+  never lower a stat; drains floor at 1; restores stop at base; `combat_level()` uses base levels.
+* **`World::grant_xp(skill, tenths)` is the one way experience is earned.** It emits
+  `WorldEvent::Experience` (for XP drops) and, on a level up, `WorldEvent::LevelUp` plus the
+  game's "Congratulations, you've just advanced a ... level." message.
 * [`Inventory`](../osrs_core/src/sim/inventory.rs) is 28 `Option<ItemStack>` slots. Stackable
   items (ammunition) join an existing stack; everything else takes one slot per item. `add`
   returns how many did not fit.
+
+### Gathering skills: [`sim/gathering.rs`](../osrs_core/src/sim/gathering.rs)
+
+Woodcutting today; mining and fishing are meant to be more data plus at most a new depletion
+rule. Everything a resource does differently is data:
+
+| File | Holds |
+|---|---|
+| [`data/tools.json`](../osrs_core/data/tools.json) | `ToolDef`: item, category (`"axe"`), skill, level, the animation the player loops |
+| [`data/gathering.json`](../osrs_core/data/gathering.json) | `GatheringNodeDef`: the option that starts it (`"Chop down"`), the scenery ids and what each becomes while depleted, requirements, tool category, roll interval, XP, product, the per-tool `[low, high]` success chances, depletion rule, respawn range, pet, messages |
+
+`Requirement` (level, tool of a category, free slots) is checked when the player clicks, on
+arrival and before every attempt; its refusal is the game's message, overridable per entry.
+
+The loop runs in the player's PlayerQueue phase, from the **one action slot**
+`Player::action` (`PlayerAction::Gather`); walking, attacking or talking to an NPC clears it:
+
+1. walk until orthogonally next to the object;
+2. on arrival say the start message and start the best usable tool's animation (`best_tool`:
+   the highest success chance at the player's level);
+3. roll whenever the **skill clock** is 0: it is set to the node's interval (4 ticks for trees)
+   and counts down every tick, so re-clicking never resets it;
+4. a success gives the product and XP, rolls the pet (1 in `base - 25 x level`; pets are items
+   only for now), and depletes the object if the rule says so. `EverySuccess` fells a regular
+   tree with its one log; `Timer { ticks }` is the oak-and-up despawn timer (runs down while
+   chopped, back up while not, fells on the first success after it runs out).
+
+The success chance is `rules::success_numerator(low, high, level)` over 256 (the wiki's skilling
+success formula). Draws come from the player's own `skilling_rng`, never the encounter's, so
+gathering cannot change a fight's rolls.
+
+### Scenery: [`sim/scenery.rs`](../osrs_core/src/sim/scenery.rs)
+
+* `SceneryIndex`: which object (`Loc { id, tile, kind, orientation, size }`) covers which tile.
+  The server's map loader fills it with each square's ground-level free-standing objects (shapes
+  10 and 11) as it loads the square's collision (`square_map` in `main.rs`).
+* `SceneryState`: placements shown as another object for a while (`LocChange`, a stump for a
+  felled tree), counted down at the end of every tick by the world clock, plus the despawn
+  timers. The whole set goes to the client in every `Snapshot::scenery`.
 
 ### Animation and graphic ids
 
@@ -557,7 +603,7 @@ The rest of the codebase cannot mutate the world through a `Server`: `world()` o
 | session | `Login { name }` |
 | movement | `WalkTo { tile, force_inverse }`, `SetRunning(bool)` |
 | NPCs | `Attack { target }`, `InteractNpc { target }`, `ExamineNpc { target }` |
-| scenery | `ExamineObject { id }` |
+| scenery | `ExamineObject { id }`, `InteractObject { id, tile, action }` (the server finds the placement covering `tile` and dispatches the option: gathering nodes today, "Nothing interesting happens." otherwise) |
 | items | `Equip`, `Unequip { slot }`, `InventoryOption { slot, option }`, `MoveInventoryItem { from, to }`, `UseConsumable`, `ExamineItem` |
 | combat setup | `SetStance`, `TogglePrayer`, `SetPrayer(ProtectionPrayer)` (direct, no drain), `SelectSpell`, `SetSpecial`, `SetOnTask` |
 | pacing (dev only) | `SetPaused`, `RequestSingleStep` |
@@ -580,10 +626,11 @@ Plain owned data:
 |---|---|
 | `tick`, `tick_seconds`, `paused` | timing |
 | `player_id` | `None` until logged in |
-| `player: PlayerSnapshot` | tile, **step_tiles** (the tiles stepped through last tick, in order), health, `is_dead` (confirmed deaths only), prayer, attack and face targets, running, the player's attack/block animation ids, combat level, every skill, equipment, the 28 inventory slots and the worn items as `ItemView { id, name, quantity }`, active prayers, stance, spell, special energy, run energy %, poisoned/venomed/frozen |
+| `player: PlayerSnapshot` | tile, **step_tiles** (the tiles stepped through last tick, in order), health, `is_dead` (confirmed deaths only), prayer, attack and face targets, `facing_loc` (the object it works at), `action_animation` (the sequence it loops there), running, the player's attack/block animation ids, combat level, every skill with its XP, equipment, the 28 inventory slots and the worn items as `ItemView { id, name, quantity }`, active prayers, stance, spell, special energy, run energy %, poisoned/venomed/frozen |
 | `entities: Vec<EntitySnapshot>` | per NPC: id, name, tile, step_tiles, health, `is_dead`, size, `appearance` (cache NPC id), combat animations, `extra_animations` (attack and heal sequences), data id, and `facing` (the player it fights or the monster it heals) |
 | `events` | `WorldEvent`s since the last snapshot |
 | `messages` | outbox lines followed by the world's messages |
+| `scenery` | every `LocChange` in force (felled trees as stumps), the whole set each time |
 
 ### `spawn_server` and `ServerHandle`
 
