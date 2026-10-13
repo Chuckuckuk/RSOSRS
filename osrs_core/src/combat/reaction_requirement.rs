@@ -5,12 +5,13 @@ use super::protection_prayer::ProtectionPrayer;
 pub enum ReactionKind {
     #[default]
     None,
-    PrayerMatch,
-    MoveToTile,
+    PrayerMatch(ProtectionPrayer),
+    DisablePrayer,
+    MoveOffTile(HazardAnchor), // which tile the hazard is anchored to
     Interrupt,
 }
 
-/// Which tile a `MoveToTile` hazard is anchored to.
+/// Which tile a `MoveToTile` or `MoveOffTile` hazard is anchored to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HazardAnchor {
     /// The attacker's own tile at the moment the attack was selected.
@@ -25,9 +26,6 @@ pub enum HazardAnchor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ReactionRequirement {
     pub kind: ReactionKind,
-    pub required_prayer: ProtectionPrayer,
-    pub move_away_distance: i32,
-    pub anchor: HazardAnchor,
 }
 
 impl ReactionRequirement {
@@ -36,11 +34,15 @@ impl ReactionRequirement {
     }
 
     pub fn prayer_match(required_prayer: ProtectionPrayer) -> Self {
-        Self { kind: ReactionKind::PrayerMatch, required_prayer, ..Self::default() }
+        Self { kind: ReactionKind::PrayerMatch(required_prayer), ..Self::default() }
     }
 
-    pub fn move_to_tile(move_away_distance: i32, anchor: HazardAnchor) -> Self {
-        Self { kind: ReactionKind::MoveToTile, move_away_distance, anchor, ..Self::default() }
+    pub fn disable_prayer() -> Self {
+        Self { kind: ReactionKind::DisablePrayer, ..Self::default() }
+    }
+
+    pub fn move_off_tile(anchor: HazardAnchor) -> Self {
+        Self { kind: ReactionKind::MoveOffTile(anchor), ..Self::default() }
     }
 
     pub fn interrupt() -> Self {
