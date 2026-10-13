@@ -199,7 +199,16 @@ impl World {
     /// A successful attempt: the product, the experience, the pet roll and depletion. Returns
     /// whether the player carries on.
     fn gathered(&mut self, node: &GatheringNodeDef, loc: &Loc) -> bool {
-        let _ = self.give_item(&node.product, node.product_quantity);
+        // The free-slot requirement is checked before every attempt, so this only happens for a
+        // node whose data leaves it out. As in the game, there is no experience without the
+        // product: the player is told and stops. (Overflow onto the ground needs ground items.)
+        let left_over = self.give_item(&node.product, node.product_quantity).unwrap_or(node.product_quantity);
+        if left_over == node.product_quantity {
+            let room = node.requirements.iter().find(|r| matches!(r, Requirement::FreeSlots { .. }));
+            let refusal = room.map_or_else(|| "You don't have enough inventory space.".to_owned(), Requirement::refusal);
+            self.game_message(refusal);
+            return false;
+        }
         if let Some(message) = &node.success_message {
             self.game_message(message.clone());
         }
@@ -464,6 +473,22 @@ mod tests {
 
         assert_eq!(logs(&world), 2);
         assert!(world.take_messages().contains(&"Your inventory is too full to hold any more logs.".to_owned()));
+    }
+
+    #[test]
+    fn a_product_that_does_not_fit_gives_no_experience() {
+        // a node whose data forgets the free-slot requirement
+        let node = sure_tree(|n| n.requirements.retain(|r| !matches!(r, Requirement::FreeSlots { .. })));
+        let mut world = woods_with(1, &["bronze_axe"], &[node]);
+        world.give_item("shark", 27).unwrap();
+        chop(&mut world).unwrap();
+
+        run_until(&mut world, 20, |w| w.player.action().is_none());
+
+        assert_eq!(logs(&world), 0);
+        assert_eq!(world.player.skills.xp_tenths(Skill::Woodcutting), 0);
+        assert!(world.scenery_changes().next().is_none(), "the tree still stands");
+        assert!(world.take_messages().contains(&"You don't have enough inventory space.".to_owned()));
     }
 
     #[test]
