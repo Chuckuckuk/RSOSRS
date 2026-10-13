@@ -11,8 +11,7 @@ use crate::actors::{ActorKind, EntityId, MovementPolicy, StationaryMovementPolic
 use crate::collision::{CollisionFlag, CollisionMap};
 use crate::data::{EquipSlot, Registry};
 use crate::combat::{
-    get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor, AttackDefinition, AttackStyle, CombatStats, HazardAnchor,
-    CombatState, HomingPulseOrb, NpcCombatState,
+    AttackDefinition, AttackStyle, CombatState, CombatStats, HazardAnchor, HomingPulseOrb, NpcCombatState, ReactionKind, get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor,
 };
 use crate::encounters::{EncounterContext, Phase, TriggerAction, TriggerBinding};
 use crate::model::ConditionContext;
@@ -249,6 +248,7 @@ impl World {
         id
     }
 
+    /// TODO: support respawning dead NPCs
     pub fn spawn_npc(&mut self, name: &str, start: TileCoord, config: NpcConfig) -> EntityId {
         let entity = Entity::new_npc(self.next_id(), name, start, &config, &mut self.map);
         self.add_entity(entity)
@@ -304,6 +304,7 @@ impl World {
         self.player.request_walk_to(tile, force_inverse);
     }
 
+    /// TODO: sync player inventory/equipment display with last server snapshot, not client-side
     pub fn player_equip(&mut self, item_id: &str) -> Result<(), String> {
         let registry = Rc::clone(&self.registry);
         self.player.equip(&registry, item_id)
@@ -343,6 +344,7 @@ impl World {
     }
 
     /// Choosing `option` ("Wield", "Eat", "Drop", ...) on the item in inventory `slot`.
+    /// TODO: generalize this to allow for custom/item-specific click options, and for the player to click on items in the world (e.g. a dropped item).
     pub fn player_inventory_option(&mut self, slot: usize, option: &str) {
         let Some(stack) = self.player.inventory.get(slot).cloned() else { return };
         let name = self.item_name(&stack.item).to_lowercase();
@@ -540,6 +542,7 @@ impl World {
     // ---- ticking ----
 
     /// Runs one full game tick: every phase in order, every registered entity in registration order.
+    /// TODO: parallelize
     pub fn run_tick(&mut self) {
         let mut scheduler = std::mem::take(&mut self.scheduler);
         scheduler.run_tick(|phase, id, tick, registrar| self.dispatch(phase, id, tick, registrar));
@@ -914,7 +917,7 @@ impl World {
     }
 
     // ---- plain NPC ----
-
+    // TODO: support custom NPCs that don't use the default AI, e.g. a boss that uses a custom attack scheduler
     fn run_npc_ai(&mut self, entity: &mut Entity) {
         let id = entity.id;
         let Behavior::Npc(state) = &mut entity.behavior else { return };
@@ -947,10 +950,14 @@ impl World {
         // Reaction.Anchor picks which tile CAPTURED AT TELEGRAPH START this attack's hazard is
         // centered on - never a live tile, or moving away during the telegraph would never
         // actually dodge a target-anchored hazard.
-        let hazard_origin = if attack.reaction.anchor == HazardAnchor::Target {
-            state.combat_state.target_tile_at_selection()
-        } else {
-            state.combat_state.self_tile_at_selection()
+        let hazard_origin = match attack.reaction.kind {
+            ReactionKind::MoveOffTile(anchor) => {
+                match anchor {
+                    HazardAnchor::Target => state.combat_state.target_tile_at_selection(),
+                    HazardAnchor::SelfTile => state.combat_state.self_tile_at_selection(),
+                }
+            }
+            _ => state.combat_state.self_tile_at_selection(),
         };
         let stats = actor.stats();
 
@@ -977,6 +984,7 @@ impl World {
 
     /// A summoned healer that is not fighting the player goes to stand next to the monster it
     /// heals. Returns false (doing nothing) for anything else, or once its leader is dead.
+    /// TODO: treat npcs attempting to heal/support another npc as 'targeting' that npc so that logic can be unified with the player-targeting logic above.
     fn walk_to_leader(&mut self, entity: &mut Entity) -> bool {
         let healer = entity.def.as_ref().is_some_and(|def| def.heals_summoner.is_some());
         let Some(leader) = entity.leader.filter(|_| healer).and_then(|id| self.entity(id)) else { return false };
@@ -1025,7 +1033,7 @@ impl World {
     }
 
     // ---- boss ----
-
+    // TODO: unify NPC and boss AI, so that bosses can be data-defined and have their own movement policies, and so that the Purutu orbs are just another kind of hazard.
     fn run_boss_ai(&mut self, entity: &mut Entity, registrar: &mut TickRegistrar<EntityId>) {
         self.update_aggression(entity);
         self.answer_summons(entity, registrar);
@@ -1101,16 +1109,23 @@ impl World {
             return;
         }
 
-        let hazard_origin = if attack.reaction.anchor == HazardAnchor::Target {
-            combat_state.target_tile_at_selection()
-        } else {
-            combat_state.self_tile_at_selection()
+        let hazard_origin = match attack.reaction.kind {
+            ReactionKind::MoveOffTile(anchor) => {
+                match anchor {
+                    HazardAnchor::Target => combat_state.target_tile_at_selection(),
+                    HazardAnchor::SelfTile => combat_state.self_tile_at_selection(),
+                }
+            }
+            _ => combat_state.self_tile_at_selection(),
         };
         let stats = actor.stats();
 
         self.fire_at_player(id, &entity.name, stats, &attack, hazard_origin);
     }
 
+    // TODO: move away from explicitly handling the Purutu orbs
+    // these are a mobile hazard similar to Hunllef's tornadoes or Alchemical Hydra's lightning attack
+    // such entities should be handled in a generic way allowing for stationary or mobile hazards to exist and persist based on lifetime, not resolution
     fn advance_orbs(&mut self, orbs: &mut Vec<HomingPulseOrb>) {
         let player_view = self.player.view();
 
@@ -1195,6 +1210,7 @@ impl World {
     /// calls four Yt-HurKot). A call that may be answered again is re-armed when the monster has
     /// been healed back to full; the next time it falls low, only the helpers that died are
     /// replaced. Helpers join the schedule at the next phase boundary, like a spawn group.
+    /// TODO: make npc summoning form of custom event that can be data-defined, so that a monster can have a healer, a buffer, or a debuffer.
     fn answer_summons(&mut self, entity: &mut Entity, registrar: &mut TickRegistrar<EntityId>) {
         let Some(def) = entity.def.clone() else { return };
         if def.summons.is_empty() || entity.is_dead() {
@@ -1239,6 +1255,7 @@ impl World {
     /// A summoned healer restores its leader's hitpoints every so often while it is close enough,
     /// unless the player has distracted it by attacking it. A distracted healer fights the player,
     /// and gives up on them (going back to healing) once they are far enough away.
+    /// TODO: make this a generic "support" behavior that can be data-defined, so that a monster can have a healer, a buffer, or a debuffer.
     fn heal_leader(&mut self, entity: &mut Entity) {
         let Some(heal) = entity.def.as_ref().and_then(|def| def.heals_summoner) else { return };
         let Some(leader_id) = entity.leader else { return };
@@ -1301,6 +1318,7 @@ impl World {
     }
 
     /// Counts how long the player has been standing near tolerance-subject aggressive monsters.
+    /// TODO: track tolerance regions monster-agnostic using a spatial index, rather than iterating over every monster every tick.
     fn update_aggro_region(&mut self) {
         let player = &self.player;
         let near = !player.is_dead()
@@ -1315,6 +1333,7 @@ impl World {
         self.aggro_region_ticks = if near { self.aggro_region_ticks + 1 } else { 0 };
     }
 
+    /// TODO: unify boss and NPC movement so that NPC movement can be data-defined and have custom movement policies
     fn run_boss_movement(&mut self, entity: &mut Entity) {
         self.advance_incoming(entity);
         if entity.is_dead() {
@@ -1351,7 +1370,7 @@ impl World {
     }
 
     // ---- healer ----
-
+    /// TODO: generalize healer behavior so that it can be treated as a special case of NPC AI, rather than a separate branch of the world tick.
     fn run_heal_ai(&mut self, entity: &mut Entity) {
         let Behavior::Healer(state) = &entity.behavior else { return };
         if entity.is_dead() {
