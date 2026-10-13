@@ -29,8 +29,7 @@ impl ExamineTexts {
 
     /// The plain description of something called `name`, for when no text is listed.
     pub fn plain(name: &str) -> String {
-        let article = if "aeiouAEIOU".contains(name.chars().next().unwrap_or('x')) { "an" } else { "a" };
-        format!("It's {article} {}.", name.to_lowercase())
+        format!("It's {} {}.", crate::model::article(name), name.to_lowercase())
     }
 
     /// What examining object `id` (called `name`, when the server knows its name) says.

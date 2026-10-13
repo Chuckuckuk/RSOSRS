@@ -36,13 +36,10 @@ impl SkillLevelsDef {
 #[serde(deny_unknown_fields)]
 pub struct InventoryStack {
     pub item: String,
-    #[serde(default = "one_u32")]
+    #[serde(default = "super::one_u32")]
     pub quantity: u32,
 }
 
-fn one_u32() -> u32 {
-    1
-}
 
 /// Everything about the player at the start of a scenario.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -15,6 +15,10 @@
 //!        OSRS_SPAWN=x,z                  world tile to enter the world on (default: Lumbridge square)
 //!        OSRS_ATTACK=<entity id>         ask the server to attack that NPC once in the world
 //!        OSRS_WIELD=0,1                  wield the items in these inventory slots once in the world
+//!        OSRS_SEED=n                     seed of the open world's random rolls (default: from the clock,
+//!                                        so each launch rolls differently); set it to replay a run
+//!        OSRS_INTERACT=id,x,z,option     choose an option on the scenery object `id` covering tile (x, z)
+//!                                        once in the world, e.g. 1276,3247,3231,Chop down
 //!        OSRS_TAB=n                      open this interface tab first (0..13)
 //!        OSRS_LAYOUT=classic|modern|fixed  interface layout (default classic: resizable)
 //!        OSRS_UI_SCALE=n                 whole-number interface scale (default: largest that fits 765x503)
@@ -39,6 +43,7 @@ mod overheads;
 mod player_look;
 mod projectiles;
 mod route;
+mod scenery_swaps;
 mod sound_fx;
 mod tile_marks;
 
@@ -49,7 +54,7 @@ use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use osrs_cache::config::Configs;
 use osrs_cache::kit::{build_player, Appearance};
 use osrs_cache::anim::{Animations, Clip};
-use osrs_cache::scene::LocMesh;
+use osrs_cache::scene::{footprint, LocMesh};
 use osrs_cache::squares::{MapSource, SQUARE};
 use osrs_cache::textures::load_textures;
 use osrs_cache::Cache;
@@ -57,7 +62,7 @@ use osrs_core::collision::{CollisionMap, CollisionMapData};
 use osrs_core::data::{load_scenario, Registry, ScenarioDef};
 use osrs_core::sim::scenarios::{build_scenario_on, scenario_start};
 use osrs_core::sim::{
-    spawn_server, ClientCommand, PlayerConfig, PlayerId, Server, ServerHandle, Snapshot, TickDriver, World,
+    spawn_server, ClientCommand, Loc, PlayerConfig, PlayerId, Server, ServerHandle, Snapshot, TickDriver, World,
 };
 use osrs_core::tiles::TileCoord;
 use osrs_render::{spawn_animated, AnimatedModel, ModelAnimationPlugin};
@@ -227,8 +232,9 @@ struct Scene {
 
 /// Sequences the unarmed player plays, in the order of `Scene::player_clips`. Walking uses a
 /// different one when the body is not facing the way it is going (side-steps and backing up), and
-/// standing uses a turn-on-the-spot while the facing catches up.
-const PLAYER_CLIPS: [(&str, u32); 10] = [
+/// standing uses a turn-on-the-spot while the facing catches up. The last is whatever the player
+/// loops while standing at a task (an axe's chop; the bronze axe's until the server names another).
+const PLAYER_CLIPS: [(&str, u32); 11] = [
     ("idle", 808),
     ("walk", 819),
     ("run", 824),
@@ -239,6 +245,7 @@ const PLAYER_CLIPS: [(&str, u32); 10] = [
     ("punch", 422),
     ("block", 424),
     ("death", 836),
+    ("action", 879),
 ];
 const CLIP_IDLE: usize = 0;
 const CLIP_WALK: usize = 1;
@@ -250,6 +257,7 @@ const CLIP_TURN: usize = 6;
 pub(crate) const CLIP_ATTACK: usize = 7;
 pub(crate) const CLIP_BLOCK: usize = 8;
 pub(crate) const CLIP_DEATH: usize = 9;
+pub(crate) const CLIP_ACTION: usize = 10;
 
 fn load_scene(spawn: (i32, i32), radius: i32) -> osrs_cache::Result<(Scene, FirstSquares, Textures, ObjectInfo)> {
     // the squares around the spawn are decoded up front so the first frame has a world in it
@@ -346,13 +354,16 @@ fn main() {
         let (sx, sy) = square_of(spawn.x, spawn.z);
         // the squares around the spawn are loaded up front, so whatever starts near the player
         // stands on ground the server knows; the rest stream in as he walks
-        let mut map = CollisionMap::new(square_collision(&source, (sx, sy))).expect("a square's arrays match its size");
+        let (first_collision, mut first_locs) = square_map(&source, (sx, sy));
+        let mut map = CollisionMap::new(first_collision).expect("a square's arrays match its size");
         let mut loaded: HashSet<(i32, i32)> = HashSet::from([(sx, sy)]);
         for dz in -radius..=radius {
             for dx in -radius..=radius {
                 let square = (sx + dx, sy + dz);
                 if loaded.insert(square) {
-                    if let Err(e) = map.merge(square_collision(&source, square)) {
+                    let (collision, locs) = square_map(&source, square);
+                    first_locs.extend(locs);
+                    if let Err(e) = map.merge(collision) {
                         eprintln!("[server] map square ({}, {}) rejected: {e}", square.0, square.1);
                     }
                 }
@@ -373,7 +384,7 @@ fn main() {
                 Server::new(world, driver)
             }
             None => {
-                let mut world = World::new(map, 12345, spawn, PlayerConfig::new_account());
+                let mut world = World::new(map, open_world_seed(), spawn, PlayerConfig::new_account());
                 world.set_registry(registry);
                 // a man (level 2) stands about in Lumbridge square, a few tiles from where you arrive
                 let man_at = nearest_open_tile(&world.map, TileCoord::new(spawn.x + 4, spawn.z - 3));
@@ -392,6 +403,7 @@ fn main() {
                     ("cooked_karambwan", 2),
                     ("prayer_potion_4", 2),
                     ("bronze_arrow", 150),
+                    ("bronze_axe", 1),
                 ] {
                     if let Err(e) = world.give_item(item, quantity) {
                         eprintln!("[server] starter kit: {e}");
@@ -406,14 +418,23 @@ fn main() {
             source.object_defs().values().filter(|d| !d.name.is_empty()).map(|d| (d.id, d.name.clone())).collect(),
         );
 
-        server.set_map_streamer(move |map, tile| {
+        server.set_map_streamer(move |map, scenery, tile| {
+            // the objects of the squares loaded before the world existed (once: taking them frees
+            // the list)
+            for loc in std::mem::take(&mut first_locs) {
+                scenery.add(loc);
+            }
             let (cx, cy) = square_of(tile.x, tile.z);
             for dz in -radius..=radius {
                 for dx in -radius..=radius {
                     let square = (cx + dx, cy + dz);
                     if loaded.insert(square) {
                         let started = std::time::Instant::now();
-                        match map.merge(square_collision(&source, square)) {
+                        let (collision, locs) = square_map(&source, square);
+                        for loc in locs {
+                            scenery.add(loc);
+                        }
+                        match map.merge(collision) {
                             Ok(()) => println!(
                                 "[server] map square ({}, {}) loaded in {:.2?}",
                                 square.0,
@@ -447,10 +468,11 @@ fn main() {
     .insert_resource(map_stream::StreamRadius(radius))
     .init_resource::<StreamedWorld>()
     .init_resource::<MaterialCache>()
+    .init_resource::<scenery_swaps::SwapMeshes>()
     .add_systems(Startup, setup)
     .add_systems(
         Update,
-        (scripted_input, poll_server, start_scenario, sync_player, npcs::sync_npcs, map_stream::stream_map, limit_planes, orbit_camera, toggle_grid, screenshot_and_exit)
+        (scripted_input, poll_server, start_scenario, sync_player, npcs::sync_npcs, map_stream::stream_map, scenery_swaps::show_scenery_changes, limit_planes, orbit_camera, toggle_grid, screenshot_and_exit)
             .chain(),
     );
     app.world_mut().insert_non_send(ServerLink { link, latest: None, ticks_in_latest: 1, new_events: Vec::new() });
@@ -534,15 +556,50 @@ fn nearest_open_tile(map: &CollisionMap, wanted: TileCoord) -> Option<TileCoord>
         .find(|t| map.flags_at(*t) & CollisionFlag::BLOCK_FULL == 0)
 }
 
-/// The collision of one map square, as the arrays a `CollisionMap` takes. A square that cannot be
-/// decoded is solid, so nobody is ever walked onto ground nobody has seen.
-fn square_collision(source: &MapSource, square: (i32, i32)) -> CollisionMapData {
+/// The open world's random seed: `OSRS_SEED` when set (to replay a run), else from the clock, so
+/// that each launch rolls differently. A fixed seed replays the same rolls every launch (with the
+/// old fixed seed every first log took 18 attempts).
+fn open_world_seed() -> i32 {
+    if let Some(seed) = std::env::var("OSRS_SEED").ok().and_then(|v| v.trim().parse().ok()) {
+        return seed;
+    }
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let seed = (nanos % i32::MAX as u128) as i32;
+    println!("[server] random seed {seed} (OSRS_SEED={seed} replays this run)");
+    seed
+}
+
+/// What the server needs of one map square, decoded once: its collision, as the arrays a
+/// `CollisionMap` takes, and its free-standing ground-level objects (trees and the like), for the
+/// scenery index. A square that cannot be decoded is solid and empty, so nobody is ever walked onto
+/// ground nobody has seen.
+fn square_map(source: &MapSource, square: (i32, i32)) -> (CollisionMapData, Vec<Loc>) {
     let cells = (SQUARE * SQUARE) as usize;
-    let flags = source.collision(square.0, square.1).unwrap_or_else(|e| {
-        eprintln!("[server] map square ({}, {}) could not be read: {e}", square.0, square.1);
-        vec![osrs_cache::collision::flag::FLOOR; cells]
-    });
-    CollisionMapData {
+    let (flags, locs) = match source.neighbourhood(square.0, square.1) {
+        Ok(around) => {
+            let defs = source.object_defs();
+            let locs = around
+                .middle_placements()
+                .filter(|(_, p)| p.plane == 0 && matches!(p.kind, 10 | 11))
+                .filter_map(|((x, z), p)| {
+                    let (w, h) = footprint(defs.get(&p.id)?, p.orientation);
+                    Some(Loc {
+                        id: p.id,
+                        tile: TileCoord::new(x, z),
+                        kind: p.kind,
+                        orientation: p.orientation,
+                        size: (w as i32, h as i32),
+                    })
+                })
+                .collect();
+            (around.collision(defs), locs)
+        }
+        Err(e) => {
+            eprintln!("[server] map square ({}, {}) could not be read: {e}", square.0, square.1);
+            (vec![osrs_cache::collision::flag::FLOOR; cells], Vec::new())
+        }
+    };
+    let collision = CollisionMapData {
         origin_x: square.0 * SQUARE,
         origin_z: square.1 * SQUARE,
         width: SQUARE,
@@ -551,7 +608,8 @@ fn square_collision(source: &MapSource, square: (i32, i32)) -> CollisionMapData 
         // heights are not used for movement here: no step limit on real terrain
         heights: vec![0; cells],
         max_step_height: 32,
-    }
+    };
+    (collision, locs)
 }
 
 fn setup(
@@ -594,6 +652,17 @@ fn setup(
     // without a click)
     if let Some(target) = std::env::var("OSRS_ATTACK").ok().and_then(|v| v.parse::<u32>().ok()) {
         server.link.send(ClientCommand::Attack { target: osrs_core::actors::EntityId(target) });
+    }
+
+    // OSRS_INTERACT=id,x,z,option chooses an option on a scenery object straight away (for trying
+    // an object without finding it on screen)
+    if let Ok(v) = std::env::var("OSRS_INTERACT") {
+        let parts: Vec<&str> = v.splitn(4, ',').map(str::trim).collect();
+        if let [id, x, z, action] = parts[..] {
+            if let (Ok(id), Ok(x), Ok(z)) = (id.parse(), x.parse(), z.parse()) {
+                server.link.send(ClientCommand::InteractObject { id, tile: TileCoord::new(x, z), action: action.to_owned() });
+            }
+        }
     }
 
     let feet = spawner
@@ -853,12 +922,22 @@ fn sync_player(
         // While interacting with an NPC the body is turned toward it however he is moving (so a
         // walk to it can go sideways or backwards); otherwise toward the way he is going. Either
         // way it eases in and out, even once he has stopped, so a turn in progress finishes.
+        // ...or toward the middle of the object he is working at (a tree he chops)
+        let toward_loc = snapshot.player.facing_loc.map(|loc| {
+            let middle = Vec3::new(
+                loc.tile.x as f32 + loc.size.0 as f32 / 2.0,
+                transform.translation.y,
+                -(loc.tile.z as f32 + loc.size.1 as f32 / 2.0),
+            );
+            combat_fx::heading_between(transform.translation, middle)
+        });
         let toward_target = snapshot
             .player
             .face_target
             .and_then(|id| npc_views.entity_of(id))
             .and_then(|entity| npc_transforms.get(entity).ok())
-            .map(|target| combat_fx::heading_between(transform.translation, target.translation));
+            .map(|target| combat_fx::heading_between(transform.translation, target.translation))
+            .or(toward_loc);
         let (heading, facing, dt) = (toward_target.unwrap_or(player.heading), player.facing, time.delta_secs());
         player.facing = player.turn.step(facing, heading, dt);
         transform.rotation = Quat::from_rotation_y(player.facing);
@@ -880,7 +959,10 @@ fn sync_player(
             let diff = (wanted - player.facing + PI).rem_euclid(TAU) - PI;
             -diff * 2048.0 / TAU
         };
-        let clip = if !moving_on {
+        let clip = if !moving_on && snapshot.player.action_animation.is_some() {
+            // standing at a task: its animation, looped until the server says it has stopped
+            CLIP_ACTION
+        } else if !moving_on {
             // standing: turn on the spot while the facing catches up, else idle
             if player.steps != 0 && to_turn.abs() > 32.0 { CLIP_TURN } else { CLIP_IDLE }
         } else if to_turn.abs() <= 256.0 {

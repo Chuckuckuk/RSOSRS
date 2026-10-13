@@ -39,7 +39,7 @@ fn streaming_server(source: MapSource) -> (Server, Rc<RefCell<HashSet<(i32, i32)
     let mut server = Server::new(world, TickDriver::default());
     let loaded = Rc::new(RefCell::new(HashSet::from([start])));
     let seen = Rc::clone(&loaded);
-    server.set_map_streamer(move |map, tile| {
+    server.set_map_streamer(move |map, _scenery, tile| {
         let (cx, cy) = square_of(tile.x, tile.z);
         for dz in -1..=1 {
             for dx in -1..=1 {

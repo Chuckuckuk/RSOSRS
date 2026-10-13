@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use super::config::PlayerConfig;
+use super::gathering::PlayerAction;
 use super::loadout::Loadout;
 use super::skills::Skills;
 use crate::actors::{Actor, ActorKind, CombatTargetView, EntityId};
@@ -9,7 +10,8 @@ use crate::combat::{
     DamageBuffer, PendingAttackQueue, PlayerReactionState, PrayerPool,
     ProtectionPrayer, StatusEffectTracker,
 };
-use crate::rng::Rng;
+use crate::model::Skill;
+use crate::rng::{DotNetRandom, Rng};
 use crate::rules::{self, PrayerDrainCounter};
 use crate::tiles::TileCoord;
 
@@ -55,7 +57,7 @@ pub struct Player {
     pub(crate) stamina_ticks: i32,
     pub(crate) hp_regen_counter: i32,
     pub(crate) spec_regen_counter: i32,
-    pub(crate) drift_counters: [i32; 7],
+    pub(crate) drift_counters: [i32; Skill::COUNT],
     pub(crate) prayer_drain: PrayerDrainCounter,
     pub(crate) consumable_delays: BTreeMap<String, i32>,
     pub(crate) ran_this_tick: bool,
@@ -76,6 +78,13 @@ pub struct Player {
     /// ("red-x"), so the two do not dance round each other while the player steps out from under
     /// a large NPC. A walk click (yellow) clears the target and so lifts it.
     pub(crate) approaching_target: bool,
+    /// What the player is busy doing besides fighting and walking (gathering from a tree).
+    pub(crate) action: Option<PlayerAction>,
+    /// Ticks until the next gathering attempt may be made; counts down every tick, whatever the
+    /// player is doing (see `sim::gathering`).
+    pub(crate) skill_clock: i32,
+    /// The skilling rolls' own generator, so gathering never shifts a fight's rolls.
+    pub(crate) skilling_rng: DotNetRandom,
 }
 
 impl Player {
@@ -100,7 +109,8 @@ impl Player {
                 levels.magic,
                 config.max_prayer_points,
                 config.max_health,
-            ),
+            )
+            .with(Skill::Agility, config.agility_level),
             loadout: Loadout::new(),
             stance_index: None,
             active_prayers: Vec::new(),
@@ -114,7 +124,7 @@ impl Player {
             stamina_ticks: 0,
             hp_regen_counter: 0,
             spec_regen_counter: 0,
-            drift_counters: [0; 7],
+            drift_counters: [0; Skill::COUNT],
             prayer_drain: PrayerDrainCounter::default(),
             consumable_delays: BTreeMap::new(),
             ran_this_tick: false,
@@ -127,6 +137,9 @@ impl Player {
             pending_click: None,
             current_path_is_running: false,
             approaching_target: false,
+            action: None,
+            skill_clock: 0,
+            skilling_rng: DotNetRandom::new(0),
         }
     }
 
@@ -168,6 +181,7 @@ impl Player {
         self.attack_target = Some(target);
         self.interact_target = None;
         self.pending_click = None;
+        self.action = None;
     }
 
     /// Walk up to `target` and stay facing it. Replaces an attack or a queued walk.
@@ -175,6 +189,24 @@ impl Player {
         self.interact_target = Some(target);
         self.attack_target = None;
         self.pending_click = None;
+        self.action = None;
+    }
+
+    /// Starts `action` (gathering...). Replaces an attack, an NPC interaction or a queued walk.
+    pub(crate) fn set_action(&mut self, action: PlayerAction) {
+        self.action = Some(action);
+        self.attack_target = None;
+        self.interact_target = None;
+        self.pending_click = None;
+    }
+
+    pub fn action(&self) -> Option<&PlayerAction> {
+        self.action.as_ref()
+    }
+
+    /// Whether the player carries or wears `item`.
+    pub fn has_item(&self, item: &str) -> bool {
+        self.inventory.count(item) > 0 || self.loadout.slots().any(|(_, worn)| worn == item)
     }
 
     pub fn interact_target(&self) -> Option<EntityId> {
@@ -192,6 +224,7 @@ impl Player {
     pub fn request_walk_to(&mut self, tile: TileCoord, force_inverse: bool) {
         self.attack_target = None;
         self.interact_target = None;
+        self.action = None;
         self.pending_click = Some(PendingClick { tile, force_inverse });
     }
 

@@ -91,6 +91,8 @@ Set these in PowerShell with `$env:NAME = "value"` before `cargo run`.
 | `OSRS_WALK_TO=x,z` | ask the server to walk there at startup |
 | `OSRS_WALK_RUN=0` | with `OSRS_WALK_TO`, walk rather than run |
 | `OSRS_ATTACK=id` | attack NPC entity `id` at startup (the man is usually 1) |
+| `OSRS_SEED=n` | seed of the open world's random rolls; by default it comes from the clock (and is printed), so each launch rolls differently |
+| `OSRS_INTERACT=id,x,z,option` | choose `option` on scenery object `id` covering tile (x, z) at startup, e.g. `OSRS_SPAWN=3245,3231` with `OSRS_INTERACT=1276,3247,3231,Chop down` chops the tree east of you |
 | `OSRS_WIELD=0,1` | wield the items in these inventory slots at startup |
 | `OSRS_TAB=n` | open interface tab `n` (0-13) first |
 | `OSRS_LAYOUT=classic`, `modern` or `fixed` | interface layout: resizable classic (default), resizable modern, or the fixed 765x503 one (the 3D view then fills only its viewport widget) |
@@ -126,6 +128,15 @@ attack's `animation`. To fight it in the client, write a scenario with a `locati
 map and start the client with `--scenario` (chapter 7.1); `data/scenarios/jad.json` is the example.
 To have it stand about in the open world instead, add a `spawn_npc_def` call in the
 server-building closure in [`osrs_core/src/main.rs`](../osrs_core/src/main.rs).
+
+### Add a gathering resource (another tree, a rock)
+
+Usually no Rust changes. Add its tool rows to [`data/tools.json`](../osrs_core/data/tools.json)
+(if new) and a node to [`data/gathering.json`](../osrs_core/data/gathering.json): its scenery ids
+and their depleted forms (check them with `find_locs` / `obj_info`), requirements, the per-tool
+`[low, high]` chances from the wiki's chart, XP in tenths, product, depletion rule and respawn
+range. `the_bundled_dataset_loads_and_validates` checks the references. Only a resource that runs
+out in a new way (a fishing spot that moves) needs a new `DepletionDef` variant.
 
 ### Add a conditional gear effect
 

@@ -14,3 +14,12 @@ pub use bonuses::{DamageType, EquipmentBonuses, StyleBonuses};
 pub use effects::{PrayerEffects, StanceBonuses};
 pub use modifier::{Condition, ConditionContext, Modifier, ModifierScaling, ModifierTarget, ScalingContext};
 pub use skill::Skill;
+
+/// The indefinite article the game writes before `word`: "an" before a vowel, else "a".
+pub fn article(word: &str) -> &'static str {
+    if word.starts_with(['a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U']) {
+        "an"
+    } else {
+        "a"
+    }
+}

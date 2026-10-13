@@ -1,8 +1,9 @@
 //! What happened in the world, as a client would want to draw it: attacks being thrown, hits
-//! landing (hit splats) and things dying. The sim records these as it resolves a tick; a
+//! landing (hit splats), things dying, experience gained. The sim records these as it resolves a tick; a
 //! `Server` hands them to its client in the snapshot.
 
 use crate::actors::EntityId;
+use crate::model::Skill;
 
 /// A fighter: the player or one of the world's NPCs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -36,4 +37,8 @@ pub enum WorldEvent {
     /// (0 = now). The server decides every sound, as the game's does: the client only plays them,
     /// quieter the further `from` is from the player.
     Sound { sound: u32, from: Combatant, delay_ticks: i32 },
+    /// The player gained `gained_tenths` tenths of experience in `skill` (an XP drop).
+    Experience { skill: Skill, gained_tenths: i32 },
+    /// The player's base level in `skill` went up to `level`.
+    LevelUp { skill: Skill, level: i32 },
 }

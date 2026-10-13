@@ -1,19 +1,49 @@
 use crate::model::Skill;
 use crate::rules;
 
-/// A player's base and current (boosted or drained) levels for the combat skills. Hitpoints and
-/// Prayer keep their live value elsewhere (`Health`, `PrayerPool`); only their BASE level is
-/// meaningful here (it gates prayers and feeds the combat level).
+/// A player's base and current (boosted or drained) level and experience in every skill.
+/// Hitpoints and Prayer keep their live value elsewhere (`Health`, `PrayerPool`); only their BASE
+/// level is meaningful here (it gates prayers and feeds the combat level).
+///
+/// Experience is in tenths of a point, as the game keeps it. A level set directly (`set_base`, a
+/// scenario's levels) brings the experience to that level's threshold, so the two always agree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skills {
-    base: [i32; 7],
-    current: [i32; 7],
+    base: [i32; Skill::COUNT],
+    current: [i32; Skill::COUNT],
+    xp_tenths: [i32; Skill::COUNT],
+}
+
+impl Default for Skills {
+    /// A new account: 10 Hitpoints, 1 in everything else.
+    fn default() -> Self {
+        let base = Skill::ALL.map(Skill::starting_level);
+        Self { base, current: base, xp_tenths: base.map(rules::xp_tenths_for_level) }
+    }
 }
 
 impl Skills {
+    /// The seven combat skills as given, every other skill at its starting level.
     pub fn new(attack: i32, strength: i32, defence: i32, ranged: i32, magic: i32, prayer: i32, hitpoints: i32) -> Self {
-        let base = [attack, strength, defence, ranged, magic, prayer, hitpoints];
-        Self { base, current: base }
+        let mut skills = Self::default();
+        for (skill, level) in [
+            (Skill::Attack, attack),
+            (Skill::Strength, strength),
+            (Skill::Defence, defence),
+            (Skill::Ranged, ranged),
+            (Skill::Magic, magic),
+            (Skill::Prayer, prayer),
+            (Skill::Hitpoints, hitpoints),
+        ] {
+            skills.set_base(skill, level);
+        }
+        skills
+    }
+
+    /// The same skills with `skill` set to `level` (a builder for setups and tests).
+    pub fn with(mut self, skill: Skill, level: i32) -> Self {
+        self.set_base(skill, level);
+        self
     }
 
     pub fn base(&self, skill: Skill) -> i32 {
@@ -24,9 +54,30 @@ impl Skills {
         self.current[skill.index()]
     }
 
+    /// Experience in `skill`, in tenths of a point.
+    pub fn xp_tenths(&self, skill: Skill) -> i32 {
+        self.xp_tenths[skill.index()]
+    }
+
+    /// Sets the base and current level, and the experience to that level's threshold.
     pub fn set_base(&mut self, skill: Skill, level: i32) {
         self.base[skill.index()] = level;
         self.current[skill.index()] = level;
+        self.xp_tenths[skill.index()] = rules::xp_tenths_for_level(level);
+    }
+
+    /// Adds `tenths` of experience (capped at 200M) and returns the new base level if it went up.
+    /// A level gained raises the current level by as much, so a boost or drain keeps its size.
+    pub fn add_xp(&mut self, skill: Skill, tenths: i32) -> Option<i32> {
+        let i = skill.index();
+        self.xp_tenths[i] = self.xp_tenths[i].saturating_add(tenths.max(0)).min(rules::MAX_XP_TENTHS);
+        let level = rules::level_for_xp_tenths(self.xp_tenths[i]);
+        if level <= self.base[i] {
+            return None;
+        }
+        self.current[i] += level - self.base[i];
+        self.base[i] = level;
+        Some(level)
     }
 
     /// Raises the current level to at least `level`; a boost never lowers a stat.
@@ -126,6 +177,40 @@ mod tests {
         assert_eq!(skills.current(Skill::Magic), 100);
         assert_eq!(skills.current(Skill::Defence), 98);
         assert!(!skills.drift(Skill::Attack));
+    }
+
+    #[test]
+    fn a_new_account_has_ten_hitpoints_and_one_in_everything_else() {
+        let skills = Skills::default();
+        assert_eq!(skills.base(Skill::Hitpoints), 10);
+        assert_eq!(skills.xp_tenths(Skill::Hitpoints), 11_540);
+        assert_eq!(skills.base(Skill::Woodcutting), 1);
+        assert_eq!(skills.xp_tenths(Skill::Woodcutting), 0);
+    }
+
+    #[test]
+    fn experience_raises_levels_including_several_at_once() {
+        let mut skills = Skills::default();
+        assert_eq!(skills.add_xp(Skill::Woodcutting, 825), None, "82.5 XP is still level 1");
+        assert_eq!(skills.add_xp(Skill::Woodcutting, 5), Some(2), "83 XP is level 2");
+        assert_eq!(skills.add_xp(Skill::Woodcutting, 11_540 - 830), Some(10), "1,154 XP jumps to 10");
+        assert_eq!(skills.current(Skill::Woodcutting), 10);
+    }
+
+    #[test]
+    fn experience_stops_at_two_hundred_million() {
+        let mut skills = Skills::default().with(Skill::Woodcutting, 99);
+        skills.add_xp(Skill::Woodcutting, i32::MAX);
+        assert_eq!(skills.xp_tenths(Skill::Woodcutting), rules::MAX_XP_TENTHS);
+        assert_eq!(skills.base(Skill::Woodcutting), 99);
+    }
+
+    #[test]
+    fn a_level_gained_keeps_a_boost() {
+        let mut skills = Skills::default();
+        skills.boost_to(Skill::Woodcutting, 4);
+        skills.add_xp(Skill::Woodcutting, 830);
+        assert_eq!((skills.base(Skill::Woodcutting), skills.current(Skill::Woodcutting)), (2, 5));
     }
 
     #[test]

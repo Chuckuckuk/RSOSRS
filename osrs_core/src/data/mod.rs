@@ -1,9 +1,10 @@
 //! The data-driven half of the simulator: serde definitions for items, sets, prayers, spells,
-//! monsters and consumables, a `Registry` that loads and cross-checks them, and the bundled OSRS
+//! monsters, consumables and gathering (tools and resource nodes), a `Registry` that loads and cross-checks them, and the bundled OSRS
 //! dataset (`Registry::builtin`). Nothing here knows how a tick runs; `sim` turns definitions
 //! into live entities.
 
 mod consumables;
+mod gathering;
 mod items;
 mod npcs;
 mod prayers;
@@ -17,6 +18,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 pub use consumables::{ConsumableDef, ConsumableEffect};
+pub use gathering::{DepletionDef, GatheringNodeDef, NodeLocDef, PetDropDef, Requirement, ToolDef};
 pub use items::{AmmoDef, AmmoWeight, EquipSlot, ItemDef, SetDef, SpecialAttackDef, StanceDef, StanceKind, WeaponDef};
 pub use npcs::{AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels, NpcMovementDef, NpcSounds, RotationDef, SummonDef};
 pub use prayers::PrayerDef;
@@ -74,6 +76,11 @@ impl OnHitDef {
     }
 }
 
+/// Serde default for a count of one.
+pub(crate) fn one_u32() -> u32 {
+    1
+}
+
 /// The on-disk shape: one JSON document may hold any mix of definition kinds.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -84,6 +91,8 @@ pub struct DataFile {
     pub spells: Vec<SpellDef>,
     pub npcs: Vec<NpcDef>,
     pub consumables: Vec<ConsumableDef>,
+    pub tools: Vec<ToolDef>,
+    pub gathering: Vec<GatheringNodeDef>,
 }
 
 #[derive(Debug)]
@@ -116,6 +125,9 @@ pub struct Registry {
     spells: BTreeMap<String, SpellDef>,
     npcs: BTreeMap<String, NpcDef>,
     consumables: BTreeMap<String, ConsumableDef>,
+    /// By item id.
+    tools: BTreeMap<String, ToolDef>,
+    gathering: BTreeMap<String, GatheringNodeDef>,
 }
 
 fn insert_all<T>(
@@ -153,6 +165,8 @@ impl Registry {
         insert_all(&mut self.spells, "spell", file.spells, |d| &d.id)?;
         insert_all(&mut self.npcs, "npc", file.npcs, |d| &d.id)?;
         insert_all(&mut self.consumables, "consumable", file.consumables, |d| &d.id)?;
+        insert_all(&mut self.tools, "tool", file.tools, |d| &d.item)?;
+        insert_all(&mut self.gathering, "gathering node", file.gathering, |d| &d.id)?;
         Ok(())
     }
 
@@ -186,6 +200,8 @@ impl Registry {
             ("spells.json", include_str!("../../data/spells.json")),
             ("consumables.json", include_str!("../../data/consumables.json")),
             ("npcs.json", include_str!("../../data/npcs.json")),
+            ("tools.json", include_str!("../../data/tools.json")),
+            ("gathering.json", include_str!("../../data/gathering.json")),
         ] {
             registry.merge_json(name, json).unwrap_or_else(|e| panic!("bundled data is malformed: {e}"));
         }
@@ -269,6 +285,34 @@ impl Registry {
 
     pub fn consumables(&self) -> impl Iterator<Item = &ConsumableDef> {
         self.consumables.values()
+    }
+
+    /// The tool that item `item` is, if it is one.
+    pub fn tool(&self, item: &str) -> Option<&ToolDef> {
+        self.tools.get(item)
+    }
+
+    pub fn tools(&self) -> impl Iterator<Item = &ToolDef> {
+        self.tools.values()
+    }
+
+    pub fn gathering_node(&self, id: &str) -> Option<&GatheringNodeDef> {
+        self.gathering.get(id)
+    }
+
+    pub fn gathering_nodes(&self) -> impl Iterator<Item = &GatheringNodeDef> {
+        self.gathering.values()
+    }
+
+    /// The node that choosing `action` on scenery object `loc` gathers from, if any.
+    pub fn gathering_node_for(&self, loc: u32, action: &str) -> Option<&GatheringNodeDef> {
+        self.gathering.values().find(|node| node.action.eq_ignore_ascii_case(action) && node.depleted_form(loc).is_some())
+    }
+
+    /// Adds (or replaces) a gathering node: tests build nodes the bundle does not have this way.
+    #[cfg(test)]
+    pub(crate) fn insert_gathering_node_for_test(&mut self, def: GatheringNodeDef) {
+        self.gathering.insert(def.id.clone(), def);
     }
 
     /// Cross-checks the whole registry and reports every problem at once (not just the first), so
@@ -404,6 +448,72 @@ impl Registry {
             }
         }
 
+        for tool in self.tools.values() {
+            if !self.items.contains_key(&tool.item) {
+                problems.push(format!("tool '{}': unknown item", tool.item));
+            }
+            if !(1..=99).contains(&tool.level) {
+                problems.push(format!("tool '{}': level must be within 1..=99", tool.item));
+            }
+        }
+
+        let mut node_locs = BTreeMap::new();
+        for node in self.gathering.values() {
+            let who = format!("gathering node '{}'", node.id);
+            if node.locs.is_empty() {
+                problems.push(format!("{who}: lists no objects"));
+            }
+            for loc in &node.locs {
+                if let Some(other) = node_locs.insert((loc.loc, node.action.to_ascii_lowercase()), &node.id) {
+                    problems.push(format!("{who}: object {} '{}' is already gathered by '{other}'", loc.loc, node.action));
+                }
+            }
+            if node.roll_interval_ticks < 1 {
+                problems.push(format!("{who}: roll_interval_ticks must be at least 1"));
+            }
+            if node.xp_tenths < 0 {
+                problems.push(format!("{who}: xp_tenths must not be negative"));
+            }
+            if !self.items.contains_key(&node.product) && !self.consumables.contains_key(&node.product) {
+                problems.push(format!("{who}: unknown product '{}'", node.product));
+            }
+            if node.chances.is_empty() {
+                problems.push(format!("{who}: lists no tools in chances"));
+            }
+            for (tool, [low, high]) in &node.chances {
+                if !self.tools.contains_key(tool) {
+                    problems.push(format!("{who}: chances name '{tool}', which is not a tool"));
+                }
+                if *low < 0 || high < low {
+                    problems.push(format!("{who}: chances for '{tool}' need 0 <= low <= high"));
+                }
+            }
+            if let DepletionDef::Timer { ticks } = node.depletion {
+                if ticks < 1 {
+                    problems.push(format!("{who}: a despawn timer needs at least 1 tick"));
+                }
+            }
+            let [min, max] = node.respawn_ticks;
+            if min < 1 || max < min {
+                problems.push(format!("{who}: respawn_ticks need 1 <= min <= max"));
+            }
+            if let Some(pet) = &node.pet {
+                if !self.items.contains_key(&pet.item) {
+                    problems.push(format!("{who}: unknown pet item '{}'", pet.item));
+                }
+                if pet.base_chance < 1 {
+                    problems.push(format!("{who}: pet base_chance must be at least 1"));
+                }
+            }
+            for requirement in &node.requirements {
+                if let Requirement::Tool { category, .. } = requirement {
+                    if !self.tools.values().any(|t| &t.category == category) {
+                        problems.push(format!("{who}: requires a {category}, but no tool is one"));
+                    }
+                }
+            }
+        }
+
         if problems.is_empty() {
             Ok(())
         } else {
@@ -474,6 +584,49 @@ mod tests {
         assert!(registry.spells().count() >= 25);
         assert!(registry.npcs().count() >= 8);
         assert!(registry.consumables().count() >= 15);
+        assert!(registry.tools().count() >= 9);
+        assert!(registry.gathering_nodes().count() >= 1);
+    }
+
+    #[test]
+    fn the_regular_tree_is_chopped_with_axes_into_logs() {
+        let registry = Registry::builtin();
+
+        let tree = registry.gathering_node_for(1276, "Chop down").expect("object 1276 is a tree");
+        assert_eq!(tree.skill, crate::model::Skill::Woodcutting);
+        assert_eq!(tree.product, "logs");
+        assert_eq!(tree.xp_tenths, 250);
+        assert_eq!(tree.depletion, DepletionDef::EverySuccess);
+        assert_eq!(tree.chances["bronze_axe"], [64, 200]);
+        assert_eq!(tree.chances["crystal_axe"], [250, 800]);
+        assert_eq!(tree.pet.as_ref().map(|p| (p.item.as_str(), p.base_chance)), Some(("beaver", 317_647)));
+        assert!(registry.gathering_node_for(1276, "Examine").is_none());
+        assert_eq!(registry.tool("rune_axe").map(|t| t.level), Some(41));
+        assert!(registry.item("logs").is_some_and(|i| i.slot.is_none()));
+    }
+
+    #[test]
+    fn a_node_naming_an_unknown_tool_or_product_is_reported() {
+        let mut registry = Registry::new();
+        registry
+            .merge_json(
+                "bad",
+                r#"{
+                    "items":[{"id":"stick","name":"Stick","slot":"weapon"}],
+                    "tools":[{"item":"stick","category":"wand","skill":"woodcutting","level":1}],
+                    "gathering":[{"id":"t","skill":"woodcutting","action":"Chop down","locs":[{"loc":1,"depleted":2}],
+                        "requirements":[{"tool":{"category":"axe"}}],"xp_tenths":10,"product":"ghost_log","chances":{"stick":[1,2],"ghost_axe":[1,2]},
+                        "depletion":"every_success","respawn_ticks":[5,1]}]
+                }"#,
+            )
+            .unwrap();
+
+        let DataError::Invalid(problems) = registry.validate().unwrap_err() else { panic!("expected Invalid") };
+
+        assert!(problems.iter().any(|p| p.contains("unknown product 'ghost_log'")), "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("'ghost_axe', which is not a tool")), "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("requires a axe, but no tool is one")), "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("respawn_ticks")), "{problems:?}");
     }
 
     #[test]

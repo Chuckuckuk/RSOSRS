@@ -7,8 +7,8 @@
 //! shows is enum 681 (keyed by the cell's number in the game's own order), both read from the cache.
 //! `320:32` says "Total level: N", the sum of every skill's base level (script 396 and 1007).
 //!
-//! The server models seven skills (`Skill`); every other skill shows level 1. TODO: the XP tooltip
-//! (needs XP in the snapshot), "View guide" and the members markers.
+//! Every skill's levels come from the server (`Skill` is in the game's stat order). TODO: the XP
+//! tooltip (the snapshot carries the experience now), "View guide" and the members markers.
 
 use super::{comp, sprite_child, text_child, PaneInput};
 use osrs_cache::clientscript::load_enum;
@@ -45,18 +45,9 @@ pub const CELLS: [(u32, i32, i32); 24] = [
     (24, 24, 1),
 ];
 
-/// The game's stat numbers for the skills the server has.
+/// The skill with the game's stat number `stat`.
 pub fn skill_of_stat(stat: i32) -> Option<Skill> {
-    Some(match stat {
-        0 => Skill::Attack,
-        1 => Skill::Defence,
-        2 => Skill::Strength,
-        3 => Skill::Hitpoints,
-        4 => Skill::Ranged,
-        5 => Skill::Prayer,
-        6 => Skill::Magic,
-        _ => return None,
-    })
+    usize::try_from(stat).ok().and_then(Skill::from_index)
 }
 
 /// What a cell shows, from the cache's enums.
@@ -87,7 +78,7 @@ impl SkillTable {
 
 /// The level shown for a stat: the server's, else the game's starting level (10 for Hitpoints).
 fn levels(input: &PaneInput, stat: i32) -> (i32, i32) {
-    let start = if stat == 3 { 10 } else { 1 };
+    let start = skill_of_stat(stat).map_or(1, Skill::starting_level);
     let found = input
         .player
         .zip(skill_of_stat(stat))
@@ -130,6 +121,12 @@ mod tests {
         let mut keys: Vec<i32> = CELLS.iter().map(|c| c.1).collect();
         keys.sort_unstable();
         assert_eq!(keys, (1..=24).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn woodcutting_is_stat_eight() {
+        assert_eq!(skill_of_stat(8), Some(Skill::Woodcutting));
+        assert_eq!(skill_of_stat(-1), None);
     }
 
     #[test]

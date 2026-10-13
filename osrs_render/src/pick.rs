@@ -6,10 +6,10 @@
 //! real action: in the game a scenery piece without one (a fence, a rug) has no click box and does
 //! not take clicks, and nor does one whose default option is just "Walk here".
 
-use crate::world::{ObjectScene, WorldData};
+use crate::world::{tile_under, ObjectScene, WorldData};
 use bevy::prelude::*;
 use osrs_cache::scene::{LocMesh, MeshData};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::world::ObjectKey;
@@ -60,6 +60,9 @@ pub struct Picker {
     targets: Vec<Target>,
     left_click: HashMap<u32, String>,
     names: HashMap<u32, String>,
+    /// Placements (the tile under their middle, their id) that are not there for now: a felled
+    /// tree, whose stump is added in its place.
+    hidden: HashSet<((i32, i32), u32)>,
 }
 
 impl Picker {
@@ -74,7 +77,7 @@ impl Picker {
     /// have a left-click option to it, and `names` gives every object's name, for the whole game
     /// rather than for any one square.
     pub fn streamed(plane: u8, left_click: HashMap<u32, String>, names: HashMap<u32, String>) -> Picker {
-        Picker { plane, targets: Vec::new(), left_click, names }
+        Picker { plane, targets: Vec::new(), left_click, names, hidden: HashSet::new() }
     }
 
     /// Adds the click boxes of `objects` (positions as the scene spawns them, plus `offset`),
@@ -113,6 +116,16 @@ impl Picker {
         }
     }
 
+    /// Takes object `id`, whose middle is over `tile`, out of picking until [`Picker::show`].
+    /// It stays out if its square is dropped and added again meanwhile.
+    pub fn hide(&mut self, tile: (i32, i32), id: u32) {
+        self.hidden.insert((tile, id));
+    }
+
+    pub fn show(&mut self, tile: (i32, i32), id: u32) {
+        self.hidden.remove(&(tile, id));
+    }
+
     /// Drops the click boxes added under `owner`.
     pub fn remove(&mut self, owner: (i32, i32)) {
         self.targets.retain(|t| t.owner != owner);
@@ -129,7 +142,7 @@ impl Picker {
     pub fn pick(&self, ground: &impl GroundSurface, ray: Ray3d) -> Pick {
         match self.pick_all(ground, ray) {
             None => Pick::Nothing,
-            Some(Click { object: Some((id, name, action)), .. }) => Pick::Object { id, name, action },
+            Some(Click { object: Some(PickedObject { id, name, action, .. }), .. }) => Pick::Object { id, name, action },
             Some(Click { tile: (x, z), object: None, .. }) => Pick::Ground { x, z },
         }
     }
@@ -145,12 +158,17 @@ impl Picker {
         let ground_t = (hit - origin).dot(dir);
 
         // nearest hit among objects that take a left-click, and among all named objects
-        let mut intercepting: Option<(f32, u32)> = None;
+        let mut intercepting: Option<(f32, u32, Vec3)> = None;
         let mut any: Option<(f32, u32)> = None;
         for t in &self.targets {
             let Some(enter) = ray_aabb(origin, dir, t.min, t.max) else { continue };
             let beaten = |best: Option<(f32, u32)>| best.is_some_and(|(d, _)| enter > d);
-            if enter > ground_t || (beaten(any) && (!t.intercepts || beaten(intercepting))) {
+            let intercepting_best = intercepting.map(|(d, id, _)| (d, id));
+            if enter > ground_t || (beaten(any) && (!t.intercepts || beaten(intercepting_best))) {
+                continue;
+            }
+            // (checked only for the few boxes the ray passes through)
+            if !self.hidden.is_empty() && self.hidden.contains(&(tile_under(t.origin), t.id)) {
                 continue;
             }
             for mesh in mesh_parts(&t.scene.meshes[&t.key]) {
@@ -163,37 +181,51 @@ impl Picker {
                         if any.is_none_or(|(d, _)| hit < d) {
                             any = Some((hit, t.id));
                         }
-                        if t.intercepts && intercepting.is_none_or(|(d, _)| hit < d) {
-                            intercepting = Some((hit, t.id));
+                        if t.intercepts && intercepting.is_none_or(|(d, _, _)| hit < d) {
+                            intercepting = Some((hit, t.id, t.origin));
                         }
                     }
                 }
             }
         }
         let name_of = |id: u32| self.names.get(&id).cloned().unwrap_or_default();
-        let object = intercepting.map(|(_, id)| {
-            let action = self.left_click.get(&id).cloned().unwrap_or_default();
-            (id, name_of(id), action)
+        let object = intercepting.map(|(_, id, at)| PickedObject {
+            id,
+            name: name_of(id),
+            action: self.left_click.get(&id).cloned().unwrap_or_default(),
+            tile: tile_under(at),
         });
         let examinable = any.map(|(_, id)| (id, name_of(id)));
         Some(Click {
-            tile: (hit.x.floor() as i32, (-hit.z).floor() as i32),
+            tile: tile_under(hit),
             object,
             examinable,
             ground_distance: ground_t,
-            object_distance: intercepting.map(|(d, _)| d),
+            object_distance: intercepting.map(|(d, _, _)| d),
             examinable_distance: any.map(|(d, _)| d),
         })
     }
 }
 
+/// An object a click lands on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickedObject {
+    pub id: u32,
+    pub name: String,
+    /// Its left-click option.
+    pub action: String,
+    /// The world tile under its middle (inside its footprint): with the id, what the server
+    /// needs to find the placement.
+    pub tile: (i32, i32),
+}
+
 /// Everything under a click: the ground tile its path ends on, the object that intercepts it on the
-/// way (id, name, left-click option), and the nearest named object in the way (id, name), which
-/// can be one that does not intercept.
+/// way, and the nearest named object in the way (id, name), which can be one that does not
+/// intercept.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Click {
     pub tile: (i32, i32),
-    pub object: Option<(u32, String, String)>,
+    pub object: Option<PickedObject>,
     pub examinable: Option<(u32, String)>,
     /// How far along the ray (world units) the ground, the intercepting object and the
     /// examinable object are, so other things (NPCs) can be ordered against them.

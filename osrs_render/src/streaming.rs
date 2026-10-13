@@ -6,10 +6,11 @@
 //! every square sits where it really is and nothing has to be re-based when one comes or goes.
 
 use crate::pick::GroundSurface;
-use crate::world::{load_objects, spawn_parts, MaterialCache, ObjectScene, ScrollingTextures, TextureStore};
+use crate::world::{load_objects, model_loader, spawn_parts, MaterialCache, ObjectScene, ScrollingTextures, TextureStore};
 use bevy::prelude::*;
 use osrs_cache::config::Configs;
 use osrs_cache::model::Model;
+use osrs_cache::scene::{build_loc, LocMesh};
 use osrs_cache::squares::{MapSource, SQUARE};
 use osrs_cache::terrain_mesh::TerrainMesh;
 use std::collections::HashMap;
@@ -74,6 +75,15 @@ impl SquareLoader {
         (left_click, names)
     }
 
+    /// The mesh of object `id` placed as shape `kind` turned `orientation` quarter turns, on its
+    /// own (an object put in place of another at run time: a tree's stump). `None` if it has no
+    /// model.
+    pub fn build_object(&mut self, id: u32, kind: u8, orientation: u8) -> Option<LocMesh> {
+        let def = self.source.object_defs().get(&id)?;
+        let mut load_model = model_loader(self.source.cache(), &mut self.models);
+        build_loc(&mut load_model, def, kind, orientation, None, &self.texture_hsl).filter(|mesh| !mesh.is_empty())
+    }
+
     /// Decodes square (`sx`, `sy`).
     pub fn load(&mut self, sx: i32, sy: i32) -> osrs_cache::Result<SquareData> {
         let started = Instant::now();
@@ -127,33 +137,50 @@ impl SquareLoader {
 pub enum Loaded {
     Ready(SquareData),
     Failed((i32, i32), String),
+    /// The mesh asked for with [`SquareStream::request_object`] (`None` if it has no model).
+    Object { id: u32, kind: u8, orientation: u8, mesh: Option<LocMesh> },
 }
 
-/// A thread that decodes squares on request. Dropping the handle stops it.
+/// What the loading thread is asked for.
+enum Request {
+    Square((i32, i32)),
+    Object { id: u32, kind: u8, orientation: u8 },
+}
+
+/// A thread that decodes squares (and single objects) on request. Dropping the handle stops it.
 pub struct SquareStream {
-    requests: Sender<(i32, i32)>,
+    requests: Sender<Request>,
     results: Receiver<Loaded>,
 }
 
 impl SquareStream {
     pub fn spawn() -> SquareStream {
-        let (request_tx, request_rx) = mpsc::channel::<(i32, i32)>();
+        let (request_tx, request_rx) = mpsc::channel::<Request>();
         let (result_tx, result_rx) = mpsc::channel();
         thread::spawn(move || {
             let mut loader = match SquareLoader::open() {
                 Ok(loader) => loader,
                 Err(e) => {
                     // nothing can be loaded; report every request as failed
-                    for square in request_rx {
-                        let _ = result_tx.send(Loaded::Failed(square, e.to_string()));
+                    for request in request_rx {
+                        let result = match request {
+                            Request::Square(square) => Loaded::Failed(square, e.to_string()),
+                            Request::Object { id, kind, orientation } => Loaded::Object { id, kind, orientation, mesh: None },
+                        };
+                        let _ = result_tx.send(result);
                     }
                     return;
                 }
             };
-            for (sx, sy) in request_rx {
-                let result = match loader.load(sx, sy) {
-                    Ok(data) => Loaded::Ready(data),
-                    Err(e) => Loaded::Failed((sx, sy), e.to_string()),
+            for request in request_rx {
+                let result = match request {
+                    Request::Square((sx, sy)) => match loader.load(sx, sy) {
+                        Ok(data) => Loaded::Ready(data),
+                        Err(e) => Loaded::Failed((sx, sy), e.to_string()),
+                    },
+                    Request::Object { id, kind, orientation } => {
+                        Loaded::Object { id, kind, orientation, mesh: loader.build_object(id, kind, orientation) }
+                    }
                 };
                 if result_tx.send(result).is_err() {
                     return;
@@ -164,7 +191,13 @@ impl SquareStream {
     }
 
     pub fn request(&self, square: (i32, i32)) {
-        let _ = self.requests.send(square);
+        let _ = self.requests.send(Request::Square(square));
+    }
+
+    /// Asks for the mesh of one object placed as `kind`, turned `orientation`; it comes back from
+    /// [`SquareStream::poll`] as [`Loaded::Object`].
+    pub fn request_object(&self, id: u32, kind: u8, orientation: u8) {
+        let _ = self.requests.send(Request::Object { id, kind, orientation });
     }
 
     /// Every result that has come back since the last call.

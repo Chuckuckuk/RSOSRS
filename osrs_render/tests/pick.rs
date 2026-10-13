@@ -106,9 +106,9 @@ fn walk_here_under_an_object_goes_to_the_ground_at_the_end_of_the_path() {
     let ray = down_at(c.x, c.y + 20.0, c.z);
 
     let click = picker.pick_all(&world, ray).expect("the ray reaches ground");
-    let (id, _, action) = click.object.expect("the object is in the way");
-    assert_eq!(id, key.0);
-    assert!(!action.is_empty());
+    let object = click.object.expect("the object is in the way");
+    assert_eq!(object.id, key.0);
+    assert!(!object.action.is_empty());
 
     // the same ray with no click boxes ends on the same tile: that is where "Walk here" goes
     let mut open = lumbridge().unwrap();
@@ -146,7 +146,7 @@ fn a_named_object_with_no_left_click_option_can_still_be_examined() {
 
     // a left-click is not intercepted by it ...
     assert!(
-        click.object.as_ref().is_none_or(|(id, _, _)| *id != key.0),
+        click.object.as_ref().is_none_or(|object| object.id != key.0),
         "an object without a left-click option must not intercept"
     );
     // ... but it is the nearest named thing in the way, so it can be examined

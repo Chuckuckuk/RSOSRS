@@ -26,7 +26,7 @@ use osrs_core::actors::EntityId;
 use osrs_core::data::EquipSlot;
 use osrs_core::sim::{ClientCommand, ItemView};
 use osrs_core::tiles::TileCoord;
-use osrs_render::pick::{Click, Picker};
+use osrs_render::pick::{Click, PickedObject, Picker};
 use osrs_render::streaming::StreamedWorld;
 
 /// The narrowest the menu is; it grows to fit its longest line.
@@ -76,7 +76,7 @@ enum MenuAction {
     /// Walk to a world tile.
     Walk(TileCoord),
     /// The left-click option of an object.
-    Object { id: u32, name: String, action: String },
+    Object(PickedObject),
     /// Ask the server what an object is.
     Examine { id: u32 },
     /// An option of an NPC. "Attack" is a request to the server; the rest have no effect yet.
@@ -330,9 +330,14 @@ fn widget_menu(target: UiTarget, snapshot: Option<&osrs_core::sim::Snapshot>, ic
 fn perform(server: &ServerLink, chat: &mut ChatLog, now: f32, action: &MenuAction) {
     match action {
         MenuAction::Walk(tile) => request_walk(server, *tile, false),
-        // objects have no interactions yet
-        MenuAction::Object { id, name, action } => {
-            println!("[client] {action} {name} (object {id}): nothing to do with objects yet")
+        // the server finds the object from its id and a tile it covers, and decides what happens
+        MenuAction::Object(PickedObject { id, name, action, tile }) => {
+            println!("[client] {action} {name} (object {id} at {}, {})", tile.0, tile.1);
+            server.link.send(ClientCommand::InteractObject {
+                id: *id,
+                tile: TileCoord::new(tile.0, tile.1),
+                action: action.clone(),
+            });
         }
         MenuAction::Examine { id } => server.link.send(ClientCommand::ExamineObject { id: *id }),
         MenuAction::ExamineNpc { id } => server.link.send(ClientCommand::ExamineNpc { target: *id }),
@@ -457,7 +462,7 @@ fn ground_clicks(
                 (true, Some(option), _) => {
                     perform(&server, &mut extra.chat, now, &npc_action(under.npc.as_ref().expect("an NPC came first"), &option))
                 }
-                (_, _, Some((id, name, action))) => perform(&server, &mut extra.chat, now, &MenuAction::Object { id, name, action }),
+                (_, _, Some(object)) => perform(&server, &mut extra.chat, now, &MenuAction::Object(object)),
                 _ => request_walk(&server, under.tile, ctrl),
             }
         }
@@ -548,12 +553,12 @@ fn ground_clicks(
                 }
                 // an object's option, then Examine
                 let mut object_items: Vec<MenuItem> = Vec::new();
-                if let Some((id, name, action)) = under.click.object.clone() {
+                if let Some(object) = under.click.object.clone() {
                     object_items.push(MenuItem {
-                        option: action.clone(),
-                        subject: Some((name.clone(), Subject::Object)),
+                        option: object.action.clone(),
+                        subject: Some((object.name.clone(), Subject::Object)),
                         suffix: None,
-                        action: MenuAction::Object { id, name, action },
+                        action: MenuAction::Object(object),
                     });
                 }
                 if let Some((id, name)) = under.click.examinable.clone() {
