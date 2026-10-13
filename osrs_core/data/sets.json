@@ -1,0 +1,79 @@
+{
+  "items": [
+    { "id": "graceful_hood", "name": "Graceful hood", "slot": "head", "weight_kg": -3.0, "notes": "Weight reduction omitted." },
+    { "id": "graceful_cape", "name": "Graceful cape", "slot": "cape", "weight_kg": -4.0, "notes": "Weight reduction omitted." },
+    { "id": "graceful_top", "name": "Graceful top", "slot": "body", "weight_kg": -5.0, "notes": "Weight reduction omitted." },
+    { "id": "graceful_legs", "name": "Graceful legs", "slot": "legs", "weight_kg": -6.0, "notes": "Weight reduction omitted." },
+    { "id": "graceful_gloves", "name": "Graceful gloves", "slot": "hands", "weight_kg": -3.0, "notes": "Weight reduction omitted." },
+    { "id": "graceful_boots", "name": "Graceful boots", "slot": "feet", "weight_kg": -4.0, "notes": "Weight reduction omitted." }
+  ],
+  "sets": [
+    {
+      "id": "void_melee", "name": "Void Knight (melee)",
+      "pieces": [
+        ["void_knight_top", "elite_void_top"],
+        ["void_knight_robe", "elite_void_robe"],
+        ["void_knight_gloves"],
+        ["void_melee_helm"]
+      ],
+      "modifiers": [
+        { "target": "accuracy_level", "ratio": { "num": 11, "den": 10 }, "condition": { "style": "melee" } },
+        { "target": "damage_level", "ratio": { "num": 11, "den": 10 }, "condition": { "style": "melee" } }
+      ]
+    },
+    {
+      "id": "void_ranged", "name": "Void Knight (ranged)",
+      "pieces": [
+        ["void_knight_top", "elite_void_top"],
+        ["void_knight_robe", "elite_void_robe"],
+        ["void_knight_gloves"],
+        ["void_ranger_helm"]
+      ],
+      "modifiers": [
+        { "target": "accuracy_level", "ratio": { "num": 11, "den": 10 }, "condition": { "style": "ranged" } },
+        { "target": "damage_level", "ratio": { "num": 11, "den": 10 }, "condition": { "style": "ranged" },
+          "group": "void_damage", "priority": 1 }
+      ]
+    },
+    {
+      "id": "elite_void_ranged", "name": "Elite Void Knight (ranged)",
+      "pieces": [["elite_void_top"], ["elite_void_robe"], ["void_knight_gloves"], ["void_ranger_helm"]],
+      "modifiers": [
+        { "target": "damage_level", "ratio": { "num": 9, "den": 8 }, "condition": { "style": "ranged" },
+          "group": "void_damage", "priority": 2 }
+      ]
+    },
+    {
+      "id": "void_mage", "name": "Void Knight (magic)",
+      "pieces": [
+        ["void_knight_top", "elite_void_top"],
+        ["void_knight_robe", "elite_void_robe"],
+        ["void_knight_gloves"],
+        ["void_mage_helm"]
+      ],
+      "modifiers": [
+        { "target": "accuracy_level", "ratio": { "num": 29, "den": 20 }, "condition": { "style": "magic" } }
+      ]
+    },
+    {
+      "id": "elite_void_mage", "name": "Elite Void Knight (magic)",
+      "pieces": [["elite_void_top"], ["elite_void_robe"], ["void_knight_gloves"], ["void_mage_helm"]],
+      "modifiers": [
+        { "target": "magic_damage_permille", "add": 25, "condition": { "style": "magic" } }
+      ]
+    },
+    {
+      "id": "dharok", "name": "Dharok's set",
+      "pieces": [["dharoks_helm"], ["dharoks_platebody"], ["dharoks_platelegs"], ["dharoks_greataxe"]],
+      "modifiers": [
+        { "target": "max_hit", "scaling": "missing_hitpoints", "condition": { "style": "melee" } }
+      ]
+    },
+    {
+      "id": "graceful_outfit", "name": "Graceful outfit",
+      "pieces": [
+        ["graceful_hood"], ["graceful_cape"], ["graceful_top"], ["graceful_legs"], ["graceful_gloves"], ["graceful_boots"]
+      ]
+    }
+  ]
+}

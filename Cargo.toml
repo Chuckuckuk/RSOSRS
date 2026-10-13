@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["osrs_core", "osrs_cache", "osrs_render", "osrs_viewer"]
+
+# Profiles only take effect at the workspace root.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

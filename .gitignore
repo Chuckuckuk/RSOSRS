@@ -1,0 +1,25 @@
+# Build output
+/target/
+
+# Packed executables carry a slice of the game cache (Jagex assets): never commit them
+/dist/
+*.exe
+*.rar
+
+# Screenshots and renders are made from Jagex's models, textures and sprites
+/shots/
+
+# Third-party XTEA key dump (unused: this cache revision is not encrypted)
+/osrs_cache/data/xtea_keys.json
+
+# Anything extracted from the game cache
+*.dat
+*.idx*
+*.jag
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

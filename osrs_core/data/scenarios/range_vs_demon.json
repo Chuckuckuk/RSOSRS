@@ -1,0 +1,14 @@
+{
+  "name": "Crossbow vs abyssal demon",
+  "seed": 7,
+  "half_extent": 15,
+  "player": {
+    "levels": { "attack": 70, "strength": 70, "defence": 75, "ranged": 90, "prayer": 60, "hitpoints": 85, "agility": 70 },
+    "equipment": ["rune_crossbow", "rune_bolts", "fire_cape"],
+    "prayers": ["protect_from_melee"],
+    "stance": 1,
+    "attack": 0
+  },
+  "npcs": [ { "npc": "abyssal_demon", "at": [8, 0], "hostile": true } ],
+  "notes": "Kite-free ranged fight: the demon closes the distance, Protect from Melee blocks its claws."
+}

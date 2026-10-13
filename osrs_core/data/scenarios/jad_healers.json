@@ -1,0 +1,31 @@
+{
+  "name": "TzTok-Jad and his healers",
+  "seed": 63,
+  "half_extent": 20,
+  "location": [2400, 5080],
+  "player": {
+    "levels": { "attack": 75, "strength": 80, "defence": 75, "ranged": 90, "magic": 80, "prayer": 70, "hitpoints": 85, "agility": 70 },
+    "equipment": [
+      "armadyl_helmet", "avas_assembler", "necklace_of_anguish", "rune_bolts", "rune_crossbow",
+      "armadyl_chestplate", "twisted_buckler", "armadyl_chainskirt", "barrows_gloves", "pegasian_boots", "archers_ring_i"
+    ],
+    "prayers": ["protect_from_magic"],
+    "inventory": [
+      { "item": "ranging_potion_4" },
+      { "item": "prayer_potion_4" },
+      { "item": "prayer_potion_4" },
+      { "item": "prayer_potion_4" },
+      { "item": "prayer_potion_4" },
+      { "item": "super_restore_4" },
+      { "item": "super_restore_4" },
+      { "item": "saradomin_brew_4" },
+      { "item": "saradomin_brew_4" },
+      { "item": "shark", "quantity": 6 },
+      { "item": "cooked_karambwan", "quantity": 4 }
+    ],
+    "start": [0, 0],
+    "attack": 0
+  },
+  "npcs": [ { "npc": "tztok_jad", "at": [-2, 8], "hostile": true, "hitpoints": 140 } ],
+  "notes": "The Jad fight from its second half: Jad starts on 140 hitpoints, so his four Yt-HurKot come at once. Attack a healer to distract it; let them heal him to full and the dead ones come again. Play it with `cargo run -p osrs_core --release -- --scenario jad_healers`."
+}

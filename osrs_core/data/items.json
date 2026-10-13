@@ -1,0 +1,433 @@
+{
+  "items": [
+    { "id": "vial", "name": "Vial", "weight_kg": 0.004, "notes": "Left when the last dose of a potion is drunk. No slot: carried, never worn." },
+    {
+      "id": "abyssal_whip", "name": "Abyssal whip", "slot": "weapon", "weight_kg": 0.453,
+      "bonuses": { "attack": { "slash": 82 }, "melee_strength": 82 },
+      "weapon": {
+        "category": "whip", "attack_speed": 4, "attack_sound": 2720,
+        "stances": [
+          { "name": "Flick", "kind": "accurate", "damage_type": "slash", "bonuses": { "attack": 3 } },
+          { "name": "Lash", "kind": "controlled", "damage_type": "slash", "bonuses": { "attack": 1, "strength": 1, "defence": 1 } },
+          { "name": "Deflect", "kind": "defensive", "damage_type": "slash", "bonuses": { "defence": 3 } }
+        ],
+        "special": {
+          "name": "Energy Drain", "energy_cost": 50,
+          "modifiers": [ { "target": "attack_roll", "ratio": { "num": 5, "den": 4 } } ]
+        }
+      }
+    },
+    {
+      "id": "dragon_scimitar", "name": "Dragon scimitar", "slot": "weapon", "weight_kg": 1.814,
+      "bonuses": { "attack": { "stab": 8, "slash": 67, "crush": -2 }, "defence": { "slash": 1 }, "melee_strength": 66 },
+      "weapon": {
+        "category": "scimitar", "attack_speed": 4, "attack_sound": 2500,
+        "stances": [
+          { "name": "Chop", "kind": "accurate", "damage_type": "slash", "bonuses": { "attack": 3 } },
+          { "name": "Slash", "kind": "aggressive", "damage_type": "slash", "bonuses": { "strength": 3 } },
+          { "name": "Lunge", "kind": "controlled", "damage_type": "stab", "sound": 2501, "bonuses": { "attack": 1, "strength": 1, "defence": 1 } },
+          { "name": "Block", "kind": "defensive", "damage_type": "slash", "bonuses": { "defence": 3 } }
+        ],
+        "special": {
+          "name": "Sever", "energy_cost": 55,
+          "modifiers": [ { "target": "attack_roll", "ratio": { "num": 5, "den": 4 } } ]
+        }
+      }
+    },
+    {
+      "id": "dragon_dagger", "name": "Dragon dagger", "slot": "weapon", "weight_kg": 0.453,
+      "bonuses": { "attack": { "stab": 40, "slash": 25, "crush": -4, "magic": 1 }, "defence": { "magic": 1 }, "melee_strength": 40 },
+      "weapon": {
+        "category": "dagger", "attack_speed": 4, "attack_sound": 2549,
+        "stances": [
+          { "name": "Stab", "kind": "accurate", "damage_type": "stab", "bonuses": { "attack": 3 } },
+          { "name": "Lunge", "kind": "aggressive", "damage_type": "stab", "bonuses": { "strength": 3 } },
+          { "name": "Slash", "kind": "aggressive", "damage_type": "slash", "sound": 2548, "bonuses": { "strength": 3 } },
+          { "name": "Block", "kind": "defensive", "damage_type": "stab", "bonuses": { "defence": 3 } }
+        ],
+        "special": {
+          "name": "Double Attack", "energy_cost": 25, "hit_count": 2,
+          "modifiers": [
+            { "target": "attack_roll", "ratio": { "num": 23, "den": 20 } },
+            { "target": "max_hit", "ratio": { "num": 23, "den": 20 } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "dragon_mace", "name": "Dragon mace", "slot": "weapon", "weight_kg": 1.814,
+      "bonuses": { "attack": { "stab": 40, "slash": -2, "crush": 60 }, "melee_strength": 55, "prayer": 5 },
+      "notes": "",
+      "weapon": {
+        "category": "mace", "attack_speed": 5, "attack_sound": 2508,
+        "stances": [
+          { "name": "Pound", "kind": "accurate", "damage_type": "crush", "bonuses": { "attack": 3 } },
+          { "name": "Pummel", "kind": "aggressive", "damage_type": "crush", "bonuses": { "strength": 3 } },
+          { "name": "Spike", "kind": "controlled", "damage_type": "stab", "sound": 2509, "bonuses": { "attack": 1, "strength": 1, "defence": 1 } },
+          { "name": "Block", "kind": "defensive", "damage_type": "crush", "bonuses": { "defence": 3 } }
+        ],
+        "special": {
+          "name": "Shatter", "energy_cost": 25,
+          "modifiers": [
+            { "target": "attack_roll", "ratio": { "num": 5, "den": 4 } },
+            { "target": "max_hit", "ratio": { "num": 3, "den": 2 } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "armadyl_godsword", "name": "Armadyl godsword", "slot": "weapon", "weight_kg": 10.0,
+      "bonuses": { "attack": { "slash": 132, "crush": 80 }, "melee_strength": 132, "prayer": 8 },
+      "weapon": {
+        "category": "godsword", "attack_speed": 6, "attack_sound": 2503,
+        "stances": [
+          { "name": "Chop", "kind": "accurate", "damage_type": "slash", "bonuses": { "attack": 3 } },
+          { "name": "Slash", "kind": "aggressive", "damage_type": "slash", "bonuses": { "strength": 3 } },
+          { "name": "Smash", "kind": "aggressive", "damage_type": "crush", "sound": 2502, "bonuses": { "strength": 3 } },
+          { "name": "Block", "kind": "defensive", "damage_type": "slash", "bonuses": { "defence": 3 } }
+        ],
+        "special": {
+          "name": "The Judgement", "energy_cost": 50,
+          "modifiers": [
+            { "target": "attack_roll", "ratio": { "num": 2, "den": 1 } },
+            { "target": "max_hit", "ratio": { "num": 11, "den": 8 } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "granite_maul", "name": "Granite maul", "slot": "weapon", "weight_kg": 4.535,
+      "bonuses": { "attack": { "crush": 81 }, "melee_strength": 79 },
+      "notes": " The special fires instantly (speed 1) rather than waiting out the 7-tick swing.",
+      "weapon": {
+        "category": "blunt_2h", "attack_speed": 7, "attack_sound": 2714,
+        "stances": [
+          { "name": "Pound", "kind": "accurate", "damage_type": "crush", "bonuses": { "attack": 3 } },
+          { "name": "Pummel", "kind": "aggressive", "damage_type": "crush", "bonuses": { "strength": 3 } },
+          { "name": "Block", "kind": "defensive", "damage_type": "crush", "bonuses": { "defence": 3 } }
+        ],
+        "special": { "name": "Quick Smash", "energy_cost": 50, "attack_speed": 1 }
+      }
+    },
+    {
+      "id": "dharoks_greataxe", "name": "Dharok's greataxe", "slot": "weapon", "weight_kg": 3.175,
+      "bonuses": { "attack": { "stab": -4, "slash": 103, "crush": 95, "magic": -4 }, "defence": { "ranged": -1 }, "melee_strength": 105 },
+      "notes": "",
+      "weapon": {
+        "category": "axe_2h", "attack_speed": 7, "attack_sound": 1321,
+        "stances": [
+          { "name": "Chop", "kind": "accurate", "damage_type": "slash", "bonuses": { "attack": 3 } },
+          { "name": "Hack", "kind": "aggressive", "damage_type": "slash", "bonuses": { "strength": 3 } },
+          { "name": "Smash", "kind": "aggressive", "damage_type": "crush", "sound": 1316, "bonuses": { "strength": 3 } },
+          { "name": "Block", "kind": "defensive", "damage_type": "slash", "bonuses": { "defence": 3 } }
+        ]
+      }
+    },
+    { "id": "dharoks_helm", "name": "Dharok's helm", "slot": "head", "weight_kg": 1.814, "bonuses": { "attack": { "magic": -3, "ranged": -1 }, "defence": { "stab": 45, "slash": 48, "crush": 44, "magic": -1, "ranged": 51 } }, "notes": "Bonuses omitted; present for the set effect." },
+    { "id": "dharoks_platebody", "name": "Dharok's platebody", "slot": "body", "weight_kg": 9.979, "bonuses": { "attack": { "magic": -30, "ranged": -10 }, "defence": { "stab": 122, "slash": 120, "crush": 107, "magic": -6, "ranged": 132 } }, "notes": "Bonuses omitted; present for the set effect." },
+    { "id": "dharoks_platelegs", "name": "Dharok's platelegs", "slot": "legs", "weight_kg": 9.071, "bonuses": { "attack": { "magic": -21, "ranged": -11 }, "defence": { "stab": 85, "slash": 82, "crush": 83, "magic": -4, "ranged": 92 } }, "notes": "Bonuses omitted; present for the set effect." },
+    {
+      "id": "keris", "name": "Keris", "slot": "weapon", "weight_kg": 0.453,
+      "bonuses": { "attack": { "stab": 40, "slash": 20, "crush": -10, "magic": 2 }, "defence": { "magic": 2 }, "melee_strength": 30, "prayer": 2 },
+      "notes": " Reference section 4: +33% damage on Kalphite with a 1/51 chance of triple damage.",
+      "modifiers": [
+        { "target": "max_hit", "ratio": { "num": 133, "den": 100 }, "condition": { "target_has": "kalphite" } },
+        { "target": "damage_roll", "ratio": { "num": 3, "den": 1 }, "chance_one_in": 51, "condition": { "target_has": "kalphite" } }
+      ],
+      "weapon": {
+        "category": "stab_sword", "attack_speed": 4, "attack_sound": 2507,
+        "stances": [
+          { "name": "Stab", "kind": "accurate", "damage_type": "stab", "bonuses": { "attack": 3 } },
+          { "name": "Lunge", "kind": "aggressive", "damage_type": "stab", "bonuses": { "strength": 3 } },
+          { "name": "Slash", "kind": "aggressive", "damage_type": "slash", "sound": 2506, "bonuses": { "strength": 3 } },
+          { "name": "Block", "kind": "defensive", "damage_type": "stab", "bonuses": { "defence": 3 } }
+        ]
+      }
+    },
+    {
+      "id": "arclight", "name": "Arclight", "slot": "weapon", "weight_kg": 1.814,
+      "bonuses": { "attack": { "stab": 10, "slash": 38 }, "defence": { "slash": 3, "crush": 2, "magic": 2 }, "melee_strength": 8 },
+      "notes": " Demonbane: +70% accuracy and damage against Demons. Attack sounds: the hacksword_* set, a guess.",
+      "modifiers": [
+        { "target": "attack_roll", "ratio": { "num": 17, "den": 10 }, "condition": { "target_has": "demon" } },
+        { "target": "max_hit", "ratio": { "num": 17, "den": 10 }, "condition": { "target_has": "demon" } }
+      ],
+      "weapon": {
+        "category": "slash_sword", "attack_speed": 4, "attack_sound": 2500,
+        "stances": [
+          { "name": "Chop", "kind": "accurate", "damage_type": "slash", "bonuses": { "attack": 3 } },
+          { "name": "Slash", "kind": "aggressive", "damage_type": "slash", "bonuses": { "strength": 3 } },
+          { "name": "Lunge", "kind": "controlled", "damage_type": "stab", "sound": 2501, "bonuses": { "attack": 1, "strength": 1, "defence": 1 } },
+          { "name": "Block", "kind": "defensive", "damage_type": "slash", "bonuses": { "defence": 3 } }
+        ]
+      }
+    },
+    {
+      "id": "leaf_bladed_battleaxe", "name": "Leaf-bladed battleaxe", "slot": "weapon", "weight_kg": 2.721,
+      "bonuses": { "attack": { "stab": -2, "slash": 72, "crush": 72 }, "defence": { "ranged": -1 }, "melee_strength": 92 },
+      "notes": " +17.5% damage against Leafy monsters.",
+      "tags": ["leaf_bladed"],
+      "modifiers": [ { "target": "max_hit", "ratio": { "num": 47, "den": 40 }, "condition": { "target_has": "leafy" } } ],
+      "weapon": {
+        "category": "axe", "attack_speed": 5, "attack_sound": 2498,
+        "stances": [
+          { "name": "Chop", "kind": "accurate", "damage_type": "slash", "bonuses": { "attack": 3 } },
+          { "name": "Hack", "kind": "aggressive", "damage_type": "slash", "bonuses": { "strength": 3 } },
+          { "name": "Smash", "kind": "aggressive", "damage_type": "crush", "sound": 2497, "bonuses": { "strength": 3 } },
+          { "name": "Block", "kind": "defensive", "damage_type": "slash", "bonuses": { "defence": 3 } }
+        ]
+      }
+    },
+    {
+      "id": "rune_halberd", "name": "Rune halberd", "slot": "weapon", "weight_kg": 3.175,
+      "bonuses": { "attack": { "stab": 48, "slash": 67, "magic": -4 }, "defence": { "stab": -1, "slash": 4, "crush": 5 }, "melee_strength": 68 },
+      "notes": " Reaches 2 tiles; the only melee weapon that can hit Flying monsters.",
+      "weapon": {
+        "category": "halberd", "attack_speed": 7, "attack_sound": 2533, "attack_range": 2,
+        "stances": [
+          { "name": "Jab", "kind": "controlled", "damage_type": "stab", "bonuses": { "attack": 1, "strength": 1, "defence": 1 } },
+          { "name": "Swipe", "kind": "aggressive", "damage_type": "slash", "bonuses": { "strength": 3 } },
+          { "name": "Fend", "kind": "defensive", "damage_type": "stab", "bonuses": { "defence": 3 } }
+        ]
+      }
+    },
+
+    {
+      "id": "rune_crossbow", "name": "Rune crossbow", "slot": "weapon", "weight_kg": 6.0,
+      "bonuses": { "attack": { "ranged": 90 } },
+      "weapon": {
+        "category": "crossbow", "attack_speed": 6, "attack_sound": 2695, "attack_range": 7, "ammo_family": "bolt",
+        "stances": [
+          { "name": "Accurate", "kind": "accurate", "damage_type": "ranged", "bonuses": { "ranged": 3 } },
+          { "name": "Rapid", "kind": "rapid", "damage_type": "ranged", "speed_delta": -1 },
+          { "name": "Longrange", "kind": "longrange", "damage_type": "ranged", "bonuses": { "defence": 3 }, "range_delta": 2 }
+        ]
+      }
+    },
+    {
+      "id": "twisted_bow", "name": "Twisted bow", "slot": "weapon", "weight_kg": 1.814,
+      "bonuses": { "attack": { "ranged": 70 }, "ranged_strength": 20 },
+      "notes": " Accuracy and damage scale with the target's Magic (cap 250, or 350 against Xerician monsters). Attack sound: longbow (2700), a guess.",
+      "modifiers": [
+        { "target": "attack_roll", "scaling": "twisted_bow_accuracy", "condition": { "style": "ranged" } },
+        { "target": "max_hit", "scaling": "twisted_bow_damage", "condition": { "style": "ranged" } }
+      ],
+      "weapon": {
+        "category": "bow", "attack_speed": 5, "attack_sound": 2700, "attack_range": 10, "ammo_family": "arrow",
+        "stances": [
+          { "name": "Accurate", "kind": "accurate", "damage_type": "ranged", "bonuses": { "ranged": 3 } },
+          { "name": "Rapid", "kind": "rapid", "damage_type": "ranged", "speed_delta": -1 },
+          { "name": "Longrange", "kind": "longrange", "damage_type": "ranged", "bonuses": { "defence": 3 }, "range_delta": 2 }
+        ]
+      }
+    },
+    {
+      "id": "dragon_hunter_crossbow", "name": "Dragon hunter crossbow", "slot": "weapon", "weight_kg": 7.0,
+      "bonuses": { "attack": { "ranged": 95 } },
+      "notes": " +30% accuracy and +25% damage against Draconic monsters.",
+      "modifiers": [
+        { "target": "attack_roll", "ratio": { "num": 13, "den": 10 }, "condition": { "target_has": "draconic" } },
+        { "target": "max_hit", "ratio": { "num": 5, "den": 4 }, "condition": { "target_has": "draconic" } }
+      ],
+      "weapon": {
+        "category": "crossbow", "attack_speed": 5, "attack_sound": 2695, "attack_range": 7, "ammo_family": "bolt",
+        "stances": [
+          { "name": "Accurate", "kind": "accurate", "damage_type": "ranged", "bonuses": { "ranged": 3 } },
+          { "name": "Rapid", "kind": "rapid", "damage_type": "ranged", "speed_delta": -1 },
+          { "name": "Longrange", "kind": "longrange", "damage_type": "ranged", "bonuses": { "defence": 3 }, "range_delta": 2 }
+        ]
+      }
+    },
+    {
+      "id": "rune_bolts", "name": "Rune bolts", "slot": "ammo",
+      "bonuses": { "ranged_strength": 115 },
+      "ammo": { "family": "bolt", "weight": "standard" }
+    },
+    {
+      "id": "dragon_arrow", "name": "Dragon arrow", "slot": "ammo",
+      "bonuses": { "ranged_strength": 60 },
+      "ammo": { "family": "arrow", "weight": "heavy" }
+    },
+    {
+      "id": "magic_shortbow", "name": "Magic shortbow", "slot": "weapon", "weight_kg": 1.36,
+      "bonuses": { "attack": { "ranged": 69 } },
+      "notes": "",
+      "weapon": {
+        "category": "bow", "attack_speed": 4, "attack_sound": 2702, "attack_range": 7, "ammo_family": "arrow",
+        "stances": [
+          { "name": "Accurate", "kind": "accurate", "damage_type": "ranged", "bonuses": { "ranged": 3 } },
+          { "name": "Rapid", "kind": "rapid", "damage_type": "ranged", "speed_delta": -1 },
+          { "name": "Longrange", "kind": "longrange", "damage_type": "ranged", "bonuses": { "defence": 3 }, "range_delta": 2 }
+        ]
+      }
+    },
+    {
+      "id": "toxic_blowpipe", "name": "Toxic blowpipe", "slot": "weapon", "weight_kg": 0.5,
+      "bonuses": { "attack": { "ranged": 30 }, "ranged_strength": 20 },
+      "notes": " Fires darts loaded into it; modelled as using the ammo slot. Attack sound: dart (2696), a guess.",
+      "weapon": {
+        "category": "blowpipe", "attack_speed": 3, "attack_sound": 2696, "attack_range": 5, "ammo_family": "dart",
+        "stances": [
+          { "name": "Accurate", "kind": "accurate", "damage_type": "ranged", "bonuses": { "ranged": 3 } },
+          { "name": "Rapid", "kind": "rapid", "damage_type": "ranged", "speed_delta": -1 },
+          { "name": "Longrange", "kind": "longrange", "damage_type": "ranged", "bonuses": { "defence": 3 }, "range_delta": 2 }
+        ]
+      }
+    },
+    {
+      "id": "dragon_dart", "name": "Dragon dart", "slot": "ammo",
+      "bonuses": { "ranged_strength": 35 },
+      "ammo": { "family": "dart", "weight": "light" }
+    },
+
+    {
+      "id": "trident_of_the_swamp", "name": "Trident of the swamp", "slot": "weapon", "weight_kg": 1.814,
+      "bonuses": { "attack": { "magic": 25 }, "defence": { "stab": 2, "slash": 3, "crush": 1, "magic": 15 } },
+      "notes": " Powered staff: floor(Magic / 3) - 2.",
+      "weapon": {
+        "category": "powered_staff", "attack_speed": 4, "attack_sound": 178, "attack_range": 8,
+        "powered": { "powered_staff": { "divisor": 3, "offset": -2, "gear_bonus_scale": 1 } },
+        "stances": [
+          { "name": "Accurate", "kind": "accurate", "damage_type": "magic", "bonuses": { "magic": 3 } },
+          { "name": "Longrange", "kind": "longrange", "damage_type": "magic", "bonuses": { "magic": 1, "defence": 3 }, "range_delta": 2 }
+        ]
+      }
+    },
+    {
+      "id": "sanguinesti_staff", "name": "Sanguinesti staff", "slot": "weapon", "weight_kg": 1.5,
+      "bonuses": { "attack": { "magic": 25, "ranged": -4 }, "defence": { "stab": 2, "slash": 3, "crush": 1, "magic": 15 } },
+      "notes": " Powered staff: floor(Magic / 3) - 1.",
+      "weapon": {
+        "category": "powered_staff", "attack_speed": 4, "attack_range": 8,
+        "powered": { "powered_staff": { "divisor": 3, "offset": -1, "gear_bonus_scale": 1 } },
+        "stances": [
+          { "name": "Accurate", "kind": "accurate", "damage_type": "magic", "bonuses": { "magic": 3 } },
+          { "name": "Longrange", "kind": "longrange", "damage_type": "magic", "bonuses": { "magic": 1, "defence": 3 }, "range_delta": 2 }
+        ]
+      }
+    },
+    {
+      "id": "tumekens_shadow", "name": "Tumeken's shadow", "slot": "weapon", "weight_kg": 5.0,
+      "bonuses": { "attack": { "magic": 35 }, "defence": { "magic": 20 }, "prayer": 1 },
+      "notes": " Powered staff: floor(Magic / 3) + 1, with the visible gear bonus tripled outside the Tombs of Amascut (capped at +100%).",
+      "weapon": {
+        "category": "powered_staff", "attack_speed": 5, "attack_range": 10,
+        "powered": { "powered_staff": { "divisor": 3, "offset": 1, "gear_bonus_scale": 3 } },
+        "stances": [
+          { "name": "Accurate", "kind": "accurate", "damage_type": "magic", "bonuses": { "magic": 3 } },
+          { "name": "Longrange", "kind": "longrange", "damage_type": "magic", "bonuses": { "magic": 1, "defence": 3 }, "range_delta": 2 }
+        ]
+      }
+    },
+    {
+      "id": "kodai_wand", "name": "Kodai wand", "slot": "weapon", "weight_kg": 0.198,
+      "bonuses": { "attack": { "magic": 28 }, "defence": { "slash": 3, "crush": 3, "magic": 20 }, "magic_damage_permille": 150 },
+      "notes": "Attack sound: wand_crush (2563); spells use their own.",
+      "weapon": {
+        "category": "staff", "attack_speed": 5, "attack_sound": 2563, "attack_range": 10, "can_cast": true,
+        "stances": [
+          { "name": "Bash", "kind": "accurate", "damage_type": "crush", "bonuses": { "attack": 3 } },
+          { "name": "Pound", "kind": "aggressive", "damage_type": "crush", "bonuses": { "strength": 3 } },
+          { "name": "Block", "kind": "defensive", "damage_type": "crush", "bonuses": { "defence": 3 } },
+          { "name": "Spell", "kind": "spell" },
+          { "name": "Defensive spell", "kind": "defensive_spell", "bonuses": { "defence": 3 } }
+        ]
+      }
+    },
+
+    {
+      "id": "bandos_chestplate", "name": "Bandos chestplate", "slot": "body", "weight_kg": 12.0,
+      "bonuses": { "attack": { "magic": -15, "ranged": -10 }, "defence": { "stab": 98, "slash": 93, "crush": 105, "magic": -6, "ranged": 133 }, "melee_strength": 4, "prayer": 1 },
+      "notes": ""
+    },
+    {
+      "id": "amulet_of_torture", "name": "Amulet of torture", "slot": "neck", "weight_kg": 0.01,
+      "bonuses": { "attack": { "stab": 15, "slash": 15, "crush": 15 }, "melee_strength": 10, "prayer": 2 },
+      "notes": ""
+    },
+    {
+      "id": "occult_necklace", "name": "Occult necklace", "slot": "neck", "weight_kg": 0.005,
+      "bonuses": { "attack": { "magic": 12 }, "magic_damage_permille": 50, "prayer": 2 }
+    },
+    {
+      "id": "tormented_bracelet", "name": "Tormented bracelet", "slot": "hands", "weight_kg": 0.25,
+      "bonuses": { "attack": { "magic": 10 }, "magic_damage_permille": 50, "prayer": 2 }
+    },
+    {
+      "id": "fire_cape", "name": "Fire cape", "slot": "cape", "weight_kg": 1.814,
+      "bonuses": { "attack": { "stab": 1, "slash": 1, "crush": 1, "magic": 1, "ranged": 1 }, "defence": { "stab": 11, "slash": 11, "crush": 11, "magic": 11, "ranged": 11 }, "melee_strength": 4, "prayer": 2 },
+      "notes": ""
+    },
+    {
+      "id": "berserker_ring_i", "name": "Berserker ring (i)", "slot": "ring", "weight_kg": 0.004,
+      "bonuses": { "defence": { "crush": 8 }, "melee_strength": 8 },
+      "notes": ""
+    },
+    {
+      "id": "ring_of_endurance", "name": "Ring of endurance", "slot": "ring", "weight_kg": 0.006,
+      "tags": ["ring_of_endurance"]
+    },
+    {
+      "id": "lightbearer", "name": "Lightbearer", "slot": "ring", "weight_kg": 0.05,
+      "tags": ["lightbearer"]
+    },
+    {
+      "id": "regen_bracelet", "name": "Regeneration bracelet", "slot": "hands", "weight_kg": 0.25, "bonuses": { "attack": { "stab": 8, "slash": 8, "crush": 8, "magic": 3, "ranged": 7 }, "defence": { "stab": 6, "slash": 6, "crush": 6, "magic": 3, "ranged": 6 }, "melee_strength": 7 },
+      "tags": ["regen_bracelet"]
+    },
+    {
+      "id": "hitpoints_cape", "name": "Hitpoints cape", "slot": "cape", "weight_kg": 0.453, "bonuses": { "defence": { "stab": 9, "slash": 9, "crush": 9, "magic": 9, "ranged": 9 }, "prayer": 4 },
+      "tags": ["hitpoints_cape"]
+    },
+    {
+      "id": "phoenix_necklace", "name": "Phoenix necklace", "slot": "neck", "weight_kg": 0.01,
+      "tags": ["phoenix_necklace"],
+      "notes": "When HP falls to 20% or less it heals 30% of max HP, clears the whole damage queue, and is used up."
+    },
+    {
+      "id": "slayer_helmet_i", "name": "Slayer helmet (i)", "slot": "head", "bonuses": { "attack": { "magic": 3, "ranged": 3 }, "defence": { "stab": 30, "slash": 32, "crush": 27, "magic": 10, "ranged": 30 } }, "weight_kg": 2.267,
+      "notes": "On a Slayer task: x7/6 accuracy and damage with melee, x1.15 with ranged and magic. Does not stack with a Salve amulet; the Salve wins.",
+      "modifiers": [
+        { "target": "attack_roll", "ratio": { "num": 7, "den": 6 }, "group": "slayer_or_salve", "priority": 1,
+          "condition": { "all": [ { "flag": "on_task" }, { "style": "melee" } ] } },
+        { "target": "max_hit", "ratio": { "num": 7, "den": 6 }, "group": "slayer_or_salve", "priority": 1,
+          "condition": { "all": [ { "flag": "on_task" }, { "style": "melee" } ] } },
+        { "target": "attack_roll", "ratio": { "num": 23, "den": 20 }, "group": "slayer_or_salve", "priority": 1,
+          "condition": { "all": [ { "flag": "on_task" }, { "not": { "style": "melee" } } ] } },
+        { "target": "max_hit", "ratio": { "num": 23, "den": 20 }, "group": "slayer_or_salve", "priority": 1,
+          "condition": { "all": [ { "flag": "on_task" }, { "not": { "style": "melee" } } ] } }
+      ]
+    },
+    {
+      "id": "salve_amulet_ei", "name": "Salve amulet (ei)", "slot": "neck", "weight_kg": 0.007,
+      "bonuses": { "defence": { "stab": 3, "slash": 3, "crush": 3 }, "prayer": 3 },
+      "notes": "x1.2 accuracy and damage against Undead with every style.",
+      "modifiers": [
+        { "target": "attack_roll", "ratio": { "num": 6, "den": 5 }, "group": "slayer_or_salve", "priority": 2,
+          "condition": { "target_has": "undead" } },
+        { "target": "max_hit", "ratio": { "num": 6, "den": 5 }, "group": "slayer_or_salve", "priority": 2,
+          "condition": { "target_has": "undead" } }
+      ]
+    },
+    {
+      "id": "salve_amulet_e", "name": "Salve amulet (e)", "slot": "neck", "weight_kg": 0.007,
+      "bonuses": { "defence": { "stab": 3, "slash": 3, "crush": 3 }, "prayer": 3 },
+      "notes": "x1.2 accuracy and damage against Undead, melee only.",
+      "modifiers": [
+        { "target": "attack_roll", "ratio": { "num": 6, "den": 5 }, "group": "slayer_or_salve", "priority": 2,
+          "condition": { "all": [ { "target_has": "undead" }, { "style": "melee" } ] } },
+        { "target": "max_hit", "ratio": { "num": 6, "den": 5 }, "group": "slayer_or_salve", "priority": 2,
+          "condition": { "all": [ { "target_has": "undead" }, { "style": "melee" } ] } }
+      ]
+    },
+
+    { "id": "void_knight_top", "name": "Void knight top", "slot": "body", "weight_kg": 6.803, "bonuses": { "defence": { "stab": 45, "slash": 45, "crush": 45, "magic": 45, "ranged": 45 } } },
+    { "id": "void_knight_robe", "name": "Void knight robe", "slot": "legs", "weight_kg": 8.164, "bonuses": { "defence": { "stab": 30, "slash": 30, "crush": 30, "magic": 30, "ranged": 30 } } },
+    { "id": "void_knight_gloves", "name": "Void knight gloves", "slot": "hands", "weight_kg": 0.453, "bonuses": { "defence": { "stab": 6, "slash": 6, "crush": 6, "magic": 4, "ranged": 6 } } },
+    { "id": "elite_void_top", "name": "Elite void top", "slot": "body", "weight_kg": 6.803, "bonuses": { "defence": { "stab": 45, "slash": 45, "crush": 45, "magic": 45, "ranged": 45 }, "prayer": 3 } },
+    { "id": "elite_void_robe", "name": "Elite void robe", "slot": "legs", "weight_kg": 8.164, "bonuses": { "defence": { "stab": 30, "slash": 30, "crush": 30, "magic": 30, "ranged": 30 }, "prayer": 3 } },
+    { "id": "void_melee_helm", "name": "Void melee helm", "slot": "head", "weight_kg": 0.453, "bonuses": { "defence": { "stab": 6, "slash": 6, "crush": 6, "magic": 6, "ranged": 6 } } },
+    { "id": "void_ranger_helm", "name": "Void ranger helm", "slot": "head", "weight_kg": 0.453, "bonuses": { "defence": { "stab": 6, "slash": 6, "crush": 6, "magic": 6, "ranged": 6 } } },
+    { "id": "void_mage_helm", "name": "Void mage helm", "slot": "head", "weight_kg": 0.453, "bonuses": { "defence": { "stab": 6, "slash": 6, "crush": 6, "magic": 6, "ranged": 6 } } }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Trident vs TzTok-Jad",
+  "seed": 3,
+  "half_extent": 15,
+  "player": {
+    "levels": { "defence": 70, "magic": 94, "prayer": 77, "hitpoints": 90, "agility": 80 },
+    "equipment": ["trident_of_the_swamp", "occult_necklace", "tormented_bracelet"],
+    "prayers": ["protect_from_magic", "augury"],
+    "start": [0, 0],
+    "attack": 0
+  },
+  "npcs": [ { "npc": "tztok_jad", "at": [6, 0], "hostile": true } ],
+  "notes": "Jad's weighted rotation hits for up to 97; the right overhead prayer blocks it."
+}

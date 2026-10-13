@@ -1,0 +1,9 @@
+- [Bidirectional interactions](project_bidirectional_interactions.md) — player-attacks-NPC now built (ICombatTarget+PlayerMover.SetAttackTarget), mirroring NPC-attacks-player; no shared queue abstraction needed yet.
+- [TargetSpec non-square NPCs](project_targetspec_non_square_npcs.md) — deliberately kept Width/Height independent for NPCs too, diverging from OSRS's square-only NPC size; don't "fix" this later.
+- [Boss mechanics taxonomy](project_boss_mechanics_taxonomy.md) — 20-category OSRS boss mechanic taxonomy driving the combat/encounter data model beyond Jad's shape; sets build-order priorities.
+- [Scope: moment-to-moment only](project_scope_moment_to_moment_only.md) — nothing persists between fights; no run/session wrapper, banked rewards, or cross-fight progression needed.
+- [OSRS damage-calc research](project_osrs_damage_calc_research.md) — damage formulas, pierce vs ignore, 3 attack-timing archetypes, and the real damage buffer/queue (Phoenix necklace clears it, doesn't just cap one hit); PendingAttackQueue ownership fix.
+- [NPC chase movement](project_npc_chase_movement.md) — NPCs greedy-step toward target's SW tile (no BFS route search); corner traps are real OSRS safespot behavior, not a bug.
+- [Launched-attack state ownership](feedback_attack_lifecycle_ownership.md) — once an attack launches, its in-flight state belongs to the target/encounter, never the attacker's own component.
+- [Elysian gorilla encounter](project_elysian_gorilla_encounter.md) — New World-sourced OSRS boss trio (Igniscia/Aguascia/Aeriscia), their style pairings, and the Stage 5/6 scoping decisions driving it.
+- [OSRS combat reference doc](reference_osrs_combat_reference_doc.md) — OSRS_COMBAT_REFERENCE.md (repo root) has wiki-sourced tick/stat/formula tables for Open Question #3; read before any fidelity work.

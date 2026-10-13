@@ -1,0 +1,15 @@
+{
+  "name": "Whip vs zombie",
+  "seed": 1,
+  "half_extent": 15,
+  "player": {
+    "levels": { "attack": 80, "strength": 80, "defence": 70, "prayer": 52, "hitpoints": 80, "agility": 60 },
+    "equipment": ["abyssal_whip", "salve_amulet_ei", "fire_cape"],
+    "prayers": ["superhuman_strength", "improved_reflexes"],
+    "consumables": ["super_strength_4"],
+    "stance": 1,
+    "attack": 0
+  },
+  "npcs": [ { "npc": "zombie", "at": [1, 0] } ],
+  "notes": "A mid-level melee setup with a Salve amulet against the Undead tag."
+}

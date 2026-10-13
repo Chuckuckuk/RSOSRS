@@ -1,0 +1,31 @@
+{
+  "name": "TzTok-Jad in the Fight Cave",
+  "seed": 63,
+  "half_extent": 20,
+  "location": [2400, 5080],
+  "player": {
+    "levels": { "attack": 75, "strength": 80, "defence": 75, "ranged": 90, "magic": 80, "prayer": 70, "hitpoints": 85, "agility": 70 },
+    "equipment": [
+      "armadyl_helmet", "avas_assembler", "necklace_of_anguish", "rune_bolts", "rune_crossbow",
+      "armadyl_chestplate", "twisted_buckler", "armadyl_chainskirt", "barrows_gloves", "pegasian_boots", "archers_ring_i"
+    ],
+    "prayers": ["protect_from_magic"],
+    "inventory": [
+      { "item": "ranging_potion_4" },
+      { "item": "prayer_potion_4" },
+      { "item": "prayer_potion_4" },
+      { "item": "prayer_potion_4" },
+      { "item": "prayer_potion_4" },
+      { "item": "super_restore_4" },
+      { "item": "super_restore_4" },
+      { "item": "saradomin_brew_4" },
+      { "item": "saradomin_brew_4" },
+      { "item": "shark", "quantity": 6 },
+      { "item": "cooked_karambwan", "quantity": 4 }
+    ],
+    "start": [0, 0],
+    "attack": 0
+  },
+  "npcs": [ { "npc": "tztok_jad", "at": [-2, 8], "hostile": true } ],
+  "notes": "Wave 63 alone: Jad starts 8 tiles north of the player and attacks at once. Watch his wind-up: the stomp is ranged, rearing up is magic; he never walks toward you and only uses melee when you stand next to him. Played on the real Fight Cave map with `cargo run -p osrs_core --release -- --scenario jad`; headless runs use a flat floor."
+}
