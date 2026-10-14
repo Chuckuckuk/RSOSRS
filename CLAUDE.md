@@ -83,6 +83,7 @@ Every issue gets:
 | `area: cache` | area | Cache decoding (`osrs_cache`) |
 | `area: data` | area | JSON game data (`osrs_core/data`) |
 | `skilling` | topic | Skills, XP, tools, resources, skilling pets |
+| `combat` | topic | Combat rules: attacks, reactions, prayers, boss and NPC encounters |
 | `scenery` | topic | World objects: trees, doors, stumps, object interactions |
 | `interface` | topic | In-game UI: tabs, chatbox, overlays, click feedback |
 | `audio` | topic | Sound effects and music |

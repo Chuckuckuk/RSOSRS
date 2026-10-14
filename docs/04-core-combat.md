@@ -286,8 +286,12 @@ An attack's `reaction` says what the player must do:
 |---|---|
 | `None` | 1 |
 | `PrayerMatch` | `prayer_penetration` if the player's active protection prayer equals `required_prayer`, else 1 |
-| `MoveToTile` | 0 if the player is at least `move_away_distance` (Chebyshev) from the hazard's origin tile, else 1. The origin is the attacker's or target's tile **at selection time** (`HazardAnchor`). |
-| `Interrupt` | 1 (not implemented yet) |
+| `DisablePrayer` | `prayer_penetration` if no protection prayer is active, else 1 (Maggot King's screech) |
+| `MoveOffTile` | 0 if the player is not on the hazard's origin tile, else 1. The origin is the attacker's or target's tile **at selection time** (`HazardAnchor`). |
+| `StandOnTile` | The inverse: 0 only while standing on the anchor tile (Mad Angel's blast bounce, Moons sigil) |
+| `MoveOutsideArea` | 0 if more than `radius` tiles (Chebyshev) from the anchor, else 1 (a 3x3 burst is radius 1) |
+| `DistanceFalloff` | `rings_percent[distance] / 100`, clamped to the last ring (Yama's meteor, Araxxor's ruptura) |
+| `Interrupt`, `BehindCover`, `AvoidSide`, `Objective` | 1 (recognised, not resolved yet: they need line of sight, attacker facing, or a deadline tracker) |
 
 [`get_damage_multiplier`](../osrs_core/src/combat/reaction_resolver.rs) reads the player's
 `PlayerReactionState` (active protection prayer and current fighting style) **at the moment of the

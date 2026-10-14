@@ -52,6 +52,31 @@ pub fn get_damage_multiplier(
             }
         },
         ReactionKind::Interrupt => 1.0, // placeholder logic: interruptable attacks should never resolve if the interrupt condition is met. For now, just always resolve damage.
+        ReactionKind::StandOnTile(anchor) => {
+            let hazard_tile = match anchor {
+                HazardAnchor::SelfTile => hazard_origin_tile,
+                HazardAnchor::Target => target_tile,
+            };
+            if target_tile.chebyshev_distance_to(hazard_tile) == 0 { 0.0 } else { 1.0 }
+        },
+        ReactionKind::MoveOutsideArea { anchor, radius } => {
+            let hazard_tile = match anchor {
+                HazardAnchor::SelfTile => hazard_origin_tile,
+                HazardAnchor::Target => target_tile,
+            };
+            if target_tile.chebyshev_distance_to(hazard_tile) > radius { 0.0 } else { 1.0 }
+        },
+        ReactionKind::DistanceFalloff { anchor, rings_percent } => {
+            let hazard_tile = match anchor {
+                HazardAnchor::SelfTile => hazard_origin_tile,
+                HazardAnchor::Target => target_tile,
+            };
+            let ring = (target_tile.chebyshev_distance_to(hazard_tile).max(0) as usize).min(rings_percent.len() - 1);
+            rings_percent[ring] as f32 / 100.0
+        },
+        // Placeholder logic, same stance as Interrupt: these need a line-of-sight query, the
+        // attacker's facing, or a deadline tracker that this resolver is not handed yet.
+        ReactionKind::BehindCover | ReactionKind::AvoidSide(_) | ReactionKind::Objective { .. } => 1.0,
         ReactionKind::None => 1.0 // full damage, always; Fragment of Seren's max health nuke, for example, has fixed health-based damage with no mitigation method
     }
 }
@@ -126,4 +151,46 @@ mod tests {
         assert_eq!(multiplier(&attack, Some(&state(ProtectionPrayer::Magic))), 1.0);
     }
 
+    fn at_distance(attack: &AttackDefinition, distance: i32) -> f32 {
+        get_damage_multiplier(attack, None, TileCoord::new(0, 0), TileCoord::new(distance, 0))
+    }
+
+    #[test]
+    fn stand_on_tile_is_safe_only_on_the_anchor() {
+        // Mad Angel's blast: standing on the landing tile bounces it back.
+        let attack = make_attack(ReactionRequirement::stand_on_tile(HazardAnchor::SelfTile), 0.0);
+
+        assert_eq!(at_distance(&attack, 0), 0.0);
+        assert_eq!(at_distance(&attack, 1), 1.0);
+    }
+
+    #[test]
+    fn move_outside_area_is_safe_beyond_the_radius() {
+        // A 3x3 icicle burst is radius 1: the diagonal neighbour is hit, two tiles away is not.
+        let attack = make_attack(ReactionRequirement::move_outside_area(HazardAnchor::SelfTile, 1), 0.0);
+
+        assert_eq!(at_distance(&attack, 1), 1.0);
+        assert_eq!(at_distance(&attack, 2), 0.0);
+    }
+
+    #[test]
+    fn distance_falloff_scales_by_ring_and_clamps_past_the_last() {
+        // Yama's meteor: full at the centre, half one tile out, nothing from two tiles on.
+        let attack = make_attack(
+            ReactionRequirement::distance_falloff(HazardAnchor::SelfTile, [100, 50, 0, 0]),
+            0.0,
+        );
+
+        assert_eq!(at_distance(&attack, 0), 1.0);
+        assert_eq!(at_distance(&attack, 1), 0.5);
+        assert_eq!(at_distance(&attack, 2), 0.0);
+        assert_eq!(at_distance(&attack, 9), 0.0);
+    }
+
+    #[test]
+    fn unresolved_kinds_deal_full_damage_for_now() {
+        let attack = make_attack(ReactionRequirement::behind_cover(), 0.0);
+
+        assert_eq!(at_distance(&attack, 0), 1.0);
+    }
 }

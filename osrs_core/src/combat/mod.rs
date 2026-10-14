@@ -50,7 +50,7 @@ pub use player_reaction_state::PlayerReactionState;
 pub use prayer_pool::PrayerPool;
 pub use protection_prayer::ProtectionPrayer;
 pub use range_aware_pattern::{RangeAwarePattern, RotationMode};
-pub use reaction_requirement::{HazardAnchor, ReactionKind, ReactionRequirement};
+pub use reaction_requirement::{HazardAnchor, ObjectiveKind, ReactionKind, ReactionRequirement, RelativeSide};
 pub use reaction_resolver::get_damage_multiplier;
 pub use status_effect::{StatusEffectDefinition, StatusEffectKind};
 pub use status_effect_tracker::StatusEffectTracker;

@@ -12,7 +12,7 @@ use crate::actors::{ActorKind, EntityId, MovementPolicy, StationaryMovementPolic
 use crate::collision::{CollisionFlag, CollisionMap};
 use crate::data::{EquipSlot, Registry};
 use crate::combat::{
-    AttackDefinition, AttackStyle, CombatState, CombatStats, HazardAnchor, HomingPulseOrb, NpcCombatState, ReactionKind, get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor,
+    AttackDefinition, AttackStyle, CombatState, CombatStats, HazardAnchor, HomingPulseOrb, NpcCombatState, get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor,
 };
 use crate::encounters::{EncounterContext, Phase, TriggerAction, TriggerBinding};
 use crate::model::{ConditionContext, Skill};
@@ -1074,14 +1074,9 @@ impl World {
         // Reaction.Anchor picks which tile CAPTURED AT TELEGRAPH START this attack's hazard is
         // centered on - never a live tile, or moving away during the telegraph would never
         // actually dodge a target-anchored hazard.
-        let hazard_origin = match attack.reaction.kind {
-            ReactionKind::MoveOffTile(anchor) => {
-                match anchor {
-                    HazardAnchor::Target => state.combat_state.target_tile_at_selection(),
-                    HazardAnchor::SelfTile => state.combat_state.self_tile_at_selection(),
-                }
-            }
-            _ => state.combat_state.self_tile_at_selection(),
+        let hazard_origin = match attack.reaction.kind.anchor() {
+            Some(HazardAnchor::Target) => state.combat_state.target_tile_at_selection(),
+            Some(HazardAnchor::SelfTile) | None => state.combat_state.self_tile_at_selection(),
         };
         let stats = actor.stats();
 
@@ -1233,14 +1228,9 @@ impl World {
             return;
         }
 
-        let hazard_origin = match attack.reaction.kind {
-            ReactionKind::MoveOffTile(anchor) => {
-                match anchor {
-                    HazardAnchor::Target => combat_state.target_tile_at_selection(),
-                    HazardAnchor::SelfTile => combat_state.self_tile_at_selection(),
-                }
-            }
-            _ => combat_state.self_tile_at_selection(),
+        let hazard_origin = match attack.reaction.kind.anchor() {
+            Some(HazardAnchor::Target) => combat_state.target_tile_at_selection(),
+            Some(HazardAnchor::SelfTile) | None => combat_state.self_tile_at_selection(),
         };
         let stats = actor.stats();
 
