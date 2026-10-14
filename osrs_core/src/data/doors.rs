@@ -21,7 +21,7 @@ pub struct LeafMove {
 }
 
 /// How a door's leaves swing open. Leaves are taken in order along the wall: in the west-edge
-/// frame, the first is the southern one.
+/// frame, the first is the southern one. Each leaf of a pair opens and closes on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DoorSwing {
@@ -30,18 +30,13 @@ pub enum DoorSwing {
     Single,
     /// Two leaves hinged at their outer ends, swinging out away from each other.
     Double,
-    /// A two-leaf gate. Each leaf swings like a double door's, but only the one chosen moves.
+    /// A two-leaf gate, swinging like a double door.
     Gate,
 }
 
 impl DoorSwing {
     pub fn leaf_count(self) -> usize {
         self.moves().len()
-    }
-
-    /// Whether opening or closing one leaf moves them all. A gate's leaves move one at a time.
-    pub fn leaves_move_together(self) -> bool {
-        self != DoorSwing::Gate
     }
 
     /// How each leaf moves as it opens, in order along the wall.
