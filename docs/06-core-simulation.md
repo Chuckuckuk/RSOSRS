@@ -523,6 +523,43 @@ The success chance is `rules::success_numerator(low, high, level)` over 256 (the
 success formula). Draws come from the player's own `skilling_rng`, never the encounter's, so
 gathering cannot change a fight's rolls.
 
+### Ground items: [`sim/ground_items.rs`](../osrs_core/src/sim/ground_items.rs)
+
+`GroundItems` holds stacks (`uid`, item, quantity, tile) that despawn after `DESPAWN_TICKS` (300:
+the game's 1 minute private + 2 public; there is one player, so no owner). "Drop" puts the stack
+on the player's tile, a burnt-out fire leaves ashes, a stackable stack merges with the one on its
+tile. `GroundItemOption { uid, option: "Take" }` is `PlayerAction::Take`: walk onto the tile,
+then pick up (a full inventory says "You don't have enough inventory space to hold that item.").
+The snapshot lists every stack as `ground_items`.
+
+### Firemaking: [`sim/firemaking.rs`](../osrs_core/src/sim/firemaking.rs)
+
+`UseItemOnItem { used, target }` with a tinderbox and a log (either way round) checks the level
+(`data/firemaking.json`: `LogDef { item, level, xp_tenths, burn_ticks, bonfire_ticks }`), **drops the log on the
+player's tile** and starts a `PlayerAction::Light` on that stack. `UseItemOnGroundItem` and the log's
+"Light" ground option (`GroundItemOption`) do the same for a log already lying somewhere, walking
+onto it first. The first attempt comes 3 ticks after the starting tick and then one every 4 on
+the skill clock; the chance is `success_numerator(64, 512, level)` (65/256 at level 1, 100% from
+43). A success removes the stack, grants the XP, spawns a fire (`SceneryState::spawn`, object
+26185, lasting the log's `burn_ticks`) on the player's tile and steps the player west, else east,
+south, north; the fire leaves ashes when it goes out. Walking away leaves the log lying there.
+Spawned objects are in the snapshot's `spawned` list; a fire stops lighting on its own tile. Not
+modelled yet: bow firemaking, coloured logs, other tiles that refuse a fire, permanent fires
+becoming bonfires.
+
+**Bonfires (Forester's campfires, object 49927).** `UseItemOnObject { slot, id, tile }` with a log
+on a spawned fire (or bonfire) starts a `PlayerAction::Tend`; a bonfire's "Tend-to" does the same
+with whichever log the inventory has first (`player_interact_object` looks at spawned objects
+before the map's). The player walks to within 1 tile (diagonals count), adds a log after 1 tick
+and then every 9, for the log's full XP. The fire it was is replaced by a bonfire lasting 99 +
+`bonfire_ticks` (= the wiki's duration column); each further log adds `bonfire_ticks`, and a log
+that would take it past 300 is not added. Starting one needs a tinderbox and no bonfire within
+5 tiles (Chebyshev); tending needs none. "Check" says one of five messages by `(left + 1) / 60`.
+A burnt-out bonfire leaves ashes. "Rest" is not modelled (it answers "Nothing interesting
+happens."), the tend animation reuses the lighting one (733), and the "out of logs" message is
+invented. Client: a picked inventory item clicked on a fire sends `UseItemOnObject`
+(`ground_click::use_target`).
+
 ### Scenery: [`sim/scenery.rs`](../osrs_core/src/sim/scenery.rs)
 
 * `SceneryIndex`: which object (`Loc { id, tile, kind, orientation, size }`) covers which tile.

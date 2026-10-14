@@ -34,6 +34,11 @@ use crate::tiles::TileCoord;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayerAction {
     Gather(GatherAction),
+    Light(super::firemaking::LightAction),
+    /// Adding logs to a fire (making it a bonfire, or feeding one).
+    Tend(super::firemaking::TendAction),
+    /// Walking onto a ground item to pick it up (by its uid).
+    Take { uid: u32 },
 }
 
 /// Gathering from one placed resource.
@@ -109,6 +114,10 @@ impl World {
     /// Choosing `action` on the scenery object `id` that covers `tile`. Today only gathering
     /// options do anything; anything else is answered "Nothing interesting happens."
     pub fn player_interact_object(&mut self, id: u32, tile: TileCoord, action: &str) -> Result<(), String> {
+        // a fire a player made is not on the map: the bonfire's own options
+        if let Some(fire) = self.scenery_state.spawned_at(tile).filter(|fire| fire.loc.id == id) {
+            return self.player_interact_fire(fire.loc, action);
+        }
         let found = self.scenery.at(tile).iter().copied().find(|loc| self.scenery_state.current_id(loc) == id);
         let Some(loc) = found else {
             return Err("Nothing interesting happens.".to_owned());
@@ -138,7 +147,13 @@ impl World {
     /// The player's current action for this tick. Returns whether it used the tick (so a queued
     /// walk does not also run).
     pub(super) fn player_run_action(&mut self) -> bool {
-        let Some(PlayerAction::Gather(mut gather)) = self.player.action.clone() else { return false };
+        let mut gather = match self.player.action.clone() {
+            Some(PlayerAction::Gather(gather)) => gather,
+            Some(PlayerAction::Light(light)) => return self.run_light_action(light),
+            Some(PlayerAction::Tend(tend)) => return self.run_tend_action(tend),
+            Some(PlayerAction::Take { uid }) => return self.run_take_action(uid),
+            None => return false,
+        };
         let registry = Rc::clone(self.registry());
         let Some(node) = registry.gathering_node(&gather.node) else {
             self.player.action = None;
@@ -251,21 +266,33 @@ impl World {
     pub fn player_facing_loc(&self) -> Option<Loc> {
         match &self.player.action {
             Some(PlayerAction::Gather(gather)) => Some(gather.loc),
-            None => None,
+            Some(PlayerAction::Tend(tend)) => self.scenery_state.spawned_at(tend.tile).map(|fire| fire.loc),
+            Some(PlayerAction::Light(_)) | Some(PlayerAction::Take { .. }) | None => None,
         }
     }
 
     /// The sequence the player loops for its current action, while it is at it: the animation of
     /// the tool it gathers with.
     pub fn player_action_animation(&self) -> Option<u32> {
-        let Some(PlayerAction::Gather(gather)) = &self.player.action else { return None };
+        let gather = match &self.player.action {
+            Some(PlayerAction::Gather(gather)) => gather,
+            Some(PlayerAction::Light(light)) => return light.started.then_some(super::firemaking::LIGHTING_ANIMATION),
+            Some(PlayerAction::Tend(tend)) => return tend.started.then_some(super::firemaking::TENDING_ANIMATION),
+            Some(PlayerAction::Take { .. }) | None => return None,
+        };
         let node = self.registry().gathering_node(&gather.node).filter(|_| gather.started)?;
         best_tool(&self.player, self.registry(), node)?.0.animation
     }
 
-    /// Puts back the scenery objects whose time is up, at the end of a tick.
+    /// Puts back the scenery objects whose time is up, at the end of a tick, and runs the ground
+    /// items' despawn clocks. A fire that burns out leaves ashes.
     pub(super) fn advance_scenery(&mut self) {
-        self.scenery_state.advance();
+        for fire in self.scenery_state.advance() {
+            if fire.id == super::firemaking::FIRE_LOC || fire.id == super::firemaking::BONFIRE_LOC {
+                self.drop_ground_item(super::firemaking::ASHES, 1, fire.tile);
+            }
+        }
+        self.ground_items.advance();
     }
 }
 

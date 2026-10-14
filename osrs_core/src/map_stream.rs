@@ -167,8 +167,15 @@ pub fn stream_map(
                 eprintln!("[client] could not load map square ({}, {}): {why}", square.0, square.1);
             }
             // a replacement object's mesh (see `scenery_swaps`)
-            Loaded::Object { id, kind, orientation, mesh } => {
+            Loaded::Object { id, kind, orientation, mesh, clip } => {
+                if let Some(clip) = clip {
+                    swaps.clips.insert((id, kind, orientation), clip);
+                }
                 swaps.ready.insert((id, kind, orientation), mesh);
+            }
+            // a ground item's mesh (see `ground_scene`)
+            Loaded::Item { id, mesh } => {
+                swaps.items.insert(id, mesh);
             }
         }
     }

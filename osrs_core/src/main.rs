@@ -43,6 +43,7 @@ mod overheads;
 mod player_look;
 mod projectiles;
 mod route;
+mod ground_scene;
 mod scenery_swaps;
 mod sound_fx;
 mod tile_marks;
@@ -404,6 +405,9 @@ fn main() {
                     ("prayer_potion_4", 2),
                     ("bronze_arrow", 150),
                     ("bronze_axe", 1),
+                    ("tinderbox", 1),
+                    ("logs", 4),
+                    ("oak_logs", 1),
                 ] {
                     if let Err(e) = world.give_item(item, quantity) {
                         eprintln!("[server] starter kit: {e}");
@@ -472,7 +476,7 @@ fn main() {
     .add_systems(Startup, setup)
     .add_systems(
         Update,
-        (scripted_input, poll_server, start_scenario, sync_player, npcs::sync_npcs, map_stream::stream_map, scenery_swaps::show_scenery_changes, limit_planes, orbit_camera, toggle_grid, screenshot_and_exit)
+        (scripted_input, poll_server, start_scenario, sync_player, npcs::sync_npcs, map_stream::stream_map, scenery_swaps::show_scenery_changes, ground_scene::show_ground_things, limit_planes, orbit_camera, toggle_grid, screenshot_and_exit)
             .chain(),
     );
     app.world_mut().insert_non_send(ServerLink { link, latest: None, ticks_in_latest: 1, new_events: Vec::new() });

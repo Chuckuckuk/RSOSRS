@@ -2,6 +2,17 @@
   "items": [
     { "id": "vial", "name": "Vial", "weight_kg": 0.004, "notes": "Left when the last dose of a potion is drunk. No slot: carried, never worn." },
     { "id": "logs", "name": "Logs", "weight_kg": 2.0, "notes": "Cache item 1511. Cut from regular trees (data/gathering.json). No slot: carried, never worn." },
+    { "id": "tinderbox", "name": "Tinderbox", "weight_kg": 0.0, "notes": "Cache item 590. Lights logs (data/firemaking.json). No slot: carried, never worn." },
+    { "id": "oak_logs", "name": "Oak logs", "weight_kg": 2.0, "notes": "Cache item 1521. Burnt with a tinderbox (data/firemaking.json). No slot: carried, never worn." },
+    { "id": "willow_logs", "name": "Willow logs", "weight_kg": 2.0, "notes": "Cache item 1519. Burnt with a tinderbox (data/firemaking.json). No slot: carried, never worn." },
+    { "id": "teak_logs", "name": "Teak logs", "weight_kg": 2.0, "notes": "Cache item 6333. Burnt with a tinderbox (data/firemaking.json). No slot: carried, never worn." },
+    { "id": "arctic_pine_logs", "name": "Arctic pine logs", "weight_kg": 2.0, "notes": "Cache item 10810. Burnt with a tinderbox (data/firemaking.json). No slot: carried, never worn." },
+    { "id": "maple_logs", "name": "Maple logs", "weight_kg": 2.0, "notes": "Cache item 1517. Burnt with a tinderbox (data/firemaking.json). No slot: carried, never worn." },
+    { "id": "mahogany_logs", "name": "Mahogany logs", "weight_kg": 2.0, "notes": "Cache item 6332. Burnt with a tinderbox (data/firemaking.json). No slot: carried, never worn." },
+    { "id": "yew_logs", "name": "Yew logs", "weight_kg": 2.0, "notes": "Cache item 1515. Burnt with a tinderbox (data/firemaking.json). No slot: carried, never worn." },
+    { "id": "magic_logs", "name": "Magic logs", "weight_kg": 2.0, "notes": "Cache item 1513. Burnt with a tinderbox (data/firemaking.json). No slot: carried, never worn." },
+    { "id": "redwood_logs", "name": "Redwood logs", "weight_kg": 2.0, "notes": "Cache item 19669. Burnt with a tinderbox (data/firemaking.json). No slot: carried, never worn." },
+    { "id": "ashes", "name": "Ashes", "weight_kg": 0.0, "notes": "Cache item 592. What a burnt-out fire leaves on its tile. No slot: carried, never worn." },
     { "id": "beaver", "name": "Beaver", "notes": "Cache item 13322. The Woodcutting pet (data/gathering.json). Followers are not modelled yet, so it is only ever an item." },
     {
       "id": "abyssal_whip", "name": "Abyssal whip", "slot": "weapon", "weight_kg": 0.453,

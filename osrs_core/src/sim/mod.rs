@@ -10,7 +10,9 @@ mod entity;
 mod events;
 mod inventory;
 mod examine;
+mod firemaking;
 mod gathering;
+mod ground_items;
 mod loadout;
 mod npc_factory;
 mod player;
@@ -28,8 +30,10 @@ pub use animations::{draw_graphic, player_animations, projectile_graphic, Player
 pub use config::{BossConfig, CombatLevels, HealerConfig, NpcConfig, PassiveConfig, PlayerConfig};
 pub use events::{Combatant, WorldEvent};
 pub use examine::ExamineTexts;
+pub use firemaking::LightAction;
 pub use gathering::{GatherAction, PlayerAction};
-pub use scenery::{Loc, LocChange, LocKey, SceneryIndex};
+pub use ground_items::{GroundItem, GroundItems, DESPAWN_TICKS};
+pub use scenery::{Loc, LocChange, LocKey, SceneryIndex, SpawnedLoc};
 pub use inventory::{Inventory, ItemStack, INVENTORY_SIZE};
 pub use entity::{Behavior, BossState, Entity, HealerState, NpcState};
 pub use loadout::Loadout;
@@ -38,7 +42,7 @@ pub use player::Player;
 pub use player_runtime::{AttackPlan, Dps, UNARMED_SPEED_FALLBACK};
 pub use skills::Skills;
 pub use server::{
-    spawn_server, ClientCommand, EntitySnapshot, ItemView, PlayerId, PlayerSnapshot, Server, ServerHandle, SkillSnapshot, Snapshot,
+    spawn_server, ClientCommand, EntitySnapshot, GroundItemView, ItemView, PlayerId, PlayerSnapshot, Server, ServerHandle, SkillSnapshot, Snapshot,
 };
 pub use tick_driver::TickDriver;
 pub use world::{SpawnBlueprint, World, ENCOUNTER_CLOCK_ID, PLAYER_ID};

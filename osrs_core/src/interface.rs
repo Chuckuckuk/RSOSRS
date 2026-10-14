@@ -90,6 +90,11 @@ pub const PRAYER_BOOK: [BookPrayer; 29] = [
 #[derive(Resource)]
 pub struct PrayerLevels(pub Vec<Option<i32>>);
 
+/// The inventory slot the player has picked with "Use": the next item clicked (in the inventory or
+/// on the ground) is what it is used on.
+#[derive(Resource, Default)]
+pub struct UseSelection(pub Option<usize>);
+
 impl Default for PrayerLevels {
     fn default() -> Self {
         let registry = osrs_core::data::Registry::builtin();
@@ -380,6 +385,7 @@ pub struct InterfacePlugin;
 impl Plugin for InterfacePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Interface>()
+            .init_resource::<UseSelection>()
             .init_resource::<PrayerLevels>()
             .init_resource::<UiHits>()
             .add_systems(Startup, build_interface)
@@ -544,6 +550,7 @@ fn refresh(
     interface: Res<Interface>,
     chat: Res<ChatLog>,
     levels: Res<PrayerLevels>,
+    use_selection: Res<UseSelection>,
     icons: Option<NonSend<ItemIcons>>,
     ui: Option<NonSendMut<ClientUi>>,
     mut hits: ResMut<UiHits>,
@@ -598,6 +605,7 @@ fn refresh(
         layout: interface.layout,
         selected: interface.selected,
         open: interface.open,
+        use_selected: use_selection.0,
         map,
     };
     use std::hash::{Hash, Hasher};

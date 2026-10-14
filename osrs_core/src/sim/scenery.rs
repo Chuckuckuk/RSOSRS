@@ -84,6 +84,15 @@ pub struct LocChange {
     pub ticks_left: i32,
 }
 
+/// An object that was not on the map but a player made (a fire), until it burns out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpawnedLoc {
+    pub loc: Loc,
+    /// How many more ends of a tick it stays: it is gone at the end of the tick on which this
+    /// reaches 0.
+    pub ticks_left: i32,
+}
+
 /// A despawn timer (see `DepletionDef::Timer`): how many ticks of gathering it has left, and
 /// whether anyone gathered from it this tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,6 +108,7 @@ struct DespawnTimer {
 pub struct SceneryState {
     changes: BTreeMap<LocKey, LocChange>,
     timers: BTreeMap<LocKey, DespawnTimer>,
+    spawned: BTreeMap<LocKey, SpawnedLoc>,
 }
 
 impl SceneryState {
@@ -110,6 +120,31 @@ impl SceneryState {
     pub fn replace(&mut self, loc: Loc, replacement: u32, ticks: i32) {
         self.timers.remove(&loc.key());
         self.changes.insert(loc.key(), LocChange { loc, replacement, ticks_left: ticks });
+    }
+
+    /// Puts a made object (a fire) on the map for `ticks` ticks.
+    pub fn spawn(&mut self, loc: Loc, ticks: i32) {
+        self.spawned.insert(loc.key(), SpawnedLoc { loc, ticks_left: ticks });
+    }
+
+    /// Every made object currently standing, in a fixed order.
+    pub fn spawned(&self) -> impl Iterator<Item = &SpawnedLoc> {
+        self.spawned.values()
+    }
+
+    /// The made object standing on `tile`, if any.
+    pub fn spawned_at(&self, tile: TileCoord) -> Option<SpawnedLoc> {
+        self.spawned.values().find(|spawned| spawned.loc.covers(tile)).copied()
+    }
+
+    /// Takes a made object away without it burning out (it becomes something else).
+    pub fn despawn(&mut self, loc: &Loc) {
+        self.spawned.remove(&loc.key());
+    }
+
+    /// Whether a made object stands on `tile`.
+    pub fn has_spawned_at(&self, tile: TileCoord) -> bool {
+        self.spawned.values().any(|spawned| spawned.loc.covers(tile))
     }
 
     /// The object `loc` currently is: its replacement while it has one, else itself.
@@ -139,8 +174,10 @@ impl SceneryState {
     }
 
     /// The end of a tick: timers worked this tick run down a tick and the others back up (one
-    /// that is full again is forgotten), and the changes whose time is up are undone.
-    pub fn advance(&mut self) {
+    /// that is full again is forgotten), and the changes whose time is up are undone. Returns the
+    /// made objects that ran out this tick.
+    pub fn advance(&mut self) -> Vec<Loc> {
+        let mut burnt_out = Vec::new();
         self.timers.retain(|_, timer| {
             if std::mem::take(&mut timer.worked_this_tick) {
                 timer.remaining = (timer.remaining - 1).max(0);
@@ -150,10 +187,19 @@ impl SceneryState {
                 timer.remaining < timer.full
             }
         });
+        self.spawned.retain(|_, spawned| {
+            spawned.ticks_left -= 1;
+            let stays = spawned.ticks_left > 0;
+            if !stays {
+                burnt_out.push(spawned.loc);
+            }
+            stays
+        });
         self.changes.retain(|_, change| {
             change.ticks_left -= 1;
             change.ticks_left > 0
         });
+        burnt_out
     }
 }
 
@@ -189,6 +235,19 @@ mod tests {
         assert_eq!(state.current_id(&loc), 1342);
         state.advance();
         assert_eq!(state.current_id(&loc), 1276);
+    }
+
+    #[test]
+    fn a_spawned_object_stands_until_its_ticks_run_out() {
+        let mut state = SceneryState::new();
+        let fire = tree(3, 3, 1);
+        state.spawn(fire, 2);
+
+        assert!(state.has_spawned_at(TileCoord::new(3, 3)));
+        state.advance();
+        assert!(state.has_spawned_at(TileCoord::new(3, 3)));
+        state.advance();
+        assert!(!state.has_spawned_at(TileCoord::new(3, 3)));
     }
 
     #[test]

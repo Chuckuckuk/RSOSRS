@@ -117,6 +117,8 @@ pub struct PaneInput<'a> {
     pub layout: Layout,
     pub selected: usize,
     pub open: bool,
+    /// The inventory slot picked with "Use", waiting for a second item.
+    pub use_selected: Option<usize>,
     /// Where the minimap is centred (world tiles) and how the camera is turned.
     pub map: minimap::MapParams,
 }
@@ -125,7 +127,7 @@ impl PaneInput<'_> {
     /// A number that changes whenever anything the panes draw changes.
     pub fn fingerprint(&self) -> u64 {
         let mut h = DefaultHasher::new();
-        (self.selected, self.open, self.layout as u8, self.name, self.chat.len()).hash(&mut h);
+        (self.selected, self.open, self.layout as u8, self.name, self.chat.len(), self.use_selected).hash(&mut h);
         self.chat.last().hash(&mut h);
         self.map.quantised().hash(&mut h);
         for (x, z) in self.npc_dots {

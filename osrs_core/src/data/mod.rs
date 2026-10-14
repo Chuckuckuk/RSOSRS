@@ -4,6 +4,7 @@
 //! into live entities.
 
 mod consumables;
+mod firemaking;
 mod gathering;
 mod items;
 mod npcs;
@@ -18,6 +19,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 pub use consumables::{ConsumableDef, ConsumableEffect};
+pub use firemaking::LogDef;
 pub use gathering::{DepletionDef, GatheringNodeDef, NodeLocDef, PetDropDef, Requirement, ToolDef};
 pub use items::{AmmoDef, AmmoWeight, EquipSlot, ItemDef, SetDef, SpecialAttackDef, StanceDef, StanceKind, WeaponDef};
 pub use npcs::{AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels, NpcMovementDef, NpcSounds, RotationDef, SummonDef};
@@ -93,6 +95,7 @@ pub struct DataFile {
     pub consumables: Vec<ConsumableDef>,
     pub tools: Vec<ToolDef>,
     pub gathering: Vec<GatheringNodeDef>,
+    pub logs: Vec<LogDef>,
 }
 
 #[derive(Debug)]
@@ -128,6 +131,8 @@ pub struct Registry {
     /// By item id.
     tools: BTreeMap<String, ToolDef>,
     gathering: BTreeMap<String, GatheringNodeDef>,
+    /// By item id.
+    logs: BTreeMap<String, LogDef>,
 }
 
 fn insert_all<T>(
@@ -167,6 +172,7 @@ impl Registry {
         insert_all(&mut self.consumables, "consumable", file.consumables, |d| &d.id)?;
         insert_all(&mut self.tools, "tool", file.tools, |d| &d.item)?;
         insert_all(&mut self.gathering, "gathering node", file.gathering, |d| &d.id)?;
+        insert_all(&mut self.logs, "log", file.logs, |d| &d.item)?;
         Ok(())
     }
 
@@ -202,6 +208,7 @@ impl Registry {
             ("npcs.json", include_str!("../../data/npcs.json")),
             ("tools.json", include_str!("../../data/tools.json")),
             ("gathering.json", include_str!("../../data/gathering.json")),
+            ("firemaking.json", include_str!("../../data/firemaking.json")),
         ] {
             registry.merge_json(name, json).unwrap_or_else(|e| panic!("bundled data is malformed: {e}"));
         }
@@ -307,6 +314,11 @@ impl Registry {
     /// The node that choosing `action` on scenery object `loc` gathers from, if any.
     pub fn gathering_node_for(&self, loc: u32, action: &str) -> Option<&GatheringNodeDef> {
         self.gathering.values().find(|node| node.action.eq_ignore_ascii_case(action) && node.depleted_form(loc).is_some())
+    }
+
+    /// The firemaking definition of the log item `item`, if it can be lit.
+    pub fn log(&self, item: &str) -> Option<&LogDef> {
+        self.logs.get(item)
     }
 
     /// Adds (or replaces) a gathering node: tests build nodes the bundle does not have this way.
@@ -454,6 +466,19 @@ impl Registry {
             }
             if !(1..=99).contains(&tool.level) {
                 problems.push(format!("tool '{}': level must be within 1..=99", tool.item));
+            }
+        }
+
+        for log in self.logs.values() {
+            let who = format!("log '{}'", log.item);
+            if !self.items.contains_key(&log.item) {
+                problems.push(format!("{who}: unknown item"));
+            }
+            if !(1..=99).contains(&log.level) {
+                problems.push(format!("{who}: level must be within 1..=99"));
+            }
+            if log.xp_tenths < 0 || log.burn_ticks < 1 {
+                problems.push(format!("{who}: needs xp_tenths >= 0 and burn_ticks >= 1"));
             }
         }
 

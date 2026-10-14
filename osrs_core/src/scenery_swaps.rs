@@ -27,6 +27,18 @@ pub type MeshKey = (u32, u8, u8);
 pub struct SwapMeshes {
     pub ready: HashMap<MeshKey, Option<LocMesh>>,
     requested: HashSet<MeshKey>,
+    /// Ground item meshes by cache item id, and the ones asked for (`ground_scene`).
+    pub items: HashMap<u32, Option<LocMesh>>,
+    /// The baked animation of each object mesh that has one (a fire's flames).
+    pub clips: HashMap<MeshKey, osrs_cache::anim::Clip>,
+    pub items_requested: HashSet<u32>,
+}
+
+impl SwapMeshes {
+    /// Notes that the mesh `key` is being asked for; true the first time only.
+    pub fn requested_object(&mut self, key: MeshKey) -> bool {
+        self.requested.insert(key)
+    }
 }
 
 /// Marks the entities of a replacement, so a dropped square's are known to be gone.
@@ -48,7 +60,7 @@ pub struct Seen {
 
 /// The click-box owner of the replacement for `key`: its own, so it can be dropped alone. Map
 /// squares own theirs by square coordinates, which never reach this far below zero.
-fn owner(key: &LocKey) -> (i32, i32) {
+pub fn owner(key: &LocKey) -> (i32, i32) {
     (i32::MIN / 2 - key.x, key.z)
 }
 
