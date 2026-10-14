@@ -97,6 +97,8 @@ pub struct SpawnedLoc {
     /// How many more ends of a tick it stays: it is gone at the end of the tick on which this
     /// reaches 0.
     pub ticks_left: i32,
+    /// How many more respawns it grants before it is used up (a bonfire; 0 for a plain fire).
+    pub respawns: i32,
 }
 
 /// A despawn timer (see `DepletionDef::Timer`): how many ticks of gathering it has left, and
@@ -129,9 +131,25 @@ impl SceneryState {
         self.changes.insert(loc.key(), LocChange { loc, replacement, ticks_left: ticks });
     }
 
-    /// Puts a made object (a fire) on the map for `ticks` ticks.
+    /// Puts a made object (a fire) on the map for `ticks` ticks. Spawning over one that stands
+    /// there (feeding a bonfire) keeps its respawns.
     pub fn spawn(&mut self, loc: Loc, ticks: i32) {
-        self.spawned.insert(loc.key(), SpawnedLoc { loc, ticks_left: ticks });
+        let respawns = self.spawned.get(&loc.key()).map_or(0, |spawned| spawned.respawns);
+        self.spawned.insert(loc.key(), SpawnedLoc { loc, ticks_left: ticks, respawns });
+    }
+
+    /// Grants `loc`, if it stands, `count` more respawns.
+    pub fn add_respawns(&mut self, loc: &Loc, count: i32) {
+        if let Some(spawned) = self.spawned.get_mut(&loc.key()) {
+            spawned.respawns += count;
+        }
+    }
+
+    /// Uses one of `loc`'s respawns, returning how many are left (None if it does not stand).
+    pub fn use_respawn(&mut self, loc: &Loc) -> Option<i32> {
+        let spawned = self.spawned.get_mut(&loc.key())?;
+        spawned.respawns = (spawned.respawns - 1).max(0);
+        Some(spawned.respawns)
     }
 
     /// Every made object currently standing, in a fixed order.

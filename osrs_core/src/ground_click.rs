@@ -683,12 +683,20 @@ fn ground_clicks(
                     }
                 }
                 if let Some(object) = under.click.object.clone() {
-                    object_items.push(MenuItem {
-                        option: object.action.clone(),
-                        subject: Some((object.name.clone(), Subject::Object)),
-                        suffix: None,
-                        action: MenuAction::Object(object),
-                    });
+                    // a bonfire's other options follow its left-click one
+                    let others: &[&str] = if object.id == osrs_core::sim::BONFIRE_LOC {
+                        &osrs_core::sim::BONFIRE_OPTIONS[1..]
+                    } else {
+                        &[]
+                    };
+                    for option in std::iter::once(object.action.as_str()).chain(others.iter().copied()) {
+                        object_items.push(MenuItem {
+                            option: option.to_owned(),
+                            subject: Some((object.name.clone(), Subject::Object)),
+                            suffix: None,
+                            action: MenuAction::Object(PickedObject { action: option.to_owned(), ..object.clone() }),
+                        });
+                    }
                 }
                 if let Some((id, name)) = under.click.examinable.clone() {
                     object_items.push(MenuItem {

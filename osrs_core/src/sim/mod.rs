@@ -31,7 +31,7 @@ pub use animations::{draw_graphic, player_animations, projectile_graphic, Player
 pub use config::{BossConfig, CombatLevels, HealerConfig, NpcConfig, PassiveConfig, PlayerConfig};
 pub use events::{Combatant, WorldEvent};
 pub use examine::ExamineTexts;
-pub use firemaking::LightAction;
+pub use firemaking::{LightAction, RestAction, BONFIRE_LOC, BONFIRE_OPTIONS};
 pub use gathering::GatherAction;
 pub use ground_items::{GroundItem, GroundItems, DESPAWN_TICKS};
 pub use objects::{DoorAction, PlayerAction};

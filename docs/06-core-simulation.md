@@ -349,8 +349,9 @@ When the player's death is confirmed, `settle_deaths` starts a `RESPAWN_DELAY_TI
 stand-in: the wiki gives no figure) countdown. `count_down_respawn` (run just before
 `settle_deaths` each tick) then calls `Player::respawn`: full hitpoints, every stat back on its
 base, prayer points 0 and prayers off, status effects / in-flight hits / queued actions cleared,
-teleported to `World::respawn_tile` (the player's starting tile unless `set_respawn_tile` says
-otherwise; Lumbridge in the open world). Every NPC loses its target, the player leaves `dead`, a
+teleported to `World::respawn_point()`: a temporary redirect (`redirect_respawn`, which resting at a
+bonfire sets and its burning out ends) if one is in force, else `World::respawn_tile` (the player's
+starting tile unless `set_respawn_tile` says otherwise; Lumbridge in the open world). Every NPC loses its target, the player leaves `dead`, a
 `Respawned` event is sent and "Oh dear, you are dead!" is shown. Items are not lost yet (the
 wiki's Items Kept on Death rules are not modelled); run and special energy are left as they were.
 The `humble_pie` consumable (effect `die`) kills its eater outright, for testing all this.
@@ -564,12 +565,20 @@ on a spawned fire (or bonfire) starts a `PlayerAction::Tend`; a bonfire's "Tend-
 with whichever log the inventory has first (`player_interact_object` looks at spawned objects
 before the map's). The player walks to within 1 tile (diagonals count), adds a log after 1 tick
 and then every 9, for the log's full XP. The fire it was is replaced by a bonfire lasting 99 +
-`bonfire_ticks` (= the wiki's duration column); each further log adds `bonfire_ticks`, and a log
-that would take it past 300 is not added. Starting one needs a tinderbox and no bonfire within
+`bonfire_ticks` (= the wiki's duration column); each further log restarts the timer at 99 +
+its `bonfire_ticks` (never shortening it), so logs are added until the inventory has none. Starting one needs a tinderbox and no bonfire within
 5 tiles (Chebyshev); tending needs none. "Check" says one of five messages by `(left + 1) / 60`.
-A burnt-out bonfire leaves ashes. "Rest" is not modelled (it answers "Nothing interesting
-happens."), the tend animation reuses the lighting one (733), and the "out of logs" message is
-invented. Client: a picked inventory item clicked on a fire sends `UseItemOnObject`
+A burnt-out bonfire leaves ashes. "Rest" (the bonfire's left-click) starts a `PlayerAction::Rest`:
+the player walks to within 1 tile, then `World::redirect_respawn` points its respawn at the tile
+it stands on, tied to that bonfire's `Loc`; `respawn_point()` is what `count_down_respawn` uses
+(the redirect, else `respawn_tile`) and `advance_scenery` drops the redirect when the bonfire
+burns out. Resting at another bonfire replaces it. A bonfire also has `SpawnedLoc::respawns`:
+each log put on it (the first included) adds `RESPAWNS_PER_LOG` (1), each respawn at its redirect
+uses one, and the one that uses the last burns it out at once (ashes, redirect dropped) whatever
+its timer says; the timer stays the other way for it to end. The tend animation reuses the lighting one
+(733), and the "out of logs" and rest messages are invented. Client: `main.rs` makes "Rest" the
+bonfire's left-click and `ground_click` lists `BONFIRE_OPTIONS` ("Rest", "Tend-to", "Check") in
+its right-click menu. A picked inventory item clicked on a fire sends `UseItemOnObject`
 (`ground_click::use_target`).
 
 ### Scenery: [`sim/scenery.rs`](../osrs_core/src/sim/scenery.rs)

@@ -272,7 +272,9 @@ fn load_scene(spawn: (i32, i32), radius: i32) -> osrs_cache::Result<(Scene, Firs
             first.push(loader.load(around.0 + dx, around.1 + dz)?);
         }
     }
-    let (left_click, names) = loader.object_info();
+    let (mut left_click, names) = loader.object_info();
+    // a bonfire is rested at on a left-click; its other options are in the right-click menu
+    left_click.insert(osrs_core::sim::BONFIRE_LOC, osrs_core::sim::BONFIRE_OPTIONS[0].to_owned());
     drop(loader);
 
     let cache = Cache::open_default()?;
