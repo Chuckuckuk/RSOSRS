@@ -570,8 +570,8 @@ fn open_world_seed() -> i32 {
 }
 
 /// What the server needs of one map square, decoded once: its collision, as the arrays a
-/// `CollisionMap` takes, and its free-standing ground-level objects (trees and the like), for the
-/// scenery index. A square that cannot be decoded is solid and empty, so nobody is ever walked onto
+/// `CollisionMap` takes, and its ground-level objects that can change (free-standing ones such
+/// as trees, and wall pieces with an option such as doors), for the scenery index. A square that cannot be decoded is solid and empty, so nobody is ever walked onto
 /// ground nobody has seen.
 fn square_map(source: &MapSource, square: (i32, i32)) -> (CollisionMapData, Vec<Loc>) {
     let cells = (SQUARE * SQUARE) as usize;
@@ -580,9 +580,15 @@ fn square_map(source: &MapSource, square: (i32, i32)) -> (CollisionMapData, Vec<
             let defs = source.object_defs();
             let locs = around
                 .middle_placements()
-                .filter(|(_, p)| p.plane == 0 && matches!(p.kind, 10 | 11))
+                .filter(|(_, p)| p.plane == 0)
                 .filter_map(|((x, z), p)| {
-                    let (w, h) = footprint(defs.get(&p.id)?, p.orientation);
+                    let def = defs.get(&p.id)?;
+                    // free-standing objects (trees), and wall pieces that do something (doors)
+                    let wanted = matches!(p.kind, 10 | 11) || (p.kind <= 3 && def.left_click().is_some());
+                    if !wanted {
+                        return None;
+                    }
+                    let (w, h) = footprint(def, p.orientation);
                     Some(Loc {
                         id: p.id,
                         tile: TileCoord::new(x, z),

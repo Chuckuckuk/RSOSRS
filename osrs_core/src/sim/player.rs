@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use super::config::PlayerConfig;
-use super::gathering::PlayerAction;
+use super::objects::PlayerAction;
+use super::scenery::LocKey;
 use super::loadout::Loadout;
 use super::skills::Skills;
 use crate::actors::{Actor, ActorKind, CombatTargetView, EntityId};
@@ -85,6 +86,9 @@ pub struct Player {
     pub(crate) skill_clock: i32,
     /// The skilling rolls' own generator, so gathering never shifts a fight's rolls.
     pub(crate) skilling_rng: DotNetRandom,
+    /// This player's recent closes of one door, `(door, tick)`, for the stuck rule
+    /// (`sim::objects`).
+    pub(crate) door_closes: Vec<(LocKey, i32)>,
 }
 
 impl Player {
@@ -140,6 +144,7 @@ impl Player {
             action: None,
             skill_clock: 0,
             skilling_rng: DotNetRandom::new(0),
+            door_closes: Vec::new(),
         }
     }
 

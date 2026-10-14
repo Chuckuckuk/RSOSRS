@@ -20,6 +20,7 @@
 
 use std::rc::Rc;
 
+use super::objects::PlayerAction;
 use super::player::Player;
 use super::scenery::Loc;
 use super::world::World;
@@ -27,14 +28,6 @@ use crate::data::{DepletionDef, GatheringNodeDef, Registry, Requirement, ToolDef
 use crate::pathfinding::TargetSpec;
 use crate::rng::{one_in, Rng};
 use crate::rules;
-use crate::tiles::TileCoord;
-
-/// Something the player is busy doing that is not fighting or walking: at most one at a time.
-/// Walking, attacking or talking to an NPC cancels it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlayerAction {
-    Gather(GatherAction),
-}
 
 /// Gathering from one placed resource.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,23 +99,8 @@ impl PetOutcome {
 }
 
 impl World {
-    /// Choosing `action` on the scenery object `id` that covers `tile`. Today only gathering
-    /// options do anything; anything else is answered "Nothing interesting happens."
-    pub fn player_interact_object(&mut self, id: u32, tile: TileCoord, action: &str) -> Result<(), String> {
-        let found = self.scenery.at(tile).iter().copied().find(|loc| self.scenery_state.current_id(loc) == id);
-        let Some(loc) = found else {
-            return Err("Nothing interesting happens.".to_owned());
-        };
-        let registry = Rc::clone(self.registry());
-        // a depleted object is its replacement now, which no node gathers from
-        match registry.gathering_node_for(id, action) {
-            Some(node) => self.player_start_gathering(node, loc),
-            None => Err("Nothing interesting happens.".to_owned()),
-        }
-    }
-
     /// Checks what can be checked from afar, then sends the player to gather from `loc`.
-    fn player_start_gathering(&mut self, node: &GatheringNodeDef, loc: Loc) -> Result<(), String> {
+    pub(super) fn player_start_gathering(&mut self, node: &GatheringNodeDef, loc: Loc) -> Result<(), String> {
         if let Some(refusal) = first_unmet(&self.player, self.registry(), &node.requirements) {
             return Err(refusal);
         }
@@ -135,10 +113,8 @@ impl World {
         Ok(())
     }
 
-    /// The player's current action for this tick. Returns whether it used the tick (so a queued
-    /// walk does not also run).
-    pub(super) fn player_run_action(&mut self) -> bool {
-        let Some(PlayerAction::Gather(mut gather)) = self.player.action.clone() else { return false };
+    /// One tick of gathering. Returns whether it used the tick.
+    pub(super) fn run_gather(&mut self, mut gather: GatherAction) -> bool {
         let registry = Rc::clone(self.registry());
         let Some(node) = registry.gathering_node(&gather.node) else {
             self.player.action = None;
@@ -233,7 +209,7 @@ impl World {
             if let Some(replacement) = node.depleted_form(loc.id) {
                 let [min, max] = node.respawn_ticks;
                 let respawn = self.player.skilling_rng.next_range(min, max + 1);
-                self.scenery_state.replace(*loc, replacement, respawn);
+                self.change_loc(*loc, loc.with_id(replacement), respawn);
             }
             return false;
         }
@@ -247,25 +223,12 @@ impl World {
         true
     }
 
-    /// The scenery object the player is turned toward while gathering from it.
-    pub fn player_facing_loc(&self) -> Option<Loc> {
-        match &self.player.action {
-            Some(PlayerAction::Gather(gather)) => Some(gather.loc),
-            None => None,
-        }
-    }
-
     /// The sequence the player loops for its current action, while it is at it: the animation of
     /// the tool it gathers with.
     pub fn player_action_animation(&self) -> Option<u32> {
         let Some(PlayerAction::Gather(gather)) = &self.player.action else { return None };
         let node = self.registry().gathering_node(&gather.node).filter(|_| gather.started)?;
         best_tool(&self.player, self.registry(), node)?.0.animation
-    }
-
-    /// Puts back the scenery objects whose time is up, at the end of a tick.
-    pub(super) fn advance_scenery(&mut self) {
-        self.scenery_state.advance();
     }
 }
 
@@ -294,6 +257,7 @@ mod tests {
     use crate::rng::ScriptedRng;
     use crate::sim::scenarios::dev_open_floor_world;
     use crate::sim::{PlayerConfig, WorldEvent};
+    use crate::tiles::TileCoord;
 
     const TREE: u32 = 1276;
     const STUMP: u32 = 1342;
@@ -385,7 +349,7 @@ mod tests {
         assert!(world.take_events().contains(&WorldEvent::Experience { skill: Skill::Woodcutting, gained_tenths: 250 }));
         let changes: Vec<_> = world.scenery_changes().copied().collect();
         assert_eq!(changes.len(), 1);
-        assert_eq!((changes[0].loc, changes[0].replacement), (tree(), STUMP));
+        assert_eq!((changes[0].loc, changes[0].replacement), (tree(), tree().with_id(STUMP)));
         assert!(world.player.action().is_none(), "a regular tree gives one log, then the player stops");
         assert_eq!(world.player_action_animation(), None);
     }

@@ -1,6 +1,7 @@
 //! Scenery the server says is, for now, another object (a felled tree is its stump until it grows
-//! back): the client hides the original's entities and click box and puts the replacement in its
-//! place, and undoes it when the server stops listing the change.
+//! back, an opened door stands swung into the next tile): the client hides the original's
+//! entities and click box and puts the replacement where the server says, turned as it says, and
+//! undoes it when the server stops listing the change.
 //!
 //! The server sends the whole set of changes in every snapshot, so this is a diff against what is
 //! on screen. A square that is dropped takes its replacements with it; when it comes back, its
@@ -130,8 +131,17 @@ pub fn show_scenery_changes(
             spawner.picker().remove(owner(key));
         }
         // the original's square is not loaded: nothing to put in its place yet
-        let Some(&origin) = origins.get(key) else { continue };
-        let mesh_key = (change.replacement, change.loc.kind, change.loc.orientation);
+        let Some(&original_at) = origins.get(key) else { continue };
+        let shown_as = change.replacement;
+        // on the original's spot (a stump), or on the middle of the tile it moved to (an opened
+        // door) at that ground's height
+        let origin = if shown_as.tile == change.loc.tile {
+            original_at
+        } else {
+            let Some(ground) = spawner.world.ground_at(shown_as.tile.x, shown_as.tile.z) else { continue };
+            ground + Vec3::new((shown_as.size.0 - 1) as f32 / 2.0, 0.0, -(shown_as.size.1 - 1) as f32 / 2.0)
+        };
+        let mesh_key = (shown_as.id, shown_as.kind, shown_as.orientation);
         let Some(mesh) = swaps.ready.get(&mesh_key) else {
             if swaps.requested.insert(mesh_key) {
                 stream.request_object(mesh_key.0, mesh_key.1, mesh_key.2);
@@ -141,7 +151,8 @@ pub fn show_scenery_changes(
         let entities = match mesh {
             Some(mesh) => {
                 let object_key = (mesh_key.0, mesh_key.1, mesh_key.2, 255, 0);
-                let scene = Arc::new(ObjectScene::single(object_key, mesh.clone(), origin, change.loc.tile.plane as u8));
+                let scene = Arc::new(ObjectScene::single(object_key, mesh.clone(), origin, shown_as.tile.plane as u8));
+                // it leaves with the original's square
                 let square = square_of(change.loc.tile.x, change.loc.tile.z);
                 let entities = spawner.spawn_objects(square, owner(key), &scene);
                 for entity in &entities {
