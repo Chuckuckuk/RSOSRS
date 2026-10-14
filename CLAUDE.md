@@ -12,7 +12,21 @@ Issues live at <https://github.com/Chuckuckuk/RSOSRS/issues>. Use `gh` with `-R 
 - Start the title with the prefix of its type (see [Title prefixes](#title-prefixes)).
 - Say what happens now, what should happen, and where in the code. Name the branch it was found on.
 - Always add labels; see [Labels](#labels).
-- Map out any relevant relationships
+- Map out its relationships; see [Relationships](#relationships).
+
+### Relationships
+
+Set relationships on GitHub with `gh issue edit` whenever an issue is filed or its scope changes:
+
+- **Parent and sub-issues.** A feature with several follow-ups gets a parent issue (e.g. #29 Woodcutting over trees, sounds, pets and roll timing; #2 doors over sounds, more doors and gate layout).
+  - The parent is titled after the feature, e.g. `[feature] Woodcutting`.
+  - Its description says what is done (with the PR) and lists what remains.
+  - `gh issue edit <parent> -R Chuckuckuk/RSOSRS --add-sub-issue 6,7,9`, or `--parent <n>` from the child.
+  - An issue has only one parent. Nest a narrower issue under the broader one (#8 regular-log trees under #16 all trees under #29 Woodcutting), not under both.
+  - When one issue's leftovers become new issues, make them its sub-issues (#25–#27 under #18).
+- **Blocked by.** Use `--add-blocked-by <n>` when an issue cannot be done or merged before another: it builds on unmerged work (#18 on #2), or needs a mechanism another issue adds (#27 curtains needs #20 blocking data).
+- **Related only.** An issue that applies to more than the feature (#5 XP drops and #13 ground items are for every skill) is not made a sub-issue. Name it under "Related" in the parent's description instead.
+- **Overlapping issues.** When two issues touch the same area without one containing the other, say in each how they split the work (a comment on the older one), as #8 and #16 do.
 
 ### Title prefixes
 
@@ -36,6 +50,7 @@ If an issue's type changes, update its prefix and type label together.
 2. Link it to its branch: `gh issue develop <n> -R Chuckuckuk/RSOSRS --name <branch> --base develop`.
    - If the branch already exists locally, also set its upstream: `git fetch origin && git branch --set-upstream-to=origin/<branch> <branch>`.
 3. Check the link: `gh issue develop --list <n> -R Chuckuckuk/RSOSRS`.
+4. If the work builds on a branch that is not merged yet, stack on it: `--base <that branch>` in step 2, mark the issue blocked by the other one, and open the pull request (into `develop`) only once the base has merged, or as a draft that says it depends on it.
 
 Branching: each feature branch is cut from `develop` and merges back into `develop` by pull request. `develop` is merged into `main` separately; never open a feature PR against `main`.
 
