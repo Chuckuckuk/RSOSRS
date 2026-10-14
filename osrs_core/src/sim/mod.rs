@@ -13,6 +13,7 @@ mod examine;
 mod gathering;
 mod loadout;
 mod npc_factory;
+mod objects;
 mod player;
 mod player_runtime;
 pub mod scenarios;
@@ -28,7 +29,8 @@ pub use animations::{draw_graphic, player_animations, projectile_graphic, Player
 pub use config::{BossConfig, CombatLevels, HealerConfig, NpcConfig, PassiveConfig, PlayerConfig};
 pub use events::{Combatant, WorldEvent};
 pub use examine::ExamineTexts;
-pub use gathering::{GatherAction, PlayerAction};
+pub use gathering::GatherAction;
+pub use objects::{DoorAction, PlayerAction};
 pub use scenery::{Loc, LocChange, LocKey, SceneryIndex};
 pub use inventory::{Inventory, ItemStack, INVENTORY_SIZE};
 pub use entity::{Behavior, BossState, Entity, HealerState, NpcState};

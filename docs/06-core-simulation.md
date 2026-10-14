@@ -526,11 +526,38 @@ gathering cannot change a fight's rolls.
 ### Scenery: [`sim/scenery.rs`](../osrs_core/src/sim/scenery.rs)
 
 * `SceneryIndex`: which object (`Loc { id, tile, kind, orientation, size }`) covers which tile.
-  The server's map loader fills it with each square's ground-level free-standing objects (shapes
-  10 and 11) as it loads the square's collision (`square_map` in `main.rs`).
-* `SceneryState`: placements shown as another object for a while (`LocChange`, a stump for a
-  felled tree), counted down at the end of every tick by the world clock, plus the despawn
-  timers. The whole set goes to the client in every `Snapshot::scenery`.
+  The server's map loader fills it with each square's ground-level objects that can change:
+  free-standing ones (shapes 10 and 11, trees) and wall pieces with an option (shapes 0-3,
+  doors), as it loads the square's collision (`square_map` in `main.rs`).
+* `SceneryState`: placements shown as another object for a while. A `LocChange`'s
+  `replacement` is a whole `Loc`: on the same spot (a stump) or moved and turned (an opened
+  door). Changes are counted down at the end of every tick by the world clock, can be put back
+  early (`restore`), and are found where they now stand (`find`, which is how a click on an
+  opened door resolves). The whole set goes to the client in every `Snapshot::scenery`.
+* `World::change_loc` / `restore_loc` are the one way scenery changes, and they move a wall's
+  collision with it (`CollisionMap::add_wall` / `remove_wall`, from `collision::wall_edges`).
+  A stump keeps its tree's collision.
+
+### Objects and doors: [`sim/objects.rs`](../osrs_core/src/sim/objects.rs)
+
+`World::player_interact_object(id, tile, option)` is the one place an object's option is
+dispatched: a door's "Open"/"Close", else a gathering node's option, else "Nothing interesting
+happens." It becomes the player's `PlayerAction` (`Gather` or `Door`).
+
+Doors come from [`data/doors.json`](../osrs_core/data/doors.json): each lists its leaves' closed
+and open object ids (paired with the `obj_actions` probe) and a swing style (`single`, `double`,
+`gate`). A door:
+
+1. walks the player to where it can be used from, `TargetSpec::wall_reach` (its own tile, the
+   tile across its edge, and the tiles beside it unless walled off);
+2. swings every leaf together: a leaf opens into the tile across its edge and turns a quarter
+   (`DoorSwing::moves`, in the frame of a west-edge door, turned with the placement); a pair's
+   leaves swing out on their outer hinges; a door the map places open shuts by the inverse move;
+3. moves the wall with it, so the doorway can be walked through;
+4. goes back by itself after `DOOR_RESET_TICKS` (500, 300 s);
+5. answers "The door seems to be stuck." to the fifth close of the same door within
+   `STUCK_WINDOW_TICKS` (8: the fastest five closes can go, an open between each).
+
 
 ### Animation and graphic ids
 

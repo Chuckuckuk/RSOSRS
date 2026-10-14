@@ -27,6 +27,11 @@ impl Loc {
         TargetSpec::rect(self.tile, self.size.0, self.size.1).is_satisfied_by(tile)
     }
 
+    /// The same placement showing object `id` instead (a tree's stump).
+    pub fn with_id(self, id: u32) -> Loc {
+        Loc { id, ..self }
+    }
+
     /// What identifies this placement whatever it currently looks like.
     pub fn key(&self) -> LocKey {
         LocKey { x: self.tile.x, z: self.tile.z, plane: self.tile.plane, id: self.id }
@@ -73,12 +78,13 @@ impl SceneryIndex {
     }
 }
 
-/// A placement shown as another object for `ticks_left` more ticks.
+/// A placement shown as another object for `ticks_left` more ticks: on the same spot (a tree's
+/// stump) or moved and turned (an opened door, which swings into the next tile).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocChange {
     pub loc: Loc,
-    /// The object shown meanwhile (a stump).
-    pub replacement: u32,
+    /// What is there meanwhile, where and how it is turned.
+    pub replacement: Loc,
     /// How many more ends of a tick it stays changed: it changes back at the end of the tick on
     /// which this reaches 0.
     pub ticks_left: i32,
@@ -106,15 +112,28 @@ impl SceneryState {
         Self::default()
     }
 
-    /// Shows `loc` as `replacement` for `ticks` ticks. Its despawn timer, if any, is done with.
-    pub fn replace(&mut self, loc: Loc, replacement: u32, ticks: i32) {
+    /// Shows `replacement` instead of `loc` for `ticks` ticks. Its despawn timer, if any, is done
+    /// with.
+    pub fn replace(&mut self, loc: Loc, replacement: Loc, ticks: i32) {
         self.timers.remove(&loc.key());
         self.changes.insert(loc.key(), LocChange { loc, replacement, ticks_left: ticks });
     }
 
-    /// The object `loc` currently is: its replacement while it has one, else itself.
-    pub fn current_id(&self, loc: &Loc) -> u32 {
-        self.changes.get(&loc.key()).map_or(loc.id, |change| change.replacement)
+    /// Puts `key`'s placement back before its time (a door closed again), returning the change.
+    pub fn restore(&mut self, key: &LocKey) -> Option<LocChange> {
+        self.changes.remove(key)
+    }
+
+    /// What stands in for `loc` now: its replacement while it has one, else itself.
+    pub fn current(&self, loc: &Loc) -> Loc {
+        self.changes.get(&loc.key()).map_or(*loc, |change| change.replacement)
+    }
+
+    /// The placement (as the map places it) showing object `id` over `tile` now: one whose
+    /// replacement stands there (an opened door that swung in), or else an unchanged original.
+    pub fn find(&self, index: &SceneryIndex, id: u32, tile: TileCoord) -> Option<Loc> {
+        let moved = self.changes.values().find(|change| change.replacement.id == id && change.replacement.covers(tile));
+        moved.map(|change| change.loc).or_else(|| index.at(tile).iter().copied().find(|loc| loc.id == id && !self.is_replaced(loc)))
     }
 
     pub fn is_replaced(&self, loc: &Loc) -> bool {
@@ -139,8 +158,9 @@ impl SceneryState {
     }
 
     /// The end of a tick: timers worked this tick run down a tick and the others back up (one
-    /// that is full again is forgotten), and the changes whose time is up are undone.
-    pub fn advance(&mut self) {
+    /// that is full again is forgotten), and the changes whose time is up are undone and returned
+    /// (so whatever they changed, such as collision, can be put back too).
+    pub fn advance(&mut self) -> Vec<LocChange> {
         self.timers.retain(|_, timer| {
             if std::mem::take(&mut timer.worked_this_tick) {
                 timer.remaining = (timer.remaining - 1).max(0);
@@ -150,10 +170,16 @@ impl SceneryState {
                 timer.remaining < timer.full
             }
         });
+        let mut expired = Vec::new();
         self.changes.retain(|_, change| {
             change.ticks_left -= 1;
-            change.ticks_left > 0
+            let done = change.ticks_left <= 0;
+            if done {
+                expired.push(*change);
+            }
+            !done
         });
+        expired
     }
 }
 
@@ -182,13 +208,31 @@ mod tests {
     fn a_replacement_lasts_until_its_tick() {
         let mut state = SceneryState::new();
         let loc = tree(0, 0, 1);
-        state.replace(loc, 1342, 2);
+        state.replace(loc, loc.with_id(1342), 2);
 
-        assert_eq!(state.current_id(&loc), 1342);
-        state.advance();
-        assert_eq!(state.current_id(&loc), 1342);
-        state.advance();
-        assert_eq!(state.current_id(&loc), 1276);
+        assert_eq!(state.current(&loc).id, 1342);
+        assert!(state.advance().is_empty());
+        assert_eq!(state.current(&loc).id, 1342);
+        let expired = state.advance();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(state.current(&loc).id, 1276);
+    }
+
+    #[test]
+    fn a_moved_replacement_is_found_where_it_now_stands_and_can_be_put_back() {
+        let mut index = SceneryIndex::new();
+        let door = Loc { id: 1535, tile: TileCoord::new(5, 5), kind: 0, orientation: 0, size: (1, 1) };
+        index.add(door);
+        let mut state = SceneryState::new();
+        assert_eq!(state.find(&index, 1535, door.tile), Some(door));
+
+        let open = Loc { id: 1536, tile: TileCoord::new(4, 5), orientation: 1, ..door };
+        state.replace(door, open, 500);
+
+        assert_eq!(state.find(&index, 1536, open.tile), Some(door), "the open door, where it swung to");
+        assert_eq!(state.find(&index, 1535, door.tile), None, "the closed door is not there any more");
+        assert_eq!(state.restore(&door.key()).map(|c| c.replacement), Some(open));
+        assert_eq!(state.find(&index, 1535, door.tile), Some(door));
     }
 
     #[test]

@@ -302,13 +302,10 @@ impl CollisionMap {
 
         // Each cardinal move checks the exit edge of the footprint's trailing side against the
         // matching entry edge one tile beyond it, once per row (east/west) or column (north/south).
-        let (exit_flag, enter_flag) = match dir {
-            Direction::East => (CollisionFlag::BLOCK_EAST, CollisionFlag::BLOCK_WEST),
-            Direction::West => (CollisionFlag::BLOCK_WEST, CollisionFlag::BLOCK_EAST),
-            Direction::North => (CollisionFlag::BLOCK_NORTH, CollisionFlag::BLOCK_SOUTH),
-            Direction::South => (CollisionFlag::BLOCK_SOUTH, CollisionFlag::BLOCK_NORTH),
-            _ => return false, // not a cardinal direction
-        };
+        if !dir.is_cardinal() {
+            return false;
+        }
+        let (exit_flag, enter_flag) = (edge_flag(dir), edge_flag(dir.opposite()));
 
         for i in 0..size {
             let (exit_tile, enter_tile) = match dir {
@@ -343,6 +340,17 @@ impl CollisionMap {
 
         let delta = (self.heights[exit_idx] as i32 - self.heights[enter_idx] as i32).abs();
         delta <= self.max_step_height
+    }
+}
+
+/// The wall bit on a tile's edge facing `dir` (a cardinal direction; 0 for any other).
+pub(crate) fn edge_flag(dir: Direction) -> u32 {
+    match dir {
+        Direction::East => CollisionFlag::BLOCK_EAST,
+        Direction::West => CollisionFlag::BLOCK_WEST,
+        Direction::North => CollisionFlag::BLOCK_NORTH,
+        Direction::South => CollisionFlag::BLOCK_SOUTH,
+        _ => 0,
     }
 }
 

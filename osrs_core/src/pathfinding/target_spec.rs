@@ -1,4 +1,8 @@
-use crate::tiles::TileCoord;
+use crate::collision::{edge_flag, CollisionMap};
+use crate::tiles::{Direction, TileCoord};
+
+/// The most tiles an `AnyOf` target can list (a two-leaf door's reach).
+pub const MAX_TARGET_TILES: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetKind {
@@ -13,6 +17,9 @@ pub enum TargetKind {
     /// Stop once within Chebyshev distance `range` of any tile of an N x M footprint, standing
     /// outside it - how a ranged or magic attacker reaches a large target.
     WithinRangeOfRect,
+    /// Reach any of a short list of tiles (`TargetSpec::tiles`): where a wall object such as a
+    /// door can be used from.
+    AnyOf,
 }
 
 /// What a path search is trying to reach. One entry point for every click/interaction target
@@ -25,11 +32,40 @@ pub struct TargetSpec {
     pub width: i32,
     pub height: i32,
     pub range: i32,
+    /// The tiles of an `AnyOf` target (the first `tile_count`).
+    pub tiles: [TileCoord; MAX_TARGET_TILES],
+    pub tile_count: usize,
 }
 
 impl TargetSpec {
     fn new(kind: TargetKind, origin: TileCoord, width: i32, height: i32, range: i32) -> Self {
-        Self { kind, origin, width, height, range }
+        Self { kind, origin, width, height, range, tiles: [TileCoord::default(); MAX_TARGET_TILES], tile_count: 0 }
+    }
+
+    /// Any of `tiles` (at most [`MAX_TARGET_TILES`]; the rest are ignored).
+    pub fn any_of(tiles: &[TileCoord]) -> Self {
+        let mut target = Self::new(TargetKind::AnyOf, tiles.first().copied().unwrap_or_default(), 1, 1, 0);
+        for (slot, tile) in target.tiles.iter_mut().zip(tiles) {
+            *slot = *tile;
+        }
+        target.tile_count = tiles.len().min(MAX_TARGET_TILES);
+        target
+    }
+
+    /// Where a straight wall object (a door) on `tile`, turned `orientation`, can be used from,
+    /// as the game decides it: its own tile, the tile across its edge, and the two tiles beside
+    /// it along the wall unless a wall stands between them and its tile.
+    pub fn wall_reach(map: &CollisionMap, tile: TileCoord, orientation: u8) -> Vec<TileCoord> {
+        let at = |(dx, dz): (i32, i32)| tile.offset(dx, dz);
+        let mut reach = vec![tile, at(rotate((-1, 0), orientation))];
+        for side in [rotate((0, 1), orientation), rotate((0, -1), orientation)] {
+            // the edge of the side tile that faces the wall's own tile
+            let facing = edge_flag(Direction::from_delta(-side.0, -side.1));
+            if map.flags_at(at(side)) & facing == 0 {
+                reach.push(at(side));
+            }
+        }
+        reach
     }
 
     pub fn exact(tile: TileCoord) -> Self {
@@ -73,6 +109,7 @@ impl TargetSpec {
             TargetKind::WithinRangeOfRect => {
                 !self.contains(tile) && Self::distance_to_rect(tile, self.origin, self.width, self.height) <= self.range
             }
+            TargetKind::AnyOf => self.tiles[..self.tile_count].contains(&tile),
         }
     }
 
@@ -94,6 +131,12 @@ impl TargetSpec {
 
         touches_west || touches_east || touches_south || touches_north
     }
+}
+
+/// `(dx, dz)` turned `quarter_turns` clockwise (north to east): how an offset in the frame of a
+/// west-edge wall applies to one placed turned.
+pub fn rotate((dx, dz): (i32, i32), quarter_turns: u8) -> (i32, i32) {
+    (0..quarter_turns & 3).fold((dx, dz), |(x, z), _| (z, -x))
 }
 
 #[cfg(test)]
@@ -154,5 +197,37 @@ mod tests {
         assert!(target.is_satisfied_by(tc(7, 7)));
         assert!(target.is_satisfied_by(tc(13, 10)));
         assert!(!target.is_satisfied_by(tc(6, 10)));
+    }
+
+    #[test]
+    fn any_of_matches_only_its_tiles() {
+        let target = TargetSpec::any_of(&[tc(1, 1), tc(3, 2)]);
+
+        assert!(target.is_satisfied_by(tc(1, 1)));
+        assert!(target.is_satisfied_by(tc(3, 2)));
+        assert!(!target.is_satisfied_by(tc(2, 1)));
+        assert!(!target.is_satisfied_by(TileCoord::default()), "an unused slot is not a target");
+    }
+
+    #[test]
+    fn rotation_turns_clockwise() {
+        assert_eq!(rotate((-1, 0), 0), (-1, 0)); // west
+        assert_eq!(rotate((-1, 0), 1), (0, 1)); // north
+        assert_eq!(rotate((-1, 0), 2), (1, 0)); // east
+        assert_eq!(rotate((-1, 0), 3), (0, -1)); // south
+    }
+
+    #[test]
+    fn a_door_is_reached_from_its_tile_across_its_edge_and_beside_it_unless_walled_off() {
+        let mut map = crate::collision::test_grid::parse("....\n....\n....\n....", 0);
+        // a door on the west edge of (2, 1); a wall between (2, 2) and the door's tile
+        map.add_flags(tc(2, 2), crate::collision::CollisionFlag::BLOCK_SOUTH);
+
+        let reach = TargetSpec::wall_reach(&map, tc(2, 1), 0);
+
+        assert!(reach.contains(&tc(2, 1)), "its own tile");
+        assert!(reach.contains(&tc(1, 1)), "across the edge");
+        assert!(reach.contains(&tc(2, 0)), "beside it, open");
+        assert!(!reach.contains(&tc(2, 2)), "beside it, but walled off");
     }
 }

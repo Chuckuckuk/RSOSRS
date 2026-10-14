@@ -1,0 +1,12 @@
+{
+  "doors": [
+    { "id": "door_1535", "swing": "single", "leaves": [{ "closed": 1535, "open": 1536 }] },
+    { "id": "door_1540", "swing": "single", "leaves": [{ "closed": 1540, "open": 1541 }] },
+    { "id": "door_1543", "swing": "single", "leaves": [{ "closed": 1543, "open": 1544 }] },
+    { "id": "door_13001", "swing": "single", "leaves": [{ "closed": 13001, "open": 13002 }] },
+    { "id": "door_56376", "swing": "single", "leaves": [{ "closed": 56376, "open": 56377 }] },
+    { "id": "large_door_1521", "swing": "double", "leaves": [{ "closed": 1521, "open": 1522 }, { "closed": 1524, "open": 1525 }] },
+    { "id": "gate_1558", "swing": "gate", "leaves": [{ "closed": 1558, "open": 1559 }, { "closed": 1560, "open": 1567 }] },
+    { "id": "gate_12986", "swing": "gate", "leaves": [{ "closed": 12986, "open": 12988 }, { "closed": 12987, "open": 12989 }] }
+  ]
+}

@@ -23,6 +23,11 @@ impl TileCoord {
         Self { x, z, plane }
     }
 
+    /// The tile `dx` east and `dz` north of this one, on the same plane.
+    pub fn offset(self, dx: i32, dz: i32) -> TileCoord {
+        TileCoord::with_plane(self.x + dx, self.z + dz, self.plane)
+    }
+
     /// Chebyshev (king-move) distance - the correct metric for OSRS tile movement cost.
     pub fn chebyshev_distance_to(self, other: TileCoord) -> i32 {
         (self.x - other.x).abs().max((self.z - other.z).abs())

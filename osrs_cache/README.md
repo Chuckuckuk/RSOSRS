@@ -156,7 +156,8 @@ Gaps: animations (bind pose only), appearance colour palettes, per-face prioriti
   CollisionFlag`, so the client hands the grid straight to the server's `CollisionMap`.
 - `osrs_render::world::load_world` builds it into `WorldData::collision`; the client's mock server walks on it
   (`osrs_core/tests/lumbridge_collision.rs` checks no walking onto blocked tiles or through wall edges).
-- Not modelled: doors opening (closed doors block), multi-plane movement, projectile-blocking flags, and
+- Doors are baked as placed (closed ones block); the server moves a door's wall when it opens, with the same
+  table (`wall_edges`). Not modelled: multi-plane movement, projectile-blocking flags, and
   clicks on a blocked tile simply path to the nearest reachable one.
 
 ## Map streaming

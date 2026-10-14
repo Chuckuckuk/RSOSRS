@@ -4,6 +4,7 @@
 //! into live entities.
 
 mod consumables;
+mod doors;
 mod gathering;
 mod items;
 mod npcs;
@@ -18,6 +19,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 pub use consumables::{ConsumableDef, ConsumableEffect};
+pub use doors::{DoorDef, DoorLeafDef, DoorSwing, LeafMove};
 pub use gathering::{DepletionDef, GatheringNodeDef, NodeLocDef, PetDropDef, Requirement, ToolDef};
 pub use items::{AmmoDef, AmmoWeight, EquipSlot, ItemDef, SetDef, SpecialAttackDef, StanceDef, StanceKind, WeaponDef};
 pub use npcs::{AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels, NpcMovementDef, NpcSounds, RotationDef, SummonDef};
@@ -93,6 +95,7 @@ pub struct DataFile {
     pub consumables: Vec<ConsumableDef>,
     pub tools: Vec<ToolDef>,
     pub gathering: Vec<GatheringNodeDef>,
+    pub doors: Vec<DoorDef>,
 }
 
 #[derive(Debug)]
@@ -128,6 +131,7 @@ pub struct Registry {
     /// By item id.
     tools: BTreeMap<String, ToolDef>,
     gathering: BTreeMap<String, GatheringNodeDef>,
+    doors: BTreeMap<String, DoorDef>,
 }
 
 fn insert_all<T>(
@@ -167,6 +171,7 @@ impl Registry {
         insert_all(&mut self.consumables, "consumable", file.consumables, |d| &d.id)?;
         insert_all(&mut self.tools, "tool", file.tools, |d| &d.item)?;
         insert_all(&mut self.gathering, "gathering node", file.gathering, |d| &d.id)?;
+        insert_all(&mut self.doors, "door", file.doors, |d| &d.id)?;
         Ok(())
     }
 
@@ -202,6 +207,7 @@ impl Registry {
             ("npcs.json", include_str!("../../data/npcs.json")),
             ("tools.json", include_str!("../../data/tools.json")),
             ("gathering.json", include_str!("../../data/gathering.json")),
+            ("doors.json", include_str!("../../data/doors.json")),
         ] {
             registry.merge_json(name, json).unwrap_or_else(|e| panic!("bundled data is malformed: {e}"));
         }
@@ -307,6 +313,25 @@ impl Registry {
     /// The node that choosing `action` on scenery object `loc` gathers from, if any.
     pub fn gathering_node_for(&self, loc: u32, action: &str) -> Option<&GatheringNodeDef> {
         self.gathering.values().find(|node| node.action.eq_ignore_ascii_case(action) && node.depleted_form(loc).is_some())
+    }
+
+    pub fn doors(&self) -> impl Iterator<Item = &DoorDef> {
+        self.doors.values()
+    }
+
+    pub fn door(&self, id: &str) -> Option<&DoorDef> {
+        self.doors.get(id)
+    }
+
+    /// The door that scenery object `object` is a leaf of (in either state).
+    pub fn door_for(&self, object: u32) -> Option<&DoorDef> {
+        self.doors.values().find(|door| door.state_of(object).is_some())
+    }
+
+    /// Adds (or replaces) a door: tests build doors the bundle does not have this way.
+    #[cfg(test)]
+    pub(crate) fn insert_door_for_test(&mut self, def: DoorDef) {
+        self.doors.insert(def.id.clone(), def);
     }
 
     /// Adds (or replaces) a gathering node: tests build nodes the bundle does not have this way.
@@ -514,6 +539,24 @@ impl Registry {
             }
         }
 
+        let mut door_objects = BTreeMap::new();
+        for door in self.doors.values() {
+            let who = format!("door '{}'", door.id);
+            if door.leaves.len() != door.swing.leaf_count() {
+                problems.push(format!("{who}: a {:?} door has {} leaves, not {}", door.swing, door.leaves.len(), door.swing.leaf_count()));
+            }
+            for leaf in &door.leaves {
+                if leaf.closed == leaf.open {
+                    problems.push(format!("{who}: object {} is both closed and open", leaf.closed));
+                }
+                for object in [leaf.closed, leaf.open] {
+                    if let Some(other) = door_objects.insert(object, &door.id) {
+                        problems.push(format!("{who}: object {object} is already a leaf of '{other}'"));
+                    }
+                }
+            }
+        }
+
         if problems.is_empty() {
             Ok(())
         } else {
@@ -586,6 +629,37 @@ mod tests {
         assert!(registry.consumables().count() >= 15);
         assert!(registry.tools().count() >= 9);
         assert!(registry.gathering_nodes().count() >= 1);
+        assert!(registry.doors().count() >= 1);
+    }
+
+    #[test]
+    fn doors_pair_their_closed_and_open_objects() {
+        let registry = Registry::builtin();
+
+        let door = registry.door_for(1535).expect("1535 is a door");
+        assert_eq!((door.state_of(1535), door.state_of(1536)), (Some(false), Some(true)));
+        assert_eq!(registry.door_for(1536).map(|d| &d.id), Some(&door.id));
+        assert_eq!(registry.door_for(1524).map(|d| d.swing), Some(DoorSwing::Double));
+        assert!(registry.door_for(1276).is_none(), "a tree is not a door");
+    }
+
+    #[test]
+    fn a_door_with_the_wrong_number_of_leaves_or_a_shared_object_is_reported() {
+        let mut registry = Registry::new();
+        registry
+            .merge_json(
+                "bad",
+                r#"{"doors":[
+                    {"id":"a","swing":"double","leaves":[{"closed":1,"open":2}]},
+                    {"id":"b","swing":"single","leaves":[{"closed":2,"open":3}]}
+                ]}"#,
+            )
+            .unwrap();
+
+        let DataError::Invalid(problems) = registry.validate().unwrap_err() else { panic!("expected Invalid") };
+
+        assert!(problems.iter().any(|p| p.contains("has 1 leaves, not 2")), "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("object 2 is already a leaf")), "{problems:?}");
     }
 
     #[test]

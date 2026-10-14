@@ -92,7 +92,7 @@ Set these in PowerShell with `$env:NAME = "value"` before `cargo run`.
 | `OSRS_WALK_RUN=0` | with `OSRS_WALK_TO`, walk rather than run |
 | `OSRS_ATTACK=id` | attack NPC entity `id` at startup (the man is usually 1) |
 | `OSRS_SEED=n` | seed of the open world's random rolls; by default it comes from the clock (and is printed), so each launch rolls differently |
-| `OSRS_INTERACT=id,x,z,option` | choose `option` on scenery object `id` covering tile (x, z) at startup, e.g. `OSRS_SPAWN=3245,3231` with `OSRS_INTERACT=1276,3247,3231,Chop down` chops the tree east of you |
+| `OSRS_DO="t:cmd:args;..."` | timed server commands (`t` = seconds since start), to chain actions without clicking: `interact:id,x,z,option` (an option on scenery object `id` over tile (x, z)) and `walk:x,z`. E.g. `OSRS_SPAWN=3231,3207` with `OSRS_DO="2:interact:1535,3234,3207,Open;6:walk:3237,3207;11:interact:1536,3233,3207,Close"` opens the house door, walks out and closes it behind you |
 | `OSRS_WIELD=0,1` | wield the items in these inventory slots at startup |
 | `OSRS_TAB=n` | open interface tab `n` (0-13) first |
 | `OSRS_LAYOUT=classic`, `modern` or `fixed` | interface layout: resizable classic (default), resizable modern, or the fixed 765x503 one (the 3D view then fills only its viewport widget) |
@@ -128,6 +128,13 @@ attack's `animation`. To fight it in the client, write a scenario with a `locati
 map and start the client with `--scenario` (chapter 7.1); `data/scenarios/jad.json` is the example.
 To have it stand about in the open world instead, add a `spawn_npc_def` call in the
 server-building closure in [`osrs_core/src/main.rs`](../osrs_core/src/main.rs).
+
+### Add a door or gate
+
+No Rust changes. Find its closed and open object ids with `obj_actions <id>...` (the closed form
+has "Open", the open form "Close", with the same models) or `obj_actions --named "Gate"`, and add
+it to [`data/doors.json`](../osrs_core/data/doors.json) with its swing (`single`, `double`,
+`gate`). Pairs list both leaves. Try it in the client with `OSRS_SPAWN` and `OSRS_DO`.
 
 ### Add a gathering resource (another tree, a rock)
 
