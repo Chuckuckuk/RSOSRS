@@ -335,7 +335,8 @@ impl Registry {
         self.doors.get(id)
     }
 
-    /// The door that scenery object `object` is a leaf of (in either state).
+    /// The door that scenery object `object` is a leaf of (in either state). A closed form
+    /// belongs to one door; an open form shared by several gives the first.
     pub fn door_for(&self, object: u32) -> Option<&DoorDef> {
         self.doors.values().find(|door| door.state_of(object).is_some())
     }
@@ -564,7 +565,11 @@ impl Registry {
             }
         }
 
-        let mut door_objects = BTreeMap::new();
+        // a closed form belongs to one door (both leaves of a pair may be the same object); an
+        // open form may be shared (several doors open into the same object), but is never also
+        // a closed form
+        let mut closed_in = BTreeMap::new();
+        let mut open_forms = std::collections::BTreeSet::new();
         for door in self.doors.values() {
             let who = format!("door '{}'", door.id);
             if door.leaves.len() != door.swing.leaf_count() {
@@ -574,12 +579,16 @@ impl Registry {
                 if leaf.closed == leaf.open {
                     problems.push(format!("{who}: object {} is both closed and open", leaf.closed));
                 }
-                for object in [leaf.closed, leaf.open] {
-                    if let Some(other) = door_objects.insert(object, &door.id) {
-                        problems.push(format!("{who}: object {object} is already a leaf of '{other}'"));
+                if let Some(other) = closed_in.insert(leaf.closed, &door.id) {
+                    if other != &door.id {
+                        problems.push(format!("{who}: object {} already closes '{other}'", leaf.closed));
                     }
                 }
+                open_forms.insert(leaf.open);
             }
+        }
+        for object in open_forms.iter().filter(|object| closed_in.contains_key(*object)) {
+            problems.push(format!("door object {object} is both a closed and an open form"));
         }
 
         if problems.is_empty() {
@@ -669,6 +678,26 @@ mod tests {
     }
 
     #[test]
+    fn doors_may_share_an_open_form_but_not_a_closed_one() {
+        let mut registry = Registry::new();
+        registry
+            .merge_json(
+                "doors",
+                r#"{"doors":[
+                    {"id":"a","swing":"single","leaves":[{"closed":1,"open":9}]},
+                    {"id":"b","swing":"single","leaves":[{"closed":2,"open":9}]},
+                    {"id":"pair","swing":"gate","leaves":[{"closed":3,"open":8},{"closed":3,"open":8}]}
+                ]}"#,
+            )
+            .unwrap();
+        assert!(registry.validate().is_ok(), "a shared open form and a pair of identical leaves are fine");
+
+        registry.merge_json("more", r#"{"doors":[{"id":"c","swing":"single","leaves":[{"closed":1,"open":7}]}]}"#).unwrap();
+        let DataError::Invalid(problems) = registry.validate().unwrap_err() else { panic!("expected Invalid") };
+        assert!(problems.iter().any(|p| p.contains("object 1 already closes")), "{problems:?}");
+    }
+
+    #[test]
     fn a_door_with_the_wrong_number_of_leaves_or_a_shared_object_is_reported() {
         let mut registry = Registry::new();
         registry
@@ -684,7 +713,7 @@ mod tests {
         let DataError::Invalid(problems) = registry.validate().unwrap_err() else { panic!("expected Invalid") };
 
         assert!(problems.iter().any(|p| p.contains("has 1 leaves, not 2")), "{problems:?}");
-        assert!(problems.iter().any(|p| p.contains("object 2 is already a leaf")), "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("object 2 is both a closed and an open form")), "{problems:?}");
     }
 
     #[test]
