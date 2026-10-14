@@ -4,7 +4,7 @@
 //! Only the one player exists, so there is no owner and no private period: an item is simply
 //! there for the 3 minutes (the game's 1 minute private + 2 public) and then gone.
 
-use super::gathering::PlayerAction;
+use super::objects::PlayerAction;
 use super::world::World;
 use crate::pathfinding::TargetSpec;
 use crate::tiles::TileCoord;

@@ -35,7 +35,7 @@
 
 use std::rc::Rc;
 
-use super::gathering::PlayerAction;
+use super::objects::PlayerAction;
 use super::scenery::{Loc, SpawnedLoc};
 use super::world::World;
 use crate::collision::OccupancyMask;

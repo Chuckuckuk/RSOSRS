@@ -32,7 +32,7 @@ pub use config::{BossConfig, CombatLevels, HealerConfig, NpcConfig, PassiveConfi
 pub use events::{Combatant, WorldEvent};
 pub use examine::ExamineTexts;
 pub use firemaking::LightAction;
-pub use gathering::{GatherAction, PlayerAction};
+pub use gathering::GatherAction;
 pub use ground_items::{GroundItem, GroundItems, DESPAWN_TICKS};
 pub use objects::{DoorAction, PlayerAction};
 pub use scenery::{Loc, LocChange, LocKey, SceneryIndex, SpawnedLoc};

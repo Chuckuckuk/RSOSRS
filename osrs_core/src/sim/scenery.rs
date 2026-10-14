@@ -154,9 +154,6 @@ impl SceneryState {
         self.spawned.values().any(|spawned| spawned.loc.covers(tile))
     }
 
-    /// The object `loc` currently is: its replacement while it has one, else itself.
-    pub fn current_id(&self, loc: &Loc) -> u32 {
-        self.changes.get(&loc.key()).map_or(loc.id, |change| change.replacement)
     /// Puts `key`'s placement back before its time (a door closed again), returning the change.
     pub fn restore(&mut self, key: &LocKey) -> Option<LocChange> {
         self.changes.remove(key)
@@ -196,9 +193,9 @@ impl SceneryState {
     }
 
     /// The end of a tick: timers worked this tick run down a tick and the others back up (one
-    /// that is full again is forgotten), and the changes whose time is up are undone. Returns the
-    /// made objects that ran out this tick.
-    pub fn advance(&mut self) -> Vec<Loc> {
+    /// that is full again is forgotten), and the changes and made objects whose time is up are
+    /// undone. Returns what ran out this tick.
+    pub fn advance(&mut self) -> Expired {
         let mut burnt_out = Vec::new();
         self.timers.retain(|_, timer| {
             if std::mem::take(&mut timer.worked_this_tick) {
@@ -226,9 +223,17 @@ impl SceneryState {
             }
             !done
         });
-        burnt_out
-        expired
+        Expired { changes: expired, spawned: burnt_out }
     }
+}
+
+/// What [`SceneryState::advance`] undid at the end of a tick.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Expired {
+    /// Changes whose time was up: their originals are back.
+    pub changes: Vec<LocChange>,
+    /// Made objects that ran out (fires that burnt out).
+    pub spawned: Vec<Loc>,
 }
 
 #[cfg(test)]
@@ -259,9 +264,9 @@ mod tests {
         state.replace(loc, loc.with_id(1342), 2);
 
         assert_eq!(state.current(&loc).id, 1342);
-        assert!(state.advance().is_empty());
+        assert!(state.advance().changes.is_empty());
         assert_eq!(state.current(&loc).id, 1342);
-        let expired = state.advance();
+        let expired = state.advance().changes;
         assert_eq!(expired.len(), 1);
         assert_eq!(state.current(&loc).id, 1276);
     }

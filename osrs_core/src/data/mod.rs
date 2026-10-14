@@ -325,6 +325,8 @@ impl Registry {
     /// The firemaking definition of the log item `item`, if it can be lit.
     pub fn log(&self, item: &str) -> Option<&LogDef> {
         self.logs.get(item)
+    }
+
     pub fn doors(&self) -> impl Iterator<Item = &DoorDef> {
         self.doors.values()
     }
