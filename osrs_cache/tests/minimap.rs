@@ -20,7 +20,7 @@ fn lumbridge_minimap_has_water_walls_doors_and_icons() {
     assert_eq!(img.rgba.len(), SIZE * SIZE * 4);
 
     // the river Lum and the pond: plenty of blue-ish pixels
-    let blue = count(&img.rgba, |r, g, b| b > r + 30 && b > g + 10);
+    let blue = count(&img.rgba, |r, g, b| b as i32 > r as i32 + 30 && b as i32 > g as i32 + 10);
     assert!(blue > 1500, "{blue} blue pixels");
     // fences and castle walls are white lines, doors red ones
     let white = count(&img.rgba, |r, g, b| (r, g, b) == (0xEE, 0xEE, 0xEE));
