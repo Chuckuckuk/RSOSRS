@@ -17,8 +17,10 @@
 //!        OSRS_WIELD=0,1                  wield the items in these inventory slots once in the world
 //!        OSRS_SEED=n                     seed of the open world's random rolls (default: from the clock,
 //!                                        so each launch rolls differently); set it to replay a run
-//!        OSRS_INTERACT=id,x,z,option     choose an option on the scenery object `id` covering tile (x, z)
-//!                                        once in the world, e.g. 1276,3247,3231,Chop down
+//!        OSRS_DO="t:cmd:args;..."         timed server commands (t = seconds since start), chained:
+//!                                          interact:id,x,z,option  an option on scenery object `id` over (x, z)
+//!                                          walk:x,z                walk to a world tile
+//!                                        e.g. "2:interact:1535,3234,3207,Open;8:walk:3236,3207"
 //!        OSRS_TAB=n                      open this interface tab first (0..13)
 //!        OSRS_LAYOUT=classic|modern|fixed  interface layout (default classic: resizable)
 //!        OSRS_UI_SCALE=n                 whole-number interface scale (default: largest that fits 765x503)
@@ -472,7 +474,7 @@ fn main() {
     .add_systems(Startup, setup)
     .add_systems(
         Update,
-        (scripted_input, poll_server, start_scenario, sync_player, npcs::sync_npcs, map_stream::stream_map, scenery_swaps::show_scenery_changes, limit_planes, orbit_camera, toggle_grid, screenshot_and_exit)
+        (scripted_input, scripted_commands, poll_server, start_scenario, sync_player, npcs::sync_npcs, map_stream::stream_map, scenery_swaps::show_scenery_changes, limit_planes, orbit_camera, toggle_grid, screenshot_and_exit)
             .chain(),
     );
     app.world_mut().insert_non_send(ServerLink { link, latest: None, ticks_in_latest: 1, new_events: Vec::new() });
@@ -658,17 +660,6 @@ fn setup(
     // without a click)
     if let Some(target) = std::env::var("OSRS_ATTACK").ok().and_then(|v| v.parse::<u32>().ok()) {
         server.link.send(ClientCommand::Attack { target: osrs_core::actors::EntityId(target) });
-    }
-
-    // OSRS_INTERACT=id,x,z,option chooses an option on a scenery object straight away (for trying
-    // an object without finding it on screen)
-    if let Ok(v) = std::env::var("OSRS_INTERACT") {
-        let parts: Vec<&str> = v.splitn(4, ',').map(str::trim).collect();
-        if let [id, x, z, action] = parts[..] {
-            if let (Ok(id), Ok(x), Ok(z)) = (id.parse(), x.parse(), z.parse()) {
-                server.link.send(ClientCommand::InteractObject { id, tile: TileCoord::new(x, z), action: action.to_owned() });
-            }
-        }
     }
 
     let feet = spawner
@@ -1022,6 +1013,47 @@ fn toggle_grid(
                 _ => Visibility::Hidden,
             };
         }
+    }
+}
+
+/// One step of an `OSRS_DO` script, as the server command it sends.
+fn scripted_command(command: &str, args: &str) -> Option<ClientCommand> {
+    let parts: Vec<&str> = args.split(',').map(str::trim).collect();
+    match (command, &parts[..]) {
+        ("interact", [id, x, z, action @ ..]) if !action.is_empty() => Some(ClientCommand::InteractObject {
+            id: id.parse().ok()?,
+            tile: TileCoord::new(x.parse().ok()?, z.parse().ok()?),
+            action: action.join(","),
+        }),
+        ("walk", [x, z]) => Some(ClientCommand::WalkTo { tile: TileCoord::new(x.parse().ok()?, z.parse().ok()?), force_inverse: false }),
+        _ => None,
+    }
+}
+
+/// Debug command script, `OSRS_DO="t:interact:id,x,z,option;t:walk:x,z;..."` (seconds since
+/// start): sends server commands in order, for trying a chain of actions (open a door, walk
+/// through, close it) without finding things on screen.
+fn scripted_commands(time: Res<Time>, server: NonSend<ServerLink>, mut script: Local<Option<Vec<(f32, ClientCommand)>>>) {
+    let steps = script.get_or_insert_with(|| {
+        let text = std::env::var("OSRS_DO").unwrap_or_default();
+        text.split(';')
+            .filter(|step| !step.trim().is_empty())
+            .filter_map(|step| {
+                let mut p = step.trim().splitn(3, ':');
+                let (at, command, args) = (p.next()?.parse().ok()?, p.next()?, p.next().unwrap_or(""));
+                let parsed = scripted_command(command, args);
+                if parsed.is_none() {
+                    eprintln!("[client] OSRS_DO: cannot read \"{step}\"");
+                }
+                Some((at, parsed?))
+            })
+            .collect()
+    });
+    let now = time.elapsed_secs();
+    while steps.first().is_some_and(|(at, _)| *at <= now) {
+        let (_, command) = steps.remove(0);
+        println!("[client] OSRS_DO: {command:?}");
+        server.link.send(command);
     }
 }
 

@@ -168,7 +168,9 @@ the same bit values as `osrs_core::collision::CollisionFlag`:
 * **Scenery** (kinds 9-21), if clip type is not 0: `OBJECT` over the whole (rotated) footprint.
 * **Floor decorations** (22): `FLOOR_DECORATION` only when the definition's opcode 19 is 1.
 
-Doors are treated as closed walls, and only plane 0 is produced.
+Doors are baked as they are placed (a closed door is a wall); opening one moves its wall at run
+time on the server (`osrs_core::sim::objects`), with the same edge table
+(`collision::wall_edges`, shared by both crates). Only plane 0 is produced.
 
 ---
 
