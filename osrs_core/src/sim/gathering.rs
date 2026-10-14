@@ -227,7 +227,8 @@ impl World {
             Some(PlayerAction::Gather(gather)) => gather,
             Some(PlayerAction::Light(light)) => return light.started.then_some(super::firemaking::LIGHTING_ANIMATION),
             Some(PlayerAction::Tend(tend)) => return tend.started.then_some(super::firemaking::TENDING_ANIMATION),
-            Some(PlayerAction::Door(_)) | Some(PlayerAction::Rest(_)) | Some(PlayerAction::Take { .. }) | None => return None,
+            Some(PlayerAction::Rest(rest)) => return rest.resting.then_some(super::firemaking::RESTING_ANIMATION),
+            Some(PlayerAction::Door(_)) | Some(PlayerAction::Take { .. }) | None => return None,
         };
         let node = self.registry().gathering_node(&gather.node).filter(|_| gather.started)?;
         best_tool(&self.player, self.registry(), node)?.0.animation

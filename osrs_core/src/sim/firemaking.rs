@@ -31,7 +31,9 @@
 //! burn time at `BONFIRE_BASE_TICKS` plus its `bonfire_ticks`. No tinderbox is needed to tend one. "Check" says roughly how long is left.
 //! A bonfire that burns out leaves ashes like a fire.
 //!
-//! "Rest" (the bonfire's left-click) walks the player up to it and redirects its respawn to the
+//! "Rest" (the bonfire's left-click) walks the player up to it, where it sits facing the fire and
+//! heals `REST_HEAL_PER_TICK` a tick until it does something else, dies, or the bonfire burns
+//! out. Sitting also redirects its respawn to the
 //! tile it stands on (`World::redirect_respawn`), for as long as that bonfire burns: a death
 //! meanwhile brings the player back there instead of at the usual respawn point. Each log put on
 //! a bonfire grants it `RESPAWNS_PER_LOG` respawns; each death that respawns there uses one, and
@@ -68,6 +70,11 @@ const RESPAWNS_PER_LOG: i32 = 1;
 /// Ticks between logs added, and from starting to the first one.
 const TEND_INTERVAL: i32 = 9;
 const TEND_FIRST_TICKS: i32 = 1;
+/// The cache sequence of sitting by a bonfire: the looping "Sit down" emote (`EMOTE_SIT_LOOP`:
+/// sits down once, then loops the seated idle).
+pub const RESTING_ANIMATION: u32 = 10061;
+/// Hitpoints a player resting by a bonfire heals each tick (on top of natural regeneration).
+const REST_HEAL_PER_TICK: i32 = 1;
 /// A bonfire's options, the left-click one first.
 pub const BONFIRE_OPTIONS: [&str; 3] = ["Rest", "Tend-to", "Check"];
 /// What "Check" says by how much is left: one message per 60 ticks, the last for 240 and over.
@@ -120,6 +127,9 @@ pub struct TendAction {
 pub struct RestAction {
     /// The tile of the bonfire.
     pub tile: TileCoord,
+    /// Whether the player has arrived and sat down. From then on the action lasts until the
+    /// player does something else, dies, or the bonfire burns out.
+    pub resting: bool,
 }
 
 impl World {
@@ -196,7 +206,7 @@ impl World {
                 Ok(())
             }
             "rest" => {
-                self.player.set_action(PlayerAction::Rest(RestAction { tile: fire.tile }));
+                self.player.set_action(PlayerAction::Rest(RestAction { tile: fire.tile, resting: false }));
                 Ok(())
             }
             "check" => {
@@ -303,26 +313,31 @@ impl World {
         true
     }
 
-    /// One tick of walking up to a bonfire to rest by it. Returns that it used the tick.
-    pub(super) fn run_rest_action(&mut self, rest: RestAction) -> bool {
+    /// One tick of resting by a bonfire: walking up to it, then sitting facing it and healing
+    /// until something else is done. Returns that it used the tick.
+    pub(super) fn run_rest_action(&mut self, mut rest: RestAction) -> bool {
         // burnt out meanwhile: stop without a word
         let Some(fire) = self.scenery_state.spawned_at(rest.tile).filter(|f| f.loc.id == BONFIRE_LOC) else {
             self.player.action = None;
             return true;
         };
-        match self.approach(TargetSpec::within_range_of_rect(fire.loc.tile, 1, 1, 1)) {
-            Approach::There => {}
-            Approach::OnTheWay => return true,
-            Approach::NoWay => {
-                self.player.action = None;
-                self.game_message("I can't reach that!".to_owned());
-                return true;
+        if !rest.resting {
+            match self.approach(TargetSpec::within_range_of_rect(fire.loc.tile, 1, 1, 1)) {
+                Approach::There => {}
+                Approach::OnTheWay => return true,
+                Approach::NoWay => {
+                    self.player.action = None;
+                    self.game_message("I can't reach that!".to_owned());
+                    return true;
+                }
             }
+            rest.resting = true;
+            let tile = self.player.tile();
+            self.redirect_respawn(tile, fire.loc);
+            self.game_message("You rest by the fire. If you die while it burns, you will wake up here.".to_owned());
         }
-        self.player.action = None;
-        let tile = self.player.tile();
-        self.redirect_respawn(tile, fire.loc);
-        self.game_message("You rest by the fire. If you die while it burns, you will wake up here.".to_owned());
+        self.player.mover.actor.health_mut().heal(REST_HEAL_PER_TICK);
+        self.player.action = Some(PlayerAction::Rest(rest));
         true
     }
 
@@ -665,6 +680,61 @@ mod tests {
         assert!(world.take_messages().iter().any(|m| m.contains("You rest by the fire")));
     }
 
+    fn is_resting(world: &World) -> bool {
+        matches!(world.player.action(), Some(PlayerAction::Rest(rest)) if rest.resting)
+    }
+
+    #[test]
+    fn resting_sits_and_faces_the_fire_until_something_else_is_done() {
+        let (mut world, fire) = world_with_bonfire(1000);
+        world.player_interact_object(BONFIRE_LOC, fire.tile, "Rest").unwrap();
+
+        assert_eq!(world.player_action_animation(), None, "still on the way");
+        run_until(&mut world, 10, is_resting);
+        run_until(&mut world, 5, |_| false);
+
+        assert!(is_resting(&world), "sitting, not finished");
+        assert_eq!(world.player_action_animation(), Some(RESTING_ANIMATION));
+        assert_eq!(world.player_facing_loc().map(|loc| loc.tile), Some(fire.tile));
+
+        world.player_request_walk_to(TileCoord::new(6, 6), false);
+        run_until(&mut world, 3, |_| false);
+        assert!(!is_resting(&world), "a walk click gets up");
+        assert_eq!(world.player_action_animation(), None);
+        assert_eq!(world.player_facing_loc(), None);
+    }
+
+    #[test]
+    fn resting_heals_a_hitpoint_every_tick_and_not_before_sitting() {
+        let (mut world, fire) = world_with_bonfire(1000);
+        let max = world.player.mover.actor.health().max();
+        world.player.mover.actor.health_mut().damage(max - 2);
+        world.player_interact_object(BONFIRE_LOC, fire.tile, "Rest").unwrap();
+
+        world.run_tick(); // walking up
+        assert_eq!(world.player.mover.actor.health().current(), 2, "no healing on the way");
+
+        run_until(&mut world, 10, is_resting);
+        let sat = world.player.mover.actor.health().current();
+        run_until(&mut world, 5, |_| false);
+
+        assert_eq!(world.player.mover.actor.health().current(), sat + 5, "one per tick");
+        run_until(&mut world, 200, |_| false);
+        assert_eq!(world.player.mover.actor.health().current(), max, "stops at full");
+    }
+
+    #[test]
+    fn resting_ends_when_the_bonfire_burns_out() {
+        let (mut world, fire) = world_with_bonfire(30);
+        world.player_interact_object(BONFIRE_LOC, fire.tile, "Rest").unwrap();
+        run_until(&mut world, 10, is_resting);
+
+        run_until(&mut world, 60, |w| fires(w) == 0);
+        run_until(&mut world, 2, |_| false);
+
+        assert!(world.player.action().is_none());
+    }
+
     #[test]
     fn the_redirect_ends_with_the_fire() {
         let (mut world, fire) = world_with_bonfire(30);
@@ -682,7 +752,7 @@ mod tests {
     fn dying_beside_a_burning_bonfire_brings_the_player_back_at_it() {
         let (mut world, fire) = world_with_bonfire(1000);
         world.player_interact_object(BONFIRE_LOC, fire.tile, "Rest").unwrap();
-        run_until(&mut world, 10, |w| w.player.action().is_none());
+        run_until(&mut world, 10, is_resting);
         world.player_request_walk_to(TileCoord::new(0, 0), false);
         run_until(&mut world, 10, |w| w.player.tile() == TileCoord::new(0, 0));
 
@@ -708,7 +778,7 @@ mod tests {
         assert_eq!(bonfire(&world).map(|b| b.respawns), Some(2), "one per log");
 
         world.player_interact_object(BONFIRE_LOC, fire.tile, "Rest").unwrap();
-        run_until(&mut world, 10, |w| w.player.action().is_none());
+        run_until(&mut world, 10, is_resting);
         let rest = world.player.tile();
         let die = |world: &mut World| {
             let hp = world.player.mover.actor.health().current();

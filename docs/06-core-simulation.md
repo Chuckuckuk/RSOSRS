@@ -569,7 +569,14 @@ and then every 9, for the log's full XP. The fire it was is replaced by a bonfir
 its `bonfire_ticks` (never shortening it), so logs are added until the inventory has none. Starting one needs a tinderbox and no bonfire within
 5 tiles (Chebyshev); tending needs none. "Check" says one of five messages by `(left + 1) / 60`.
 A burnt-out bonfire leaves ashes. "Rest" (the bonfire's left-click) starts a `PlayerAction::Rest`:
-the player walks to within 1 tile, then `World::redirect_respawn` points its respawn at the tile
+the player walks to within 1 tile, then sits (`RestAction::resting`, animation `RESTING_ANIMATION`
+10061, the looping "Sit down" emote: it sits once and then loops the seated idle from the
+sequence's loop step (frames back from the end, 8 of 17 here), which `Clip::loop_start` honours),
+facing the
+bonfire (`player_facing_loc`) and healing `REST_HEAL_PER_TICK` (1) hitpoints every tick, on top of
+natural regeneration. The action lasts until the player does anything else (a walk click, another
+action or attack), dies, or the bonfire burns out; nothing about taking damage ends it yet.
+On sitting, `World::redirect_respawn` points its respawn at the tile
 it stands on, tied to that bonfire's `Loc`; `respawn_point()` is what `count_down_respawn` uses
 (the redirect, else `respawn_tile`) and `advance_scenery` drops the redirect when the bonfire
 burns out. Resting at another bonfire replaces it. A bonfire also has `SpawnedLoc::respawns`:
