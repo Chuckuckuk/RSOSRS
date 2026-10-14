@@ -1338,7 +1338,7 @@ mod tests {
         let snapshot = (0..10).filter_map(|_| server.advance(0.6)).find(|s| !s.scenery.is_empty()).unwrap();
 
         assert_eq!(snapshot.scenery.len(), 1);
-        assert_eq!((snapshot.scenery[0].loc, snapshot.scenery[0].replacement), (tree, 1342));
+        assert_eq!((snapshot.scenery[0].loc, snapshot.scenery[0].replacement), (tree, tree.with_id(1342)));
         let woodcutting = snapshot.player.skills.iter().find(|s| s.skill == Skill::Woodcutting).unwrap();
         assert_eq!(woodcutting.xp_tenths, 250);
         assert_eq!(snapshot.player.action_animation, None);

@@ -20,6 +20,7 @@
 
 use std::rc::Rc;
 
+use super::objects::{Approach, PlayerAction};
 use super::player::Player;
 use super::scenery::Loc;
 use super::world::World;
@@ -131,7 +132,7 @@ impl World {
     }
 
     /// Checks what can be checked from afar, then sends the player to gather from `loc`.
-    fn player_start_gathering(&mut self, node: &GatheringNodeDef, loc: Loc) -> Result<(), String> {
+    pub(super) fn player_start_gathering(&mut self, node: &GatheringNodeDef, loc: Loc) -> Result<(), String> {
         if let Some(refusal) = first_unmet(&self.player, self.registry(), &node.requirements) {
             return Err(refusal);
         }
@@ -166,11 +167,8 @@ impl World {
             return true;
         }
 
-        let reach = TargetSpec::adjacent(gather.loc.tile, gather.loc.size.0, gather.loc.size.1);
-        if !reach.is_satisfied_by(self.player.tile()) {
-            self.player.approaching_target = true;
-            self.player.current_path_is_running = self.player.is_running;
-            self.player.mover.request_move(&mut self.pathfinder, &mut self.map, reach);
+        // (with no path yet, it keeps trying)
+        if self.approach(TargetSpec::adjacent(gather.loc.tile, gather.loc.size.0, gather.loc.size.1)) != Approach::There {
             return true;
         }
 
@@ -248,7 +246,7 @@ impl World {
             if let Some(replacement) = node.depleted_form(loc.id) {
                 let [min, max] = node.respawn_ticks;
                 let respawn = self.player.skilling_rng.next_range(min, max + 1);
-                self.scenery_state.replace(*loc, replacement, respawn);
+                self.change_loc(*loc, loc.with_id(replacement), respawn);
             }
             return false;
         }
@@ -321,6 +319,7 @@ mod tests {
     use crate::rng::ScriptedRng;
     use crate::sim::scenarios::dev_open_floor_world;
     use crate::sim::{PlayerConfig, WorldEvent};
+    use crate::tiles::TileCoord;
 
     const TREE: u32 = 1276;
     const STUMP: u32 = 1342;
@@ -412,7 +411,7 @@ mod tests {
         assert!(world.take_events().contains(&WorldEvent::Experience { skill: Skill::Woodcutting, gained_tenths: 250 }));
         let changes: Vec<_> = world.scenery_changes().copied().collect();
         assert_eq!(changes.len(), 1);
-        assert_eq!((changes[0].loc, changes[0].replacement), (tree(), STUMP));
+        assert_eq!((changes[0].loc, changes[0].replacement), (tree(), tree().with_id(STUMP)));
         assert!(world.player.action().is_none(), "a regular tree gives one log, then the player stops");
         assert_eq!(world.player_action_animation(), None);
     }

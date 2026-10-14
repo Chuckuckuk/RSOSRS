@@ -336,6 +336,19 @@ impl StreamedWorld {
         Some([at(0, 0), at(1, 0), at(0, 1), at(1, 1)])
     }
 
+    /// Where an object `w` x `h` tiles placed with its south-west tile at (`x`, `z`) stands: the
+    /// middle of its footprint, at the average height of the footprint's four outer corners (as
+    /// the map loader places objects), if its square is loaded.
+    pub fn object_origin(&self, x: i32, z: i32, w: i32, h: i32) -> Option<Vec3> {
+        // the outer corners: south-west of the south-west tile, south-east of the south-east one...
+        let sw = self.tile_corners(x, z)?[0];
+        let se = self.tile_corners(x + w - 1, z)?[1];
+        let nw = self.tile_corners(x, z + h - 1)?[2];
+        let ne = self.tile_corners(x + w - 1, z + h - 1)?[3];
+        let height = (sw + se + nw + ne) / 4;
+        Some(Vec3::new(x as f32 + w as f32 / 2.0, -(height as f32) / 128.0, -(z as f32 + h as f32 / 2.0)))
+    }
+
     /// Render-space position of the ground at the middle of a world tile, if it is loaded.
     pub fn ground_at(&self, x: i32, z: i32) -> Option<Vec3> {
         let h: i32 = self.tile_corners(x, z)?.iter().sum();
