@@ -12,6 +12,7 @@ Issues live at <https://github.com/Chuckuckuk/RSOSRS/issues>. Use `gh` with `-R 
 - Start the title with the prefix of its type (see [Title prefixes](#title-prefixes)).
 - Say what happens now, what should happen, and where in the code. Name the branch it was found on.
 - Always add labels; see [Labels](#labels).
+- Map out any relevant relationships
 
 ### Title prefixes
 
@@ -77,3 +78,6 @@ Every issue gets:
 | `duplicate` | resolution | This issue or pull request already exists |
 | `invalid` | resolution | This doesn't seem right |
 | `wontfix` | resolution | This will not be worked on |
+
+### Updating issues
+Query issues whenever you suspect an issue needs updating. It may need a reworked description, new relationships, milestones, etc. If you update the description, add a comment describing the changes and the reasoning behind it.
