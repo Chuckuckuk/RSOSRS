@@ -10,7 +10,8 @@ use crate::world::{load_objects, model_loader, spawn_parts, MaterialCache, Objec
 use bevy::prelude::*;
 use osrs_cache::config::Configs;
 use osrs_cache::model::Model;
-use osrs_cache::scene::{build_loc, LocMesh};
+use osrs_cache::anim::{Animations, Clip};
+use osrs_cache::scene::{build_loc, build_loc_with, LocMesh};
 use osrs_cache::squares::{MapSource, SQUARE};
 use osrs_cache::terrain_mesh::TerrainMesh;
 use std::collections::HashMap;
@@ -57,13 +58,15 @@ pub struct SquareLoader {
     source: MapSource,
     texture_hsl: HashMap<u32, u16>,
     models: HashMap<u32, Option<Rc<Model>>>,
+    /// The cache's item definitions, decoded the first time an item is drawn on the ground.
+    items: Option<HashMap<u32, osrs_cache::item::ItemDef>>,
 }
 
 impl SquareLoader {
     pub fn open() -> osrs_cache::Result<SquareLoader> {
         let source = MapSource::open()?;
         let texture_hsl = Configs::new(source.cache())?.texture_average_hsl()?;
-        Ok(SquareLoader { source, texture_hsl, models: HashMap::new() })
+        Ok(SquareLoader { source, texture_hsl, models: HashMap::new(), items: None })
     }
 
     /// The left-click option of every object that has one, and the names of all objects: needed
@@ -82,6 +85,32 @@ impl SquareLoader {
         let def = self.source.object_defs().get(&id)?;
         let mut load_model = model_loader(self.source.cache(), &mut self.models);
         build_loc(&mut load_model, def, kind, orientation, None, &self.texture_hsl).filter(|mesh| !mesh.is_empty())
+    }
+
+    /// [`SquareLoader::build_object`] for an object that has an animation (a fire's flames): the
+    /// mesh keeps its rig and the animation is baked against it. `None` for the clip when the
+    /// object does not move, or its sequence does not fit the model.
+    pub fn build_animated_object(&mut self, id: u32, kind: u8, orientation: u8) -> (Option<LocMesh>, Option<Clip>) {
+        let Some(def) = self.source.object_defs().get(&id) else { return (None, None) };
+        let Some(sequence) = def.anim else { return (self.build_object(id, kind, orientation), None) };
+        let mut load_model = model_loader(self.source.cache(), &mut self.models);
+        let mesh = build_loc_with(&mut load_model, def, kind, orientation, None, &self.texture_hsl, true)
+            .filter(|mesh| !mesh.is_empty());
+        let clip = mesh.as_ref().and_then(|m| m.rig.as_ref()).and_then(|rig| {
+            let mut animations = Animations::new(self.source.cache()).ok()?;
+            Clip::bake(&mut animations, sequence, rig).ok()
+        });
+        (mesh, clip)
+    }
+
+    /// The mesh of cache item `id` as it lies on the ground (its inventory model, resized and
+    /// recoloured as its definition says). `None` if it has no model.
+    pub fn build_item(&mut self, id: u32) -> Option<LocMesh> {
+        if self.items.is_none() {
+            self.items = Some(Configs::new(self.source.cache()).ok()?.items().ok()?);
+        }
+        let def = self.items.as_ref()?.get(&id)?;
+        osrs_cache::item_icon::icon_mesh(self.source.cache(), def, &self.texture_hsl).filter(|mesh| !mesh.is_empty())
     }
 
     /// Decodes square (`sx`, `sy`).
@@ -138,13 +167,16 @@ pub enum Loaded {
     Ready(SquareData),
     Failed((i32, i32), String),
     /// The mesh asked for with [`SquareStream::request_object`] (`None` if it has no model).
-    Object { id: u32, kind: u8, orientation: u8, mesh: Option<LocMesh> },
+    Object { id: u32, kind: u8, orientation: u8, mesh: Option<LocMesh>, clip: Option<Clip> },
+    /// The mesh asked for with [`SquareStream::request_item`].
+    Item { id: u32, mesh: Option<LocMesh> },
 }
 
 /// What the loading thread is asked for.
 enum Request {
     Square((i32, i32)),
     Object { id: u32, kind: u8, orientation: u8 },
+    Item { id: u32 },
 }
 
 /// A thread that decodes squares (and single objects) on request. Dropping the handle stops it.
@@ -165,7 +197,8 @@ impl SquareStream {
                     for request in request_rx {
                         let result = match request {
                             Request::Square(square) => Loaded::Failed(square, e.to_string()),
-                            Request::Object { id, kind, orientation } => Loaded::Object { id, kind, orientation, mesh: None },
+                            Request::Object { id, kind, orientation } => Loaded::Object { id, kind, orientation, mesh: None, clip: None },
+                            Request::Item { id } => Loaded::Item { id, mesh: None },
                         };
                         let _ = result_tx.send(result);
                     }
@@ -179,8 +212,10 @@ impl SquareStream {
                         Err(e) => Loaded::Failed((sx, sy), e.to_string()),
                     },
                     Request::Object { id, kind, orientation } => {
-                        Loaded::Object { id, kind, orientation, mesh: loader.build_object(id, kind, orientation) }
+                        let (mesh, clip) = loader.build_animated_object(id, kind, orientation);
+                        Loaded::Object { id, kind, orientation, mesh, clip }
                     }
+                    Request::Item { id } => Loaded::Item { id, mesh: loader.build_item(id) },
                 };
                 if result_tx.send(result).is_err() {
                     return;
@@ -198,6 +233,12 @@ impl SquareStream {
     /// [`SquareStream::poll`] as [`Loaded::Object`].
     pub fn request_object(&self, id: u32, kind: u8, orientation: u8) {
         let _ = self.requests.send(Request::Object { id, kind, orientation });
+    }
+
+    /// Asks for the mesh of cache item `id` lying on the ground; it comes back from
+    /// [`SquareStream::poll`] as [`Loaded::Item`].
+    pub fn request_item(&self, id: u32) {
+        let _ = self.requests.send(Request::Item { id });
     }
 
     /// Every result that has come back since the last call.

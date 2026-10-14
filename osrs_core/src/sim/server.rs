@@ -15,7 +15,7 @@ use crate::data::CombatAnimations;
 use super::animations::PlayerAnimations;
 use super::events::{Combatant, WorldEvent};
 use super::examine::ExamineTexts;
-use super::scenery::{Loc, LocChange, SceneryIndex};
+use super::scenery::{Loc, LocChange, SceneryIndex, SpawnedLoc};
 use super::tick_driver::TickDriver;
 use super::world::World;
 use crate::actors::EntityId;
@@ -61,6 +61,15 @@ pub enum ClientCommand {
     Unequip { slot: EquipSlot },
     /// Choose `option` ("Wield", "Eat", "Drop", ...) on the item in an inventory slot.
     InventoryOption { slot: usize, option: String },
+    /// Use the item in inventory slot `used` on the one in slot `target` (a tinderbox on logs).
+    UseItemOnItem { used: usize, target: usize },
+    /// Use the item in inventory slot `slot` on the ground stack `uid`.
+    UseItemOnGroundItem { slot: usize, uid: u32 },
+    /// Use the item in inventory slot `slot` on the scenery object `id` covering `tile` (a log on
+    /// a fire).
+    UseItemOnObject { slot: usize, id: u32, tile: TileCoord },
+    /// Choose `option` ("Take", "Light") on the ground stack `uid`.
+    GroundItemOption { uid: u32, option: String },
     /// Drag an inventory item onto another slot (they swap).
     MoveInventoryItem { from: usize, to: usize },
     SetStance { index: usize },
@@ -152,6 +161,17 @@ pub struct ItemView {
     pub wearable: bool,
 }
 
+/// An item lying on the ground.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroundItemView {
+    /// Names the stack while it lies there.
+    pub uid: u32,
+    pub item: String,
+    pub name: String,
+    pub quantity: u32,
+    pub tile: TileCoord,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntitySnapshot {
     pub id: EntityId,
@@ -198,6 +218,10 @@ pub struct Snapshot {
     /// Every scenery object currently shown as another (felled trees as stumps). The whole set
     /// each time, so a client that loads a map square again knows what to show in it.
     pub scenery: Vec<LocChange>,
+    /// Objects players have made that are standing now (fires), which the map does not have.
+    pub spawned: Vec<SpawnedLoc>,
+    /// Every item on the ground.
+    pub ground_items: Vec<GroundItemView>,
 }
 
 /// A player that has entered the world.
@@ -357,6 +381,14 @@ impl Server {
             ClientCommand::TogglePrayer { prayer } => self.world.player_toggle_prayer(&prayer).map(|_| ()),
             ClientCommand::SelectSpell { spell } => self.world.player_select_spell(spell.as_deref()),
             ClientCommand::SetSpecial { enabled } => self.world.player_set_special(enabled),
+            ClientCommand::UseItemOnItem { used, target } => self.world.player_use_item_on_item(used, target),
+            ClientCommand::UseItemOnGroundItem { slot, uid } => self.world.player_use_item_on_ground_item(slot, uid),
+            ClientCommand::UseItemOnObject { slot, id, tile } => self.world.player_use_item_on_object(slot, id, tile),
+            ClientCommand::GroundItemOption { uid, option } => match option.to_ascii_lowercase().as_str() {
+                "take" => self.world.player_take_ground_item(uid),
+                "light" => self.world.player_light_ground_item(uid),
+                _ => Err("Nothing interesting happens.".to_owned()),
+            },
             ClientCommand::UseConsumable { item } => self.world.player_use_consumable(&item),
             ClientCommand::SetOnTask(on_task) => {
                 self.world.player_set_on_task(on_task);
@@ -474,6 +506,18 @@ impl Server {
             events: self.world.take_events(),
             messages,
             scenery: self.world.scenery_changes().copied().collect(),
+            spawned: self.world.spawned_scenery().copied().collect(),
+            ground_items: self
+                .world
+                .ground_items()
+                .map(|g| GroundItemView {
+                    uid: g.uid,
+                    item: g.item.clone(),
+                    name: self.world.item_name(&g.item),
+                    quantity: g.quantity,
+                    tile: g.tile,
+                })
+                .collect(),
         }
     }
 }

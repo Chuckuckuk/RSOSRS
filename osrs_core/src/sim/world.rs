@@ -75,6 +75,8 @@ pub struct World {
     pub(super) scenery: SceneryIndex,
     /// Scenery temporarily shown as something else (felled trees) and resources' despawn timers.
     pub(super) scenery_state: SceneryState,
+    /// Items lying on the ground.
+    pub(super) ground_items: super::ground_items::GroundItems,
 }
 
 fn slot_index(id: EntityId) -> Option<usize> {
@@ -175,6 +177,7 @@ impl World {
             aggro_region_ticks: 0,
             scenery: SceneryIndex::new(),
             scenery_state: SceneryState::new(),
+            ground_items: Default::default(),
         }
     }
 
@@ -425,9 +428,15 @@ impl World {
                     Err(message) => self.game_message(format!("You can't do that: {message}.")),
                 }
             }
-            "drop" | "destroy" => {
+            "drop" => {
+                if let Some(stack) = self.player.inventory.take(slot) {
+                    let tile = self.player.tile();
+                    self.drop_ground_item(&stack.item, stack.quantity, tile);
+                }
+            }
+            "destroy" => {
                 self.player.inventory.take(slot);
-                self.game_message(format!("You drop the {name}."));
+                self.game_message(format!("You destroy the {name}."));
             }
             "use" => self.game_message(format!("You use the {name}. Nothing interesting happens.")),
             _ => {}
