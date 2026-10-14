@@ -155,6 +155,43 @@ impl Player {
         self.mover.actor.health().is_dead()
     }
 
+    /// Brings the player back after death: full hitpoints, every stat back on its base, no
+    /// prayer points and no prayers up, no poison/freeze/skull-style effects, nothing in flight at
+    /// it and nothing it was doing, standing on `tile`. Items, experience and run/special energy
+    /// are untouched.
+    pub fn respawn(&mut self, registry: &crate::data::Registry, map: &mut CollisionMap, tile: TileCoord) {
+        let health = self.mover.actor.health_mut();
+        let missing = health.max() - health.current();
+        health.heal(missing);
+
+        self.skills.reset_to_base();
+        let prayer = self.prayer.current();
+        self.prayer.drain(prayer);
+        self.active_prayers.clear();
+        self.special_enabled = false;
+
+        self.status_effects = StatusEffectTracker::new();
+        self.damage_buffer = DamageBuffer::new();
+        self.pending_attacks = PendingAttackQueue::new();
+        self.consumable_delays.clear();
+        self.hp_regen_counter = 0;
+        self.prayer_drain = PrayerDrainCounter::default();
+        self.stamina_ticks = 0;
+
+        self.attack_target = None;
+        self.interact_target = None;
+        self.action = None;
+        self.pending_click = None;
+        self.current_path_is_running = false;
+        self.approaching_target = false;
+        self.attack_cooldown = 0;
+        self.attack_ready = true;
+        self.skill_clock = 0;
+
+        self.mover.teleport_to(map, tile);
+        self.refresh_stats(registry);
+    }
+
     /// Where the active path ends, if any steps remain.
     pub fn destination(&self) -> Option<TileCoord> {
         self.mover.destination()

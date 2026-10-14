@@ -21,6 +21,9 @@ pub enum ConsumableEffect {
     PoisonImmunity { ticks: i32 },
     /// A Stamina potion: cuts run energy drain for this many ticks.
     StaminaBoost { ticks: i32 },
+    /// Kills the user outright (Humble pie): hitpoints go to 0 and death plays out as from any
+    /// other lethal hit.
+    Die,
 }
 
 /// A food or potion. Using one starts a cooldown for its `delay_group`; foods and potions are
@@ -43,6 +46,9 @@ pub struct ConsumableDef {
     /// The cache sound effect heard as it is used; `None` is the game's usual one for its
     /// `delay_group` (eating for food, drinking for potions).
     pub sound: Option<u32>,
+    /// The name of the cache item whose picture stands for it, when the cache has none of its
+    /// own under `name` (Humble pie is not in this cache).
+    pub icon: Option<String>,
     /// Free-form provenance (wiki page, whether the numbers are verified).
     pub notes: String,
 }
@@ -58,6 +64,7 @@ impl Default for ConsumableDef {
             effects: Vec::new(),
             leaves: None,
             sound: None,
+            icon: None,
             notes: String::new(),
         }
     }

@@ -273,7 +273,7 @@ fn npc_action(npc: &NpcHit, option: &str) -> MenuAction {
 /// "Wield"/"Wear"/"Equip"/"Hold" when the server says it cannot be worn (it has no slot here).
 fn inventory_options(icons: Option<&ItemIcons>, stack: &ItemView) -> Vec<String> {
     let mut options = icons
-        .and_then(|i| i.item_named(&stack.name).map(|d| d.menu_options()))
+        .and_then(|i| i.item_named(&stack.icon).map(|d| d.menu_options()))
         .unwrap_or_else(|| vec!["Use".to_owned(), "Drop".to_owned()]);
     if !stack.wearable {
         options.retain(|option| !is_wear_option(option));
@@ -689,7 +689,7 @@ mod tests {
     fn an_item_that_cannot_be_worn_offers_no_wear_options() {
         assert!(is_wear_option("Wield") && is_wear_option("wear") && is_wear_option("Hold"));
         assert!(!is_wear_option("Drink") && !is_wear_option("Drop"));
-        let vial = ItemView { id: "vial".into(), name: "Vial".into(), quantity: 1, wearable: false };
+        let vial = ItemView { id: "vial".into(), name: "Vial".into(), icon: "Vial".into(), quantity: 1, wearable: false };
         assert!(inventory_options(None, &vial).iter().all(|o| !is_wear_option(o)));
     }
 

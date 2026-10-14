@@ -400,6 +400,7 @@ fn main() {
                     ("abyssal_whip", 1),
                     ("magic_shortbow", 1),
                     ("shark", 3),
+                    ("humble_pie", 1),
                     ("cooked_karambwan", 2),
                     ("prayer_potion_4", 2),
                     ("bronze_arrow", 150),
@@ -492,7 +493,11 @@ fn finish_recording() {
     let registry = Registry::builtin();
     // items that turn up later (a potion's lower doses, the vial): their pictures
     let names: Vec<String> =
-        registry.items().map(|i| i.name.clone()).chain(registry.consumables().map(|c| c.name.clone())).collect();
+        registry
+            .items()
+            .map(|i| i.name.clone())
+            .chain(registry.consumables().map(|c| c.icon.clone().unwrap_or_else(|| c.name.clone())))
+            .collect();
     interface::touch_icons(&names);
     // every sound the data can ask for
     let cache = Cache::open_default().expect("the cache opens");

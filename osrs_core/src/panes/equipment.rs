@@ -36,7 +36,7 @@ pub fn sync(state: &mut UiState, input: &PaneInput) {
         let layer = comp(387, file);
         state.created_overrides.retain(|(parent, _), _| *parent != layer);
         let worn = input.player.and_then(|p| p.equipped.iter().find(|(s, _)| *s == slot)).map(|(_, item)| item);
-        let object = worn.and_then(|item| input.icons.item_named(&item.name).map(|d| (d.id, item.quantity)));
+        let object = worn.and_then(|item| input.icons.item_named(&item.icon).map(|d| (d.id, item.quantity)));
         state.created.insert(
             layer,
             vec![

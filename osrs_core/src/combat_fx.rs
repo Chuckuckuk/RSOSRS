@@ -350,6 +350,15 @@ fn apply_events(
             }
             // experience drops and level-up fireworks are not drawn yet
             WorldEvent::Experience { .. } | WorldEvent::LevelUp { .. } => {}
+            WorldEvent::Respawned => {
+                if let Some(e) = entity_of(Combatant::Player) {
+                    if let Ok(mut fighter) = fighters.get_mut(e) {
+                        // up again: the held death clip must not hold him down
+                        fighter.dead = false;
+                        fighter.action = None;
+                    }
+                }
+            }
             WorldEvent::Died { who } => {
                 let Some(e) = entity_of(who) else { continue };
                 if let Ok(mut fighter) = fighters.get_mut(e) {

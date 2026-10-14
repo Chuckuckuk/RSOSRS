@@ -57,6 +57,17 @@ impl Mover {
         self.on_map = false;
     }
 
+    /// Puts the actor on `tile` at once, with no path and no walk there (a respawn, a teleport).
+    /// The previous tile is the new one too, so nothing is drawn gliding across the gap.
+    pub fn teleport_to(&mut self, map: &mut CollisionMap, tile: TileCoord) {
+        let here = self.actor.current_tile();
+        self.mark(map, here, false);
+        self.path_follower.clear();
+        self.actor.advance_tile(tile);
+        self.actor.advance_tile(tile);
+        self.mark(map, tile, true);
+    }
+
     pub fn destination(&self) -> Option<TileCoord> {
         self.path_follower.destination()
     }
