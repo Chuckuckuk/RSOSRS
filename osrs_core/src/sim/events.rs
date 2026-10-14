@@ -33,6 +33,8 @@ pub enum WorldEvent {
     Hit { target: Combatant, damage: i32 },
     /// `who` has just died.
     Died { who: Combatant },
+    /// The player has been put back in the world at its respawn point, alive again.
+    Respawned,
     /// The cache sound effect `sound` (archive 4) is heard from `from`, starting in `delay_ticks`
     /// (0 = now). The server decides every sound, as the game's does: the client only plays them,
     /// quieter the further `from` is from the player.

@@ -343,13 +343,25 @@ everything in `dying` (noticed last tick) is moved into `dead` with a `Died` eve
 at 0 HP that is not yet dead is added to `dying`. The game shows the killing blow's splat for a
 tick before the death animation, and this reproduces that.
 
+### Player death and respawn
+
+When the player's death is confirmed, `settle_deaths` starts a `RESPAWN_DELAY_TICKS` (4, a
+stand-in: the wiki gives no figure) countdown. `count_down_respawn` (run just before
+`settle_deaths` each tick) then calls `Player::respawn`: full hitpoints, every stat back on its
+base, prayer points 0 and prayers off, status effects / in-flight hits / queued actions cleared,
+teleported to `World::respawn_tile` (the player's starting tile unless `set_respawn_tile` says
+otherwise; Lumbridge in the open world). Every NPC loses its target, the player leaves `dead`, a
+`Respawned` event is sent and "Oh dear, you are dead!" is shown. Items are not lost yet (the
+wiki's Items Kept on Death rules are not modelled); run and special energy are left as they were.
+The `humble_pie` consumable (effect `die`) kills its eater outright, for testing all this.
+
 ### Outputs
 
 | Buffer | Read with | Contains | Goes to |
 |---|---|---|---|
 | `log` | `log()` | every developer log line, never cleared | the `simulate` binary, tests |
 | `messages` | `take_messages()` | lines the player should read (rejections, "You eat the shark.") | `Snapshot::messages` |
-| `events` | `take_events()` | `Attack`, `Projectile`, `Graphic`, `Heal`, `Hit`, `Died`, `Sound` in order | `Snapshot::events` |
+| `events` | `take_events()` | `Attack`, `Projectile`, `Graphic`, `Heal`, `Hit`, `Died`, `Respawned`, `Sound` in order | `Snapshot::events` |
 
 `snapshot()` (the method on `World`) returns a one-line text summary for traces.
 

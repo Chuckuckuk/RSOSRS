@@ -108,6 +108,11 @@ impl Skills {
         self.current[skill.index()] != before
     }
 
+    /// Puts every current level back on its base: boosts and drains both gone (a respawn).
+    pub fn reset_to_base(&mut self) {
+        self.current = self.base;
+    }
+
     pub fn is_off_base(&self, skill: Skill) -> bool {
         self.current[skill.index()] != self.base[skill.index()]
     }

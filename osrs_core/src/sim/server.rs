@@ -155,6 +155,8 @@ pub struct PlayerSnapshot {
 pub struct ItemView {
     pub id: String,
     pub name: String,
+    /// The cache item name to draw its picture and menu from (usually `name`).
+    pub icon: String,
     pub quantity: u32,
     /// Whether the server would let the player wear it: a client offers "Wield"/"Wear" only
     /// then, whatever the item's cache definition lists.
@@ -471,6 +473,7 @@ impl Server {
                         slot.as_ref().map(|stack| ItemView {
                             id: stack.item.clone(),
                             name: self.world.item_name(&stack.item),
+                            icon: self.world.item_icon(&stack.item),
                             quantity: stack.quantity,
                             wearable: registry.item(&stack.item).is_some_and(|item| item.slot.is_some()),
                         })
@@ -479,7 +482,7 @@ impl Server {
                 equipped: player
                     .loadout
                     .slots()
-                    .map(|(slot, id)| (slot, ItemView { id: id.to_owned(), name: self.world.item_name(id), quantity: 1, wearable: true }))
+                    .map(|(slot, id)| (slot, ItemView { id: id.to_owned(), name: self.world.item_name(id), icon: self.world.item_icon(id), quantity: 1, wearable: true }))
                     .collect(),
                 active_prayers: player.active_prayers.clone(),
                 stance: player.current_stance(registry).map(|stance| stance.name),
@@ -1153,6 +1156,45 @@ mod tests {
         let snapshot = server.snapshot();
         assert!(snapshot.player.health > before);
         assert_eq!(snapshot.player.inventory.iter().flatten().filter(|i| i.id == "shark").count(), 1);
+    }
+
+    #[test]
+    fn humble_pie_kills_and_the_player_respawns() {
+        use super::super::events::WorldEvent;
+        use crate::sim::world::RESPAWN_DELAY_TICKS;
+
+        let mut server = data_server();
+        let start = server.world.player.tile();
+        server.world.set_respawn_tile(TileCoord::new(start.x + 5, start.z));
+        server.world.give_item("humble_pie", 1).unwrap();
+        server.world.player.mover.actor.health_mut().damage(3);
+        server.world.player.prayer.drain(0);
+        server.handle_command(ClientCommand::InventoryOption { slot: 0, option: "Eat".into() });
+
+        let mut events = Vec::new();
+        let mut messages = Vec::new();
+        let mut died_on = None;
+        let mut respawned_on = None;
+        for _ in 0..12 {
+            let Some(snapshot) = server.advance(0.6) else { continue };
+            if snapshot.events.contains(&WorldEvent::Died { who: Combatant::Player }) {
+                died_on = Some(snapshot.tick);
+                assert!(snapshot.player.is_dead);
+            }
+            if snapshot.events.contains(&WorldEvent::Respawned) {
+                respawned_on = Some(snapshot.tick);
+                assert!(!snapshot.player.is_dead);
+                assert_eq!(snapshot.player.health, snapshot.player.max_health);
+                assert_eq!(snapshot.player.tile, TileCoord::new(start.x + 5, start.z));
+            }
+            messages.extend(snapshot.messages);
+            events.extend(snapshot.events);
+        }
+        let (died, back) = (died_on.expect("the pie kills"), respawned_on.expect("and the player comes back"));
+        assert_eq!(back - died, RESPAWN_DELAY_TICKS);
+        assert!(messages.iter().any(|m| m == "Oh dear, you are dead!"));
+        assert!(!server.world.player.is_dead());
+        assert!(server.world.player.has_item("humble_pie"), "the pie is not used up");
     }
 
     #[test]
