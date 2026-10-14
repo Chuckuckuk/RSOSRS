@@ -21,7 +21,7 @@ pub struct LeafMove {
 }
 
 /// How a door's leaves swing open. Leaves are taken in order along the wall: in the west-edge
-/// frame, the first is the southern one.
+/// frame, the first is the southern one. Each leaf of a pair opens and closes on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DoorSwing {

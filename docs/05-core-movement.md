@@ -101,8 +101,12 @@ one step from `from` in direction `dir`?
 1. **No corner cutting.** Both straight components (N and E) must be legal *from the same starting
    position*. This is why you cannot slip diagonally past the corner of a wall even if the
    diagonal tile itself is open.
-2. The whole destination footprint must be enterable (as above).
-3. Explicit diagonal flags (rare) are respected on both tiles.
+2. **No cutting past the destination's walls either.** Each L's second leg must be legal too:
+   E from the tile north of the start, and N from the tile east of it. A wall on the
+   destination's south or west edge (an open door standing there, say) closes the diagonal
+   even though both first steps are open.
+3. The whole destination footprint must be enterable (as above).
+4. Explicit diagonal flags (rare) are respected on both tiles.
 
 ### `merge`: growing the map as squares stream in
 
