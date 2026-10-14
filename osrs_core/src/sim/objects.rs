@@ -7,7 +7,8 @@
 //!
 //! Doors (OSRS wiki, "Door"):
 //! - The player walks to where the door can be used from (`TargetSpec::wall_reach`) and it pops
-//!   open or shut, with no animation. Every leaf of a double door or gate goes together.
+//!   open or shut, with no animation. Both leaves of a double door go together; a gate's leaves
+//!   go one at a time, only the one chosen.
 //! - An opened door swings into the next tile and turns (`DoorSwing::moves`). Its wall moves with
 //!   it, so the doorway can be walked through.
 //! - A door that a player opened or closed goes back by itself after [`DOOR_RESET_TICKS`].
@@ -52,8 +53,8 @@ pub enum PlayerAction {
 pub struct DoorAction {
     /// The `DoorDef` id.
     pub door: String,
-    /// Its leaves as the map places them, in order along the wall.
-    pub leaves: Vec<Loc>,
+    /// The leaves that move, as the map places them, each with how it swings open.
+    pub leaves: Vec<(Loc, LeafMove)>,
     pub closing: bool,
 }
 
@@ -124,6 +125,10 @@ impl World {
         if leaves.len() > 1 && leaves.iter().any(placed_open) {
             return nothing();
         }
+        let mut leaves: Vec<(Loc, LeafMove)> = leaves.into_iter().zip(door.swing.moves().iter().copied()).collect();
+        if !door.swing.leaves_move_together() {
+            leaves.retain(|(leaf, _)| leaf.key() == original.key());
+        }
         self.player.set_action(PlayerAction::Door(DoorAction { door: door.id.clone(), leaves, closing }));
         Ok(())
     }
@@ -158,7 +163,7 @@ impl World {
             return false;
         };
         // someone else opened or closed it meanwhile: nothing left to do
-        let current: Vec<Loc> = action.leaves.iter().map(|leaf| self.scenery_state.current(leaf)).collect();
+        let current: Vec<Loc> = action.leaves.iter().map(|(leaf, _)| self.scenery_state.current(leaf)).collect();
         if current.iter().any(|leaf| door.state_of(leaf.id) != Some(action.closing)) {
             self.player.action = None;
             return true;
@@ -177,11 +182,11 @@ impl World {
         }
 
         self.player.action = None;
-        if action.closing && self.door_sticks(action.leaves[0].key()) {
+        if action.closing && self.door_sticks(action.leaves[0].0.key()) {
             self.game_message("The door seems to be stuck.".to_owned());
             return true;
         }
-        for (leaf, step) in action.leaves.iter().zip(door.swing.moves()) {
+        for (leaf, step) in &action.leaves {
             if self.scenery_state.is_replaced(leaf) {
                 // back to how the map places it
                 self.restore_loc(&leaf.key());
@@ -279,7 +284,7 @@ impl World {
     pub fn player_facing_loc(&self) -> Option<Loc> {
         match &self.player.action {
             Some(PlayerAction::Gather(gather)) => Some(gather.loc),
-            Some(PlayerAction::Door(door)) => door.leaves.first().map(|leaf| self.scenery_state.current(leaf)),
+            Some(PlayerAction::Door(door)) => door.leaves.first().map(|(leaf, _)| self.scenery_state.current(leaf)),
             Some(PlayerAction::Tend(tend)) => self.scenery_state.spawned_at(tend.tile).map(|fire| fire.loc),
             Some(PlayerAction::Light(_)) | Some(PlayerAction::Take { .. }) | None => None,
         }
@@ -439,17 +444,30 @@ mod tests {
     }
 
     #[test]
-    fn a_gate_opens_both_leaves() {
+    fn a_gate_opens_only_the_leaf_you_click() {
         let (south, north) = (wall(1558, 5, 0, 0), wall(1560, 5, 1, 0));
         let mut world = walled(&[south, north], Registry::builtin());
+        let moved = |world: &World| {
+            let mut moved: Vec<Loc> = world.scenery_changes().map(|c| c.replacement).collect();
+            moved.sort_by_key(|leaf| leaf.tile.z);
+            moved
+        };
 
         world.player_interact_object(1558, south.tile, "Open").unwrap();
         run(&mut world, 20);
-
-        let ids: Vec<u32> = world.scenery_changes().map(|c| c.replacement.id).collect();
-        assert_eq!(ids.len(), 2);
-        assert!(ids.contains(&1559) && ids.contains(&1567), "{ids:?}");
+        assert_eq!(moved(&world), vec![wall(1559, 4, 0, 3)], "the south leaf swings out on its post; the north stays shut");
+        assert_ne!(world.map.flags_at(north.tile) & CollisionFlag::BLOCK_WEST, 0, "the north leaf still blocks");
         assert!(walks_through(&mut world));
+
+        world.player_request_walk_to(tc(0, 0), false);
+        run(&mut world, 40);
+        world.player_interact_object(1560, north.tile, "Open").unwrap();
+        run(&mut world, 20);
+        assert_eq!(moved(&world), vec![wall(1559, 4, 0, 3), wall(1567, 4, 1, 1)], "then the north one");
+
+        world.player_interact_object(1559, tc(4, 0), "Close").unwrap();
+        run(&mut world, 20);
+        assert_eq!(moved(&world), vec![wall(1567, 4, 1, 1)], "closing one leaves the other open");
     }
 
     #[test]

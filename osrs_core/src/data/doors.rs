@@ -30,13 +30,18 @@ pub enum DoorSwing {
     Single,
     /// Two leaves hinged at their outer ends, swinging out away from each other.
     Double,
-    /// A two-leaf gate, swinging like a double door.
+    /// A two-leaf gate. Each leaf swings like a double door's, but only the one chosen moves.
     Gate,
 }
 
 impl DoorSwing {
     pub fn leaf_count(self) -> usize {
         self.moves().len()
+    }
+
+    /// Whether opening or closing one leaf moves them all. A gate's leaves move one at a time.
+    pub fn leaves_move_together(self) -> bool {
+        self != DoorSwing::Gate
     }
 
     /// How each leaf moves as it opens, in order along the wall.

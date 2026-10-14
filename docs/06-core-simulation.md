@@ -599,9 +599,11 @@ and open object ids (paired with the `obj_actions` probe) and a swing style (`si
 
 1. walks the player to where it can be used from, `TargetSpec::wall_reach` (its own tile, the
    tile across its edge, and the tiles beside it unless walled off);
-2. swings every leaf together: a leaf opens into the tile across its edge and turns a quarter
+2. swings its leaves: a leaf opens into the tile across its edge and turns a quarter
    (`DoorSwing::moves`, in the frame of a west-edge door, turned with the placement); a pair's
-   leaves swing out on their outer hinges; a door the map places open shuts by the inverse move;
+   leaves swing out on their outer hinges; a door the map places open shuts by the inverse move.
+   Both leaves of a double door move together, but a gate moves only the leaf chosen
+   (`DoorSwing::leaves_move_together`);
 3. moves the wall with it, so the doorway can be walked through;
 4. goes back by itself after `DOOR_RESET_TICKS` (500, 300 s);
 5. answers "The door seems to be stuck." to the fifth close of the same door within
