@@ -582,12 +582,11 @@ fn square_map(source: &MapSource, square: (i32, i32)) -> (CollisionMapData, Vec<
             let defs = source.object_defs();
             let locs = around
                 .middle_placements()
-                .filter(|(_, p)| p.plane == 0)
+                .filter(|(_, p)| p.plane == 0 && matches!(p.kind, 0..=3 | 10 | 11))
                 .filter_map(|((x, z), p)| {
                     let def = defs.get(&p.id)?;
                     // free-standing objects (trees), and wall pieces that do something (doors)
-                    let wanted = matches!(p.kind, 10 | 11) || (p.kind <= 3 && def.left_click().is_some());
-                    if !wanted {
+                    if p.kind <= 3 && def.left_click().is_none() {
                         return None;
                     }
                     let (w, h) = footprint(def, p.orientation);
@@ -1035,26 +1034,39 @@ fn scripted_command(command: &str, args: &str) -> Option<ClientCommand> {
 /// through, close it) without finding things on screen.
 fn scripted_commands(time: Res<Time>, server: NonSend<ServerLink>, mut script: Local<Option<Vec<(f32, ClientCommand)>>>) {
     let steps = script.get_or_insert_with(|| {
-        let text = std::env::var("OSRS_DO").unwrap_or_default();
-        text.split(';')
-            .filter(|step| !step.trim().is_empty())
-            .filter_map(|step| {
-                let mut p = step.trim().splitn(3, ':');
-                let (at, command, args) = (p.next()?.parse().ok()?, p.next()?, p.next().unwrap_or(""));
-                let parsed = scripted_command(command, args);
+        timed_steps("OSRS_DO")
+            .into_iter()
+            .filter_map(|(at, (command, args))| {
+                let parsed = scripted_command(&command, &args);
                 if parsed.is_none() {
-                    eprintln!("[client] OSRS_DO: cannot read \"{step}\"");
+                    eprintln!("[client] OSRS_DO: cannot read \"{command}:{args}\"");
                 }
                 Some((at, parsed?))
             })
             .collect()
     });
-    let now = time.elapsed_secs();
-    while steps.first().is_some_and(|(at, _)| *at <= now) {
-        let (_, command) = steps.remove(0);
+    for command in due_steps(steps, time.elapsed_secs()) {
         println!("[client] OSRS_DO: {command:?}");
         server.link.send(command);
     }
+}
+
+/// A timed debug script from the environment variable `var`: `t:command:args` steps separated by
+/// `;`, `t` in seconds since start, in the order given.
+fn timed_steps(var: &str) -> Vec<(f32, (String, String))> {
+    let text = std::env::var(var).unwrap_or_default();
+    text.split(';')
+        .filter_map(|step| {
+            let mut p = step.trim().splitn(3, ':');
+            Some((p.next()?.parse().ok()?, (p.next()?.to_owned(), p.next().unwrap_or("").to_owned())))
+        })
+        .collect()
+}
+
+/// Takes the steps of a timed script that are due by `now` off its front.
+fn due_steps<T>(steps: &mut Vec<(f32, T)>, now: f32) -> Vec<T> {
+    let due = steps.iter().take_while(|(at, _)| *at <= now).count();
+    steps.drain(..due).map(|(_, step)| step).collect()
 }
 
 /// TODO(remove): temporary debug hook, slated for removal once it is no longer needed (and not to be
@@ -1066,20 +1078,10 @@ fn scripted_input(
     time: Res<Time>,
     mut buttons: ResMut<ButtonInput<MouseButton>>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
-    mut script: Local<Option<Vec<(f32, String, String)>>>,
+    mut script: Local<Option<Vec<(f32, (String, String))>>>,
 ) {
-    let steps = script.get_or_insert_with(|| {
-        let text = std::env::var("OSRS_INPUT").unwrap_or_default();
-        text.split(';')
-            .filter_map(|step| {
-                let mut p = step.trim().splitn(3, ':');
-                Some((p.next()?.parse().ok()?, p.next()?.to_owned(), p.next()?.to_owned()))
-            })
-            .collect()
-    });
-    let now = time.elapsed_secs();
-    while steps.first().is_some_and(|(at, _, _)| *at <= now) {
-        let (_, action, arg) = steps.remove(0);
+    let steps = script.get_or_insert_with(|| timed_steps("OSRS_INPUT"));
+    for (action, arg) in due_steps(steps, time.elapsed_secs()) {
         let button = |name: &str| match name {
             "right" => MouseButton::Right,
             _ => MouseButton::Left,

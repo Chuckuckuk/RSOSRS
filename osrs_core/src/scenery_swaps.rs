@@ -74,7 +74,7 @@ pub fn show_scenery_changes(
     mut swaps: ResMut<SwapMeshes>,
     mut shown: Local<BTreeMap<LocKey, Shown>>,
     mut seen: Local<Seen>,
-    mut placed: Query<(&PlacedLoc, &Transform, &mut Visibility), Without<SwapPart>>,
+    mut placed: Query<(&PlacedLoc, &mut Visibility), Without<SwapPart>>,
     spawned: Query<(), Added<PlacedLoc>>,
     alive: Query<(), With<SwapPart>>,
     mut spawner: SquareSpawner,
@@ -103,20 +103,20 @@ pub fn show_scenery_changes(
     }
 
     // one pass over the placed objects: show the originals that are back, hide the replaced
-    // ones (again, if their square has come back) and note where each replaced one stands
+    // ones (again, if their square has come back) and note which originals are on screen
     let mut replaced: HashMap<u32, Vec<LocChange>> = HashMap::new();
     for change in wanted.values() {
         replaced.entry(change.loc.id).or_default().push(*change);
     }
-    let mut origins: HashMap<LocKey, Vec3> = HashMap::new();
-    for (place, transform, mut visibility) in &mut placed {
+    let mut originals: HashSet<LocKey> = HashSet::new();
+    for (place, mut visibility) in &mut placed {
         if change_of(&over, place).is_some() {
             *visibility = Visibility::Inherited;
         } else if let Some(change) = change_of(&replaced, place) {
             if *visibility != Visibility::Hidden {
                 *visibility = Visibility::Hidden;
             }
-            origins.entry(change.loc.key()).or_insert(transform.translation);
+            originals.insert(change.loc.key());
         }
     }
 
@@ -131,15 +131,13 @@ pub fn show_scenery_changes(
             spawner.picker().remove(owner(key));
         }
         // the original's square is not loaded: nothing to put in its place yet
-        let Some(&original_at) = origins.get(key) else { continue };
+        if !originals.contains(key) {
+            continue;
+        }
         let shown_as = change.replacement;
-        // on the original's spot (a stump), or on the middle of the tile it moved to (an opened
-        // door) at that ground's height
-        let origin = if shown_as.tile == change.loc.tile {
-            original_at
-        } else {
-            let Some(ground) = spawner.world.ground_at(shown_as.tile.x, shown_as.tile.z) else { continue };
-            ground + Vec3::new((shown_as.size.0 - 1) as f32 / 2.0, 0.0, -(shown_as.size.1 - 1) as f32 / 2.0)
+        // where it stands now (the original's spot for a stump, the next tile for an open door)
+        let Some(origin) = spawner.world.object_origin(shown_as.tile.x, shown_as.tile.z, shown_as.size.0, shown_as.size.1) else {
+            continue;
         };
         let mesh_key = (shown_as.id, shown_as.kind, shown_as.orientation);
         let Some(mesh) = swaps.ready.get(&mesh_key) else {

@@ -129,13 +129,11 @@ impl SceneryState {
         self.changes.get(&loc.key()).map_or(*loc, |change| change.replacement)
     }
 
-    /// The placement showing object `id` over `tile` now, as `(original, current)`: a replacement
-    /// standing there (an opened door that swung in), or else an unchanged original.
-    pub fn find(&self, index: &SceneryIndex, id: u32, tile: TileCoord) -> Option<(Loc, Loc)> {
+    /// The placement (as the map places it) showing object `id` over `tile` now: one whose
+    /// replacement stands there (an opened door that swung in), or else an unchanged original.
+    pub fn find(&self, index: &SceneryIndex, id: u32, tile: TileCoord) -> Option<Loc> {
         let moved = self.changes.values().find(|change| change.replacement.id == id && change.replacement.covers(tile));
-        moved.map(|change| (change.loc, change.replacement)).or_else(|| {
-            index.at(tile).iter().find(|loc| loc.id == id && !self.is_replaced(loc)).map(|loc| (*loc, *loc))
-        })
+        moved.map(|change| change.loc).or_else(|| index.at(tile).iter().copied().find(|loc| loc.id == id && !self.is_replaced(loc)))
     }
 
     pub fn is_replaced(&self, loc: &Loc) -> bool {
@@ -226,15 +224,15 @@ mod tests {
         let door = Loc { id: 1535, tile: TileCoord::new(5, 5), kind: 0, orientation: 0, size: (1, 1) };
         index.add(door);
         let mut state = SceneryState::new();
-        assert_eq!(state.find(&index, 1535, door.tile), Some((door, door)));
+        assert_eq!(state.find(&index, 1535, door.tile), Some(door));
 
         let open = Loc { id: 1536, tile: TileCoord::new(4, 5), orientation: 1, ..door };
         state.replace(door, open, 500);
 
-        assert_eq!(state.find(&index, 1536, open.tile), Some((door, open)), "the open door, where it swung to");
+        assert_eq!(state.find(&index, 1536, open.tile), Some(door), "the open door, where it swung to");
         assert_eq!(state.find(&index, 1535, door.tile), None, "the closed door is not there any more");
         assert_eq!(state.restore(&door.key()).map(|c| c.replacement), Some(open));
-        assert_eq!(state.find(&index, 1535, door.tile), Some((door, door)));
+        assert_eq!(state.find(&index, 1535, door.tile), Some(door));
     }
 
     #[test]

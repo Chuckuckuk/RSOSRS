@@ -36,10 +36,7 @@ pub enum DoorSwing {
 
 impl DoorSwing {
     pub fn leaf_count(self) -> usize {
-        match self {
-            DoorSwing::Single => 1,
-            DoorSwing::Double | DoorSwing::Gate => 2,
-        }
+        self.moves().len()
     }
 
     /// How each leaf moves as it opens, in order along the wall.
@@ -74,11 +71,7 @@ pub struct DoorDef {
 impl DoorDef {
     /// Whether `object` is one of this door's leaves, and whether that is its open form.
     pub fn state_of(&self, object: u32) -> Option<bool> {
-        self.leaves.iter().find_map(|leaf| match object {
-            id if id == leaf.closed => Some(false),
-            id if id == leaf.open => Some(true),
-            _ => None,
-        })
+        self.leaf(object).map(|leaf| leaf.open == object)
     }
 
     /// The leaf that `object` is a form of.
@@ -103,6 +96,5 @@ mod tests {
         assert_eq!(door.state_of(4), Some(true));
         assert_eq!(door.state_of(5), None);
         assert_eq!(door.leaf(4), Some(DoorLeafDef { closed: 3, open: 4 }));
-        assert_eq!(DoorSwing::Double.moves().len(), DoorSwing::Double.leaf_count());
     }
 }

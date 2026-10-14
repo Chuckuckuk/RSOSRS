@@ -1,5 +1,5 @@
-use crate::collision::{CollisionFlag, CollisionMap};
-use crate::tiles::TileCoord;
+use crate::collision::{edge_flag, CollisionMap};
+use crate::tiles::{Direction, TileCoord};
 
 /// The most tiles an `AnyOf` target can list (a two-leaf door's reach).
 pub const MAX_TARGET_TILES: usize = 8;
@@ -56,16 +56,11 @@ impl TargetSpec {
     /// as the game decides it: its own tile, the tile across its edge, and the two tiles beside
     /// it along the wall unless a wall stands between them and its tile.
     pub fn wall_reach(map: &CollisionMap, tile: TileCoord, orientation: u8) -> Vec<TileCoord> {
-        let at = |(dx, dz): (i32, i32)| TileCoord::with_plane(tile.x + dx, tile.z + dz, tile.plane);
+        let at = |(dx, dz): (i32, i32)| tile.offset(dx, dz);
         let mut reach = vec![tile, at(rotate((-1, 0), orientation))];
         for side in [rotate((0, 1), orientation), rotate((0, -1), orientation)] {
             // the edge of the side tile that faces the wall's own tile
-            let facing = match (-side.0, -side.1) {
-                (0, 1) => CollisionFlag::BLOCK_NORTH,
-                (0, -1) => CollisionFlag::BLOCK_SOUTH,
-                (1, 0) => CollisionFlag::BLOCK_EAST,
-                _ => CollisionFlag::BLOCK_WEST,
-            };
+            let facing = edge_flag(Direction::from_delta(-side.0, -side.1));
             if map.flags_at(at(side)) & facing == 0 {
                 reach.push(at(side));
             }
@@ -226,7 +221,7 @@ mod tests {
     fn a_door_is_reached_from_its_tile_across_its_edge_and_beside_it_unless_walled_off() {
         let mut map = crate::collision::test_grid::parse("....\n....\n....\n....", 0);
         // a door on the west edge of (2, 1); a wall between (2, 2) and the door's tile
-        map.add_flags(tc(2, 2), CollisionFlag::BLOCK_SOUTH);
+        map.add_flags(tc(2, 2), crate::collision::CollisionFlag::BLOCK_SOUTH);
 
         let reach = TargetSpec::wall_reach(&map, tc(2, 1), 0);
 

@@ -10,38 +10,38 @@ use crate::tiles::TileCoord;
 /// The wall bits a wall piece of shape `kind` (0 straight, 1 and 3 diagonal corners, 2 L-shaped
 /// corner) turned `orientation` sets, as `(dx, dz, bits)` from its own tile. Other shapes set
 /// none. Orientation 0 is the west edge or north-west corner, then clockwise.
-pub fn wall_edges(kind: u8, orientation: u8) -> Vec<(i32, i32, u32)> {
+pub fn wall_edges(kind: u8, orientation: u8) -> &'static [(i32, i32, u32)] {
     use CollisionFlag as F;
     match (kind, orientation & 3) {
-        (0, 0) => vec![(0, 0, F::BLOCK_WEST), (-1, 0, F::BLOCK_EAST)],
-        (0, 1) => vec![(0, 0, F::BLOCK_NORTH), (0, 1, F::BLOCK_SOUTH)],
-        (0, 2) => vec![(0, 0, F::BLOCK_EAST), (1, 0, F::BLOCK_WEST)],
-        (0, _) => vec![(0, 0, F::BLOCK_SOUTH), (0, -1, F::BLOCK_NORTH)],
-        (1 | 3, 0) => vec![(0, 0, F::BLOCK_NORTH_WEST), (-1, 1, F::BLOCK_SOUTH_EAST)],
-        (1 | 3, 1) => vec![(0, 0, F::BLOCK_NORTH_EAST), (1, 1, F::BLOCK_SOUTH_WEST)],
-        (1 | 3, 2) => vec![(0, 0, F::BLOCK_SOUTH_EAST), (1, -1, F::BLOCK_NORTH_WEST)],
-        (1 | 3, _) => vec![(0, 0, F::BLOCK_SOUTH_WEST), (-1, -1, F::BLOCK_NORTH_EAST)],
-        (2, 0) => vec![(0, 0, F::BLOCK_WEST | F::BLOCK_NORTH), (-1, 0, F::BLOCK_EAST), (0, 1, F::BLOCK_SOUTH)],
-        (2, 1) => vec![(0, 0, F::BLOCK_NORTH | F::BLOCK_EAST), (0, 1, F::BLOCK_SOUTH), (1, 0, F::BLOCK_WEST)],
-        (2, 2) => vec![(0, 0, F::BLOCK_EAST | F::BLOCK_SOUTH), (1, 0, F::BLOCK_WEST), (0, -1, F::BLOCK_NORTH)],
-        (2, _) => vec![(0, 0, F::BLOCK_SOUTH | F::BLOCK_WEST), (0, -1, F::BLOCK_NORTH), (-1, 0, F::BLOCK_EAST)],
-        _ => Vec::new(),
+        (0, 0) => &[(0, 0, F::BLOCK_WEST), (-1, 0, F::BLOCK_EAST)],
+        (0, 1) => &[(0, 0, F::BLOCK_NORTH), (0, 1, F::BLOCK_SOUTH)],
+        (0, 2) => &[(0, 0, F::BLOCK_EAST), (1, 0, F::BLOCK_WEST)],
+        (0, _) => &[(0, 0, F::BLOCK_SOUTH), (0, -1, F::BLOCK_NORTH)],
+        (1 | 3, 0) => &[(0, 0, F::BLOCK_NORTH_WEST), (-1, 1, F::BLOCK_SOUTH_EAST)],
+        (1 | 3, 1) => &[(0, 0, F::BLOCK_NORTH_EAST), (1, 1, F::BLOCK_SOUTH_WEST)],
+        (1 | 3, 2) => &[(0, 0, F::BLOCK_SOUTH_EAST), (1, -1, F::BLOCK_NORTH_WEST)],
+        (1 | 3, _) => &[(0, 0, F::BLOCK_SOUTH_WEST), (-1, -1, F::BLOCK_NORTH_EAST)],
+        (2, 0) => &[(0, 0, F::BLOCK_WEST | F::BLOCK_NORTH), (-1, 0, F::BLOCK_EAST), (0, 1, F::BLOCK_SOUTH)],
+        (2, 1) => &[(0, 0, F::BLOCK_NORTH | F::BLOCK_EAST), (0, 1, F::BLOCK_SOUTH), (1, 0, F::BLOCK_WEST)],
+        (2, 2) => &[(0, 0, F::BLOCK_EAST | F::BLOCK_SOUTH), (1, 0, F::BLOCK_WEST), (0, -1, F::BLOCK_NORTH)],
+        (2, _) => &[(0, 0, F::BLOCK_SOUTH | F::BLOCK_WEST), (0, -1, F::BLOCK_NORTH), (-1, 0, F::BLOCK_EAST)],
+        _ => &[],
     }
 }
 
 impl CollisionMap {
     /// Puts a wall piece's bits on the map (a door closing, or one opening into its new place).
     pub fn add_wall(&mut self, tile: TileCoord, kind: u8, orientation: u8) {
-        for (dx, dz, bits) in wall_edges(kind, orientation) {
-            self.add_flags(TileCoord::with_plane(tile.x + dx, tile.z + dz, tile.plane), bits);
+        for &(dx, dz, bits) in wall_edges(kind, orientation) {
+            self.add_flags(tile.offset(dx, dz), bits);
         }
     }
 
     /// Takes a wall piece's bits off the map. Like the game's, this clears the bits whatever else
     /// set them.
     pub fn remove_wall(&mut self, tile: TileCoord, kind: u8, orientation: u8) {
-        for (dx, dz, bits) in wall_edges(kind, orientation) {
-            self.remove_flags(TileCoord::with_plane(tile.x + dx, tile.z + dz, tile.plane), bits);
+        for &(dx, dz, bits) in wall_edges(kind, orientation) {
+            self.remove_flags(tile.offset(dx, dz), bits);
         }
     }
 }

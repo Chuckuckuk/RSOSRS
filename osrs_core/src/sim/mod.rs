@@ -30,7 +30,7 @@ pub use config::{BossConfig, CombatLevels, HealerConfig, NpcConfig, PassiveConfi
 pub use events::{Combatant, WorldEvent};
 pub use examine::ExamineTexts;
 pub use gathering::GatherAction;
-pub use objects::{DoorAction, PlayerAction, DOOR_RESET_TICKS, STUCK_CLOSE_LIMIT, STUCK_WINDOW_TICKS};
+pub use objects::{DoorAction, PlayerAction};
 pub use scenery::{Loc, LocChange, LocKey, SceneryIndex};
 pub use inventory::{Inventory, ItemStack, INVENTORY_SIZE};
 pub use entity::{Behavior, BossState, Entity, HealerState, NpcState};

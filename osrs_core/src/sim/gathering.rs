@@ -20,7 +20,7 @@
 
 use std::rc::Rc;
 
-use super::objects::PlayerAction;
+use super::objects::{Approach, PlayerAction};
 use super::player::Player;
 use super::scenery::Loc;
 use super::world::World;
@@ -127,11 +127,8 @@ impl World {
             return true;
         }
 
-        let reach = TargetSpec::adjacent(gather.loc.tile, gather.loc.size.0, gather.loc.size.1);
-        if !reach.is_satisfied_by(self.player.tile()) {
-            self.player.approaching_target = true;
-            self.player.current_path_is_running = self.player.is_running;
-            self.player.mover.request_move(&mut self.pathfinder, &mut self.map, reach);
+        // (with no path yet, it keeps trying)
+        if self.approach(TargetSpec::adjacent(gather.loc.tile, gather.loc.size.0, gather.loc.size.1)) != Approach::There {
             return true;
         }
 

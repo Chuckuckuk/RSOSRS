@@ -42,23 +42,23 @@ pub struct CollisionGrid {
 /// corner) turned `orientation` sets, as `(dx, dz, bits)` from its own tile: its own side of the
 /// edge or corner, and the neighbour's side of it. Other shapes set none. (Orientation 0 is the
 /// west edge or north-west corner, then clockwise.)
-pub fn wall_edges(kind: u8, orientation: u8) -> Vec<(i32, i32, u32)> {
+pub fn wall_edges(kind: u8, orientation: u8) -> &'static [(i32, i32, u32)] {
     use flag::*;
     let o = orientation & 3;
     match (kind, o) {
-        (0, 0) => vec![(0, 0, WEST), (-1, 0, EAST)],
-        (0, 1) => vec![(0, 0, NORTH), (0, 1, SOUTH)],
-        (0, 2) => vec![(0, 0, EAST), (1, 0, WEST)],
-        (0, _) => vec![(0, 0, SOUTH), (0, -1, NORTH)],
-        (1 | 3, 0) => vec![(0, 0, NORTH_WEST), (-1, 1, SOUTH_EAST)],
-        (1 | 3, 1) => vec![(0, 0, NORTH_EAST), (1, 1, SOUTH_WEST)],
-        (1 | 3, 2) => vec![(0, 0, SOUTH_EAST), (1, -1, NORTH_WEST)],
-        (1 | 3, _) => vec![(0, 0, SOUTH_WEST), (-1, -1, NORTH_EAST)],
-        (2, 0) => vec![(0, 0, WEST | NORTH), (-1, 0, EAST), (0, 1, SOUTH)],
-        (2, 1) => vec![(0, 0, NORTH | EAST), (0, 1, SOUTH), (1, 0, WEST)],
-        (2, 2) => vec![(0, 0, EAST | SOUTH), (1, 0, WEST), (0, -1, NORTH)],
-        (2, _) => vec![(0, 0, SOUTH | WEST), (0, -1, NORTH), (-1, 0, EAST)],
-        _ => Vec::new(),
+        (0, 0) => &[(0, 0, WEST), (-1, 0, EAST)],
+        (0, 1) => &[(0, 0, NORTH), (0, 1, SOUTH)],
+        (0, 2) => &[(0, 0, EAST), (1, 0, WEST)],
+        (0, _) => &[(0, 0, SOUTH), (0, -1, NORTH)],
+        (1 | 3, 0) => &[(0, 0, NORTH_WEST), (-1, 1, SOUTH_EAST)],
+        (1 | 3, 1) => &[(0, 0, NORTH_EAST), (1, 1, SOUTH_WEST)],
+        (1 | 3, 2) => &[(0, 0, SOUTH_EAST), (1, -1, NORTH_WEST)],
+        (1 | 3, _) => &[(0, 0, SOUTH_WEST), (-1, -1, NORTH_EAST)],
+        (2, 0) => &[(0, 0, WEST | NORTH), (-1, 0, EAST), (0, 1, SOUTH)],
+        (2, 1) => &[(0, 0, NORTH | EAST), (0, 1, SOUTH), (1, 0, WEST)],
+        (2, 2) => &[(0, 0, EAST | SOUTH), (1, 0, WEST), (0, -1, NORTH)],
+        (2, _) => &[(0, 0, SOUTH | WEST), (0, -1, NORTH), (-1, 0, EAST)],
+        _ => &[],
     }
 }
 
@@ -133,7 +133,7 @@ impl CollisionGrid {
     /// Wall pieces: straight (0), diagonal corner pieces (1, 3) and L-shaped corners (2). The
     /// orientation says which edge or corner the piece sits on.
     fn add_wall(&mut self, x: i32, z: i32, kind: u8, orientation: u8) {
-        for (dx, dz, bits) in wall_edges(kind, orientation) {
+        for &(dx, dz, bits) in wall_edges(kind, orientation) {
             self.add(x + dx, z + dz, bits);
         }
     }

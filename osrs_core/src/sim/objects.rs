@@ -52,29 +52,39 @@ pub struct DoorAction {
 }
 
 /// Where a leaf placed as `from` stands once it has moved by `step` (swung open), showing `id`.
-pub fn swung(from: Loc, step: LeafMove, id: u32) -> Loc {
+fn swung(from: Loc, step: LeafMove, id: u32) -> Loc {
     let (dx, dz) = rotate(step.offset, from.orientation);
-    Loc {
-        id,
-        tile: TileCoord::with_plane(from.tile.x + dx, from.tile.z + dz, from.tile.plane),
-        orientation: (from.orientation as i32 + step.turn).rem_euclid(4) as u8,
-        ..from
-    }
+    Loc { id, tile: from.tile.offset(dx, dz), orientation: (from.orientation as i32 + step.turn).rem_euclid(4) as u8, ..from }
 }
 
 /// The other way: where a leaf standing open as `open` stands shut, showing `id`.
-pub fn unswung(open: Loc, step: LeafMove, id: u32) -> Loc {
+fn unswung(open: Loc, step: LeafMove, id: u32) -> Loc {
     let orientation = (open.orientation as i32 - step.turn).rem_euclid(4) as u8;
     let (dx, dz) = rotate(step.offset, orientation);
-    Loc { id, tile: TileCoord::with_plane(open.tile.x - dx, open.tile.z - dz, open.tile.plane), orientation, ..open }
+    Loc { id, tile: open.tile.offset(-dx, -dz), orientation, ..open }
+}
+
+/// The answer to an option that does nothing here.
+fn nothing() -> Result<(), String> {
+    Err("Nothing interesting happens.".to_owned())
+}
+
+/// How walking up to something went this tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Approach {
+    /// The player can use it from where it stands.
+    There,
+    /// Still walking.
+    OnTheWay,
+    /// No path leads there.
+    NoWay,
 }
 
 impl World {
     /// Choosing `action` on the scenery object `id` over `tile` (as the client sees it now: an
     /// opened door is where it swung to).
     pub fn player_interact_object(&mut self, id: u32, tile: TileCoord, action: &str) -> Result<(), String> {
-        let nothing = || Err("Nothing interesting happens.".to_owned());
-        let Some((original, _)) = self.scenery_state.find(&self.scenery, id, tile) else { return nothing() };
+        let Some(original) = self.scenery_state.find(&self.scenery, id, tile) else { return nothing() };
         let registry = Rc::clone(self.registry());
         if let Some(door) = registry.door_for(id) {
             let open_now = door.state_of(id) == Some(true);
@@ -92,7 +102,6 @@ impl World {
     /// Sends the player to open or close `door`, whose leaf `original` (as the map places it) was
     /// chosen.
     fn player_start_door(&mut self, door: &DoorDef, original: Loc, closing: bool) -> Result<(), String> {
-        let nothing = || Err("Nothing interesting happens.".to_owned());
         if closing && !door.can_close {
             return nothing();
         }
@@ -117,7 +126,7 @@ impl World {
         }
         let along = rotate((0, 1), leaf.orientation);
         for sign in [1, -1] {
-            let beside = TileCoord::with_plane(leaf.tile.x + along.0 * sign, leaf.tile.z + along.1 * sign, leaf.tile.plane);
+            let beside = leaf.tile.offset(along.0 * sign, along.1 * sign);
             let partner = self.scenery.at(beside).iter().copied().find(|other| {
                 other.kind == leaf.kind
                     && other.orientation == leaf.orientation
@@ -147,15 +156,14 @@ impl World {
 
         let tiles: Vec<TileCoord> =
             current.iter().flat_map(|leaf| TargetSpec::wall_reach(&self.map, leaf.tile, leaf.orientation)).collect();
-        let reach = TargetSpec::any_of(&tiles);
-        if !reach.is_satisfied_by(self.player.tile()) {
-            self.player.approaching_target = true;
-            self.player.current_path_is_running = self.player.is_running;
-            if !self.player.mover.request_move(&mut self.pathfinder, &mut self.map, reach) {
+        match self.approach(TargetSpec::any_of(&tiles)) {
+            Approach::There => {}
+            Approach::OnTheWay => return true,
+            Approach::NoWay => {
                 self.player.action = None;
                 self.game_message("I can't reach that!".to_owned());
+                return true;
             }
-            return true;
         }
 
         self.player.action = None;
@@ -180,13 +188,31 @@ impl World {
     /// is not counted.
     fn door_sticks(&mut self, door: LocKey) -> bool {
         let now = self.encounter.elapsed_ticks();
-        let closes = &mut self.player.door_closes;
-        closes.retain(|(key, at)| *key == door && now - at <= STUCK_WINDOW_TICKS);
+        let (last, closes) = self.player.door_closes.get_or_insert((door, Vec::new()));
+        if *last != door {
+            *last = door;
+            closes.clear();
+        }
+        closes.retain(|at| now - at <= STUCK_WINDOW_TICKS);
         if closes.len() + 1 >= STUCK_CLOSE_LIMIT {
             return true;
         }
-        closes.push((door, now));
+        closes.push(now);
         false
+    }
+
+    /// Walks the player toward `reach`, unless it is there already.
+    pub(super) fn approach(&mut self, reach: TargetSpec) -> Approach {
+        if reach.is_satisfied_by(self.player.tile()) {
+            return Approach::There;
+        }
+        self.player.approaching_target = true;
+        self.player.current_path_is_running = self.player.is_running;
+        if self.player.mover.request_move(&mut self.pathfinder, &mut self.map, reach) {
+            Approach::OnTheWay
+        } else {
+            Approach::NoWay
+        }
     }
 
     /// Shows `replacement` instead of `loc` for `ticks` ticks, moving its wall (if it is one).
@@ -203,15 +229,12 @@ impl World {
         }
     }
 
-    /// Takes `from`'s wall off the map and puts `to`'s on, for wall-shaped objects (a door).
-    /// Other objects keep their collision as it is (a stump blocks like its tree).
+    /// Takes `from`'s wall off the map and puts `to`'s on. Only wall shapes have wall bits (see
+    /// `collision::wall_edges`); other objects keep their collision as it is (a stump blocks like
+    /// its tree).
     fn move_wall(&mut self, from: &Loc, to: &Loc) {
-        if from.kind <= 3 {
-            self.map.remove_wall(from.tile, from.kind, from.orientation);
-        }
-        if to.kind <= 3 {
-            self.map.add_wall(to.tile, to.kind, to.orientation);
-        }
+        self.map.remove_wall(from.tile, from.kind, from.orientation);
+        self.map.add_wall(to.tile, to.kind, to.orientation);
     }
 
     /// The scenery's end of a tick: changes whose time is up go back, walls and all.

@@ -7,6 +7,7 @@ mod wall;
 pub(crate) mod test_grid;
 
 pub use collision_flag::CollisionFlag;
+pub(crate) use collision_map::edge_flag;
 pub use collision_map::CollisionMap;
 pub use collision_map_data::{CollisionMapData, CollisionMapDataError};
 pub use occupancy_mask::OccupancyMask;
