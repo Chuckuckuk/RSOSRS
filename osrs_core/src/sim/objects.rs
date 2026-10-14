@@ -16,6 +16,7 @@
 
 use std::rc::Rc;
 
+use super::firemaking::{LightAction, TendAction, ASHES, BONFIRE_LOC, FIRE_LOC};
 use super::gathering::GatherAction;
 use super::scenery::{Loc, LocKey};
 use super::world::World;
@@ -39,6 +40,11 @@ pub const STUCK_WINDOW_TICKS: i32 = (STUCK_CLOSE_LIMIT as i32 - 1) * 2;
 pub enum PlayerAction {
     Gather(GatherAction),
     Door(DoorAction),
+    Light(LightAction),
+    /// Adding logs to a fire (making it a bonfire, or feeding one).
+    Tend(TendAction),
+    /// Walking onto a ground item to pick it up (by its uid).
+    Take { uid: u32 },
 }
 
 /// Opening or closing a door.
@@ -84,6 +90,10 @@ impl World {
     /// Choosing `action` on the scenery object `id` over `tile` (as the client sees it now: an
     /// opened door is where it swung to).
     pub fn player_interact_object(&mut self, id: u32, tile: TileCoord, action: &str) -> Result<(), String> {
+        // a fire a player made is not on the map: the bonfire's own options
+        if let Some(fire) = self.scenery_state.spawned_at(tile).filter(|fire| fire.loc.id == id) {
+            return self.player_interact_fire(fire.loc, action);
+        }
         let Some(original) = self.scenery_state.find(&self.scenery, id, tile) else { return nothing() };
         let registry = Rc::clone(self.registry());
         // by the object the map places there: an open form can be shared by several doors
@@ -238,11 +248,19 @@ impl World {
         self.map.add_wall(to.tile, to.kind, to.orientation);
     }
 
-    /// The scenery's end of a tick: changes whose time is up go back, walls and all.
+    /// The scenery's end of a tick: changes whose time is up go back, walls and all; a fire that
+    /// burns out leaves ashes. The ground items' despawn clocks run too.
     pub(super) fn advance_scenery(&mut self) {
-        for change in self.scenery_state.advance() {
+        let expired = self.scenery_state.advance();
+        for change in expired.changes {
             self.move_wall(&change.replacement, &change.loc);
         }
+        for fire in expired.spawned {
+            if fire.id == FIRE_LOC || fire.id == BONFIRE_LOC {
+                self.drop_ground_item(ASHES, 1, fire.tile);
+            }
+        }
+        self.ground_items.advance();
     }
 
     /// The player's current action for this tick. Returns whether it used the tick (so a queued
@@ -251,6 +269,9 @@ impl World {
         match self.player.action.clone() {
             Some(PlayerAction::Gather(gather)) => self.run_gather(gather),
             Some(PlayerAction::Door(door)) => self.run_door(door),
+            Some(PlayerAction::Light(light)) => self.run_light_action(light),
+            Some(PlayerAction::Tend(tend)) => self.run_tend_action(tend),
+            Some(PlayerAction::Take { uid }) => self.run_take_action(uid),
             None => false,
         }
     }
@@ -260,7 +281,8 @@ impl World {
         match &self.player.action {
             Some(PlayerAction::Gather(gather)) => Some(gather.loc),
             Some(PlayerAction::Door(door)) => door.leaves.first().map(|leaf| self.scenery_state.current(leaf)),
-            None => None,
+            Some(PlayerAction::Tend(tend)) => self.scenery_state.spawned_at(tend.tile).map(|fire| fire.loc),
+            Some(PlayerAction::Light(_)) | Some(PlayerAction::Take { .. }) | None => None,
         }
     }
 }

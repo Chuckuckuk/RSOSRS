@@ -1,0 +1,14 @@
+{
+  "logs": [
+    { "item": "logs", "level": 1, "xp_tenths": 400, "burn_ticks": 102, "bonfire_ticks": 3 },
+    { "item": "oak_logs", "level": 15, "xp_tenths": 600, "burn_ticks": 109, "bonfire_ticks": 10 },
+    { "item": "willow_logs", "level": 30, "xp_tenths": 900, "burn_ticks": 116, "bonfire_ticks": 17 },
+    { "item": "teak_logs", "level": 35, "xp_tenths": 1050, "burn_ticks": 118, "bonfire_ticks": 19 },
+    { "item": "arctic_pine_logs", "level": 42, "xp_tenths": 1250, "burn_ticks": 121, "bonfire_ticks": 22 },
+    { "item": "maple_logs", "level": 45, "xp_tenths": 1350, "burn_ticks": 123, "bonfire_ticks": 24 },
+    { "item": "mahogany_logs", "level": 50, "xp_tenths": 1575, "burn_ticks": 125, "bonfire_ticks": 26 },
+    { "item": "yew_logs", "level": 60, "xp_tenths": 2025, "burn_ticks": 130, "bonfire_ticks": 31 },
+    { "item": "magic_logs", "level": 75, "xp_tenths": 3038, "burn_ticks": 137, "bonfire_ticks": 38 },
+    { "item": "redwood_logs", "level": 90, "xp_tenths": 3500, "burn_ticks": 144, "bonfire_ticks": 45 }
+  ]
+}

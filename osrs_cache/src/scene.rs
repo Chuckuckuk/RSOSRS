@@ -156,6 +156,21 @@ pub fn build_loc(
     wall_displacement: Option<u8>,
     texture_hsl: &HashMap<u32, u16>,
 ) -> Option<LocMesh> {
+    build_loc_with(load_model, def, kind, orientation, wall_displacement, texture_hsl, false)
+}
+
+/// [`build_loc`], keeping the mesh's [`Rig`] when `keep_rig` so an animation can pose it. Only
+/// meaningful for a single-model placement (the rig of an object made of several arms is the
+/// first one's).
+pub fn build_loc_with(
+    load_model: &mut dyn FnMut(u32) -> Option<std::rc::Rc<Model>>,
+    def: &ObjectDef,
+    kind: u8,
+    orientation: u8,
+    wall_displacement: Option<u8>,
+    texture_hsl: &HashMap<u32, u16>,
+    keep_rig: bool,
+) -> Option<LocMesh> {
     let o = orientation & 3;
     // (model orientation 0..=7, offset in model units) for every model the client draws
     let parts: Vec<(u8, (i32, i32))> = match kind {
@@ -177,7 +192,7 @@ pub fn build_loc(
     };
     let mut out: Option<LocMesh> = None;
     for (model_orientation, offset) in parts {
-        if let Some(m) = build_single(load_model, def, kind, model_orientation, offset, texture_hsl) {
+        if let Some(m) = build_single(load_model, def, kind, model_orientation, offset, texture_hsl, keep_rig) {
             match &mut out {
                 Some(acc) => append(acc, m),
                 None => out = Some(m),
@@ -196,6 +211,7 @@ fn build_single(
     orientation: u8,
     offset: (i32, i32),
     texture_hsl: &HashMap<u32, u16>,
+    keep_rig: bool,
 ) -> Option<LocMesh> {
     let flip = def.rotated ^ (kind == 2 && orientation > 3);
     let diagonal_decor = (4..=8).contains(&kind) && orientation > 3;
@@ -209,7 +225,7 @@ fn build_single(
         ambient: 64.0 + def.ambient as f32,
         contrast: 768.0 + def.contrast as f32 * 5.0,
         light: LIGHT,
-        keep_rig: false,
+        keep_rig,
     };
     build_models(load_model, &ids, &shape, flip, diagonal_decor, orientation, kind, offset, texture_hsl)
 }

@@ -20,9 +20,9 @@ pub fn sync(state: &mut UiState, input: &PaneInput) {
         slot.ops = vec!["*".to_owned()];
         slots.push(slot);
         let stack = input.player.and_then(|p| p.inventory.get(i)).and_then(Option::as_ref);
-        let object = stack.and_then(|s| input.icons.item_named(&s.name).map(|d| (d.id, s.quantity)));
+        let object = stack.and_then(|s| input.icons.item_named(&s.icon).map(|d| (d.id, s.quantity)));
         let ov = match object {
-            Some(item) => Override { item: Some(item), ..Default::default() },
+            Some(item) => Override { item: Some(item), selected: input.use_selected == Some(i), ..Default::default() },
             None => Override { hidden: Some(true), ..Default::default() },
         };
         state.created_overrides.insert((INVENTORY, i), ov);

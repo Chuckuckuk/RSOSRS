@@ -2,6 +2,9 @@
   "consumables": [
     { "id": "shark", "name": "Shark", "delay_group": "food", "delay_ticks": 3, "attack_delay_ticks": 3,
       "effects": [ { "heal": { "flat": 20, "percent": 0 } } ] },
+    { "id": "humble_pie", "name": "Humble pie", "delay_group": "food", "delay_ticks": 3, "attack_delay_ticks": 3,
+      "leaves": "humble_pie", "effects": [ "die" ], "icon": "Meat pie",
+      "notes": "Not a real item: a test of death. Eating it kills the eater outright, and it is not used up (it leaves itself)." },
     { "id": "manta_ray", "name": "Manta ray", "delay_group": "food", "delay_ticks": 3, "attack_delay_ticks": 3,
       "effects": [ { "heal": { "flat": 22, "percent": 0 } } ] },
     { "id": "cooked_karambwan", "name": "Cooked karambwan", "delay_group": "combo", "delay_ticks": 2, "attack_delay_ticks": 2,

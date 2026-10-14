@@ -20,6 +20,8 @@ pub struct Override {
     pub size: Option<(i32, i32)>,
     /// Cache object id and quantity: draws the item icon (and stack text) instead of a sprite.
     pub item: Option<(u32, u32)>,
+    /// The item is the one picked with "Use": its black outline is drawn white.
+    pub selected: bool,
 }
 
 #[derive(Default)]
@@ -229,7 +231,14 @@ impl Ctx<'_> {
 
     fn draw_sprite(&mut self, c: &Component, ov: &Override, rect: Rect, alpha: u8) {
         if let Some((obj, qty)) = ov.item {
-            let tex = self.assets.item(obj, qty).cloned();
+            let mut tex = self.assets.item(obj, qty).cloned();
+            if let (true, Some(t)) = (ov.selected, tex.as_mut()) {
+                for px in t.rgba.chunks_exact_mut(4) {
+                    if px[..3] == [0, 0, 0] && px[3] == 255 {
+                        px[..3].copy_from_slice(&[255, 255, 255]);
+                    }
+                }
+            }
             if let Some(t) = tex {
                 let x = rect.x + (rect.w - t.width as i32) / 2;
                 let y = rect.y + (rect.h - t.height as i32) / 2;

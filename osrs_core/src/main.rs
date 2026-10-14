@@ -45,6 +45,7 @@ mod overheads;
 mod player_look;
 mod projectiles;
 mod route;
+mod ground_scene;
 mod scenery_swaps;
 mod sound_fx;
 mod tile_marks;
@@ -402,10 +403,14 @@ fn main() {
                     ("abyssal_whip", 1),
                     ("magic_shortbow", 1),
                     ("shark", 3),
+                    ("humble_pie", 1),
                     ("cooked_karambwan", 2),
                     ("prayer_potion_4", 2),
                     ("bronze_arrow", 150),
                     ("bronze_axe", 1),
+                    ("tinderbox", 1),
+                    ("logs", 4),
+                    ("oak_logs", 1),
                 ] {
                     if let Err(e) = world.give_item(item, quantity) {
                         eprintln!("[server] starter kit: {e}");
@@ -474,7 +479,7 @@ fn main() {
     .add_systems(Startup, setup)
     .add_systems(
         Update,
-        (scripted_input, scripted_commands, poll_server, start_scenario, sync_player, npcs::sync_npcs, map_stream::stream_map, scenery_swaps::show_scenery_changes, limit_planes, orbit_camera, toggle_grid, screenshot_and_exit)
+        (scripted_input, scripted_commands, poll_server, start_scenario, sync_player, npcs::sync_npcs, map_stream::stream_map, scenery_swaps::show_scenery_changes, ground_scene::show_ground_things, limit_planes, orbit_camera, toggle_grid, screenshot_and_exit)
             .chain(),
     );
     app.world_mut().insert_non_send(ServerLink { link, latest: None, ticks_in_latest: 1, new_events: Vec::new() });
@@ -494,7 +499,11 @@ fn finish_recording() {
     let registry = Registry::builtin();
     // items that turn up later (a potion's lower doses, the vial): their pictures
     let names: Vec<String> =
-        registry.items().map(|i| i.name.clone()).chain(registry.consumables().map(|c| c.name.clone())).collect();
+        registry
+            .items()
+            .map(|i| i.name.clone())
+            .chain(registry.consumables().map(|c| c.icon.clone().unwrap_or_else(|| c.name.clone())))
+            .collect();
     interface::touch_icons(&names);
     // every sound the data can ask for
     let cache = Cache::open_default().expect("the cache opens");

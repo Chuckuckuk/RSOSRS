@@ -223,7 +223,12 @@ impl World {
     /// The sequence the player loops for its current action, while it is at it: the animation of
     /// the tool it gathers with.
     pub fn player_action_animation(&self) -> Option<u32> {
-        let Some(PlayerAction::Gather(gather)) = &self.player.action else { return None };
+        let gather = match &self.player.action {
+            Some(PlayerAction::Gather(gather)) => gather,
+            Some(PlayerAction::Light(light)) => return light.started.then_some(super::firemaking::LIGHTING_ANIMATION),
+            Some(PlayerAction::Tend(tend)) => return tend.started.then_some(super::firemaking::TENDING_ANIMATION),
+            Some(PlayerAction::Door(_)) | Some(PlayerAction::Take { .. }) | None => return None,
+        };
         let node = self.registry().gathering_node(&gather.node).filter(|_| gather.started)?;
         best_tool(&self.player, self.registry(), node)?.0.animation
     }
