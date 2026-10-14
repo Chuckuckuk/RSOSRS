@@ -33,11 +33,11 @@ If an issue's type changes, update its prefix and type label together.
 ### Starting work on an issue
 
 1. Assign it to the user: `gh issue edit <n> -R Chuckuckuk/RSOSRS --add-assignee @me`.
-2. Link it to its branch: `gh issue develop <n> -R Chuckuckuk/RSOSRS --name <branch> --base main`.
+2. Link it to its branch: `gh issue develop <n> -R Chuckuckuk/RSOSRS --name <branch> --base develop`.
    - If the branch already exists locally, also set its upstream: `git fetch origin && git branch --set-upstream-to=origin/<branch> <branch>`.
 3. Check the link: `gh issue develop --list <n> -R Chuckuckuk/RSOSRS`.
 
-Branching is trunk-based: each feature branch is cut from `main` and merges back into `main` by pull request. There is no `develop` stage.
+Branching: each feature branch is cut from `develop` and merges back into `develop` by pull request. `develop` is merged into `main` separately; never open a feature PR against `main`.
 
 ## Labels
 
@@ -81,3 +81,12 @@ Every issue gets:
 
 ### Updating issues
 Query issues whenever you suspect an issue needs updating. It may need a reworked description, new relationships, milestones, etc. If you update the description, add a comment describing the changes and the reasoning behind it.
+
+
+## Working with GitHub Pull Requests
+
+Use the gh CLI tool for PR operations.
+
+### Creating
+
+Generate a simple changelog using feat/chore/fix bullet points. Put a short description at the top. Make sure any issues have been linked. The PR will always target the `develop` branch.
