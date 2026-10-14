@@ -86,7 +86,8 @@ impl World {
     pub fn player_interact_object(&mut self, id: u32, tile: TileCoord, action: &str) -> Result<(), String> {
         let Some(original) = self.scenery_state.find(&self.scenery, id, tile) else { return nothing() };
         let registry = Rc::clone(self.registry());
-        if let Some(door) = registry.door_for(id) {
+        // by the object the map places there: an open form can be shared by several doors
+        if let Some(door) = registry.door_for(original.id) {
             let open_now = door.state_of(id) == Some(true);
             let option = if open_now { "Close" } else { "Open" };
             if action.eq_ignore_ascii_case(option) {
