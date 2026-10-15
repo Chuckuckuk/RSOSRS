@@ -15,6 +15,8 @@ use osrs_cache::{idx, Cache};
 const FRAME_SECONDS: f32 = 0.1;
 /// Frames in each colour's animation.
 const FRAMES: usize = 4;
+/// How much bigger than the interface's pixels the cross is drawn.
+const CROSS_SCALE: f32 = 2.0;
 
 /// Which cross a click plays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,9 +134,9 @@ fn draw_cross(
         return;
     };
     let Some(handle) = art.frames.get(frame) else { return };
-    // the interface's pixels are whole screen pixels; the cross is drawn with the same ones
+    // the interface's pixels are whole screen pixels; the cross is drawn CROSS_SCALE of them a pixel
     let physical = Vec2::new(window.physical_width() as f32, window.physical_height() as f32);
-    let size = art.size * super::interface::ui_scale(physical) as f32 / window.scale_factor();
+    let size = art.size * CROSS_SCALE * super::interface::ui_scale(physical) as f32 / window.scale_factor();
     if image.image != *handle {
         image.image = handle.clone();
     }

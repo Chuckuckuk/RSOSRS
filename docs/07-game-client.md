@@ -348,7 +348,8 @@ ground, shift-click, "Walk here"), red when the click went to something (`cross_
 an object, a ground item, using an item on one of them, or examining one). Clicks on the
 interface and the minimap play none. A menu entry plays it where the entry was clicked. The cross
 is the cache sprite `cross` (frames 0-3 yellow, 4-7 red, on a 16x16 canvas), each frame shown for
-100 ms as the client does, drawn at the interface's pixel scale (`interface::ui_scale`).
+100 ms as the client does, drawn at twice the interface's pixel scale (`CROSS_SCALE` times
+`interface::ui_scale`).
 
 `MenuAction` enumerates what an entry does; `perform` turns it into a `ClientCommand`:
 
