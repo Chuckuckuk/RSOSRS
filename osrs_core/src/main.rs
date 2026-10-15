@@ -35,6 +35,7 @@
 //! collision for the same squares.
 
 mod chat;
+mod click_cross;
 mod combat_fx;
 mod ground_click;
 mod interface;
@@ -466,7 +467,7 @@ fn main() {
         primary_window: Some(window_from_env(window_title(&launch))),
         ..default()
     }))
-    .add_plugins((WorldRenderPlugin, ModelAnimationPlugin, ground_click::GroundClickPlugin, chat::ChatPlugin, combat_fx::CombatFxPlugin, interface::InterfacePlugin, overheads::OverheadPlugin, player_look::PlayerLookPlugin, projectiles::ProjectilePlugin, sound_fx::SoundPlugin, tile_marks::TileMarksPlugin))
+    .add_plugins((WorldRenderPlugin, ModelAnimationPlugin, ground_click::GroundClickPlugin, click_cross::ClickCrossPlugin, chat::ChatPlugin, combat_fx::CombatFxPlugin, interface::InterfacePlugin, overheads::OverheadPlugin, player_look::PlayerLookPlugin, projectiles::ProjectilePlugin, sound_fx::SoundPlugin, tile_marks::TileMarksPlugin))
     .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.03)))
     .insert_resource(ScreenshotState { path: std::env::var("OSRS_SCREENSHOT").ok(), shot: false })
     .insert_resource(scene)

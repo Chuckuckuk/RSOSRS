@@ -342,6 +342,15 @@ the world it lists the NPC's options (default first) and "Examine", the object's
 ray. Names are coloured the game's way: objects cyan, NPCs yellow, items orange, and an NPC's
 level from green (far below the player's combat level) through yellow (equal) to red (far above).
 
+**Click feedback.** A click on the world plays the game's cross where it was clicked
+([`click_cross.rs`](../osrs_core/src/click_cross.rs)): yellow for a walk (left-click on the
+ground, shift-click, "Walk here"), red when the click went to something (`cross_colour`: an NPC,
+an object, a ground item, using an item on one of them, or examining one). Clicks on the
+interface and the minimap play none. A menu entry plays it where the entry was clicked. The cross
+is the cache sprite `cross` (frames 0-3 yellow, 4-7 red, on a 16x16 canvas), each frame shown for
+100 ms as the client does, drawn at twice the interface's pixel scale (`CROSS_SCALE` times
+`interface::ui_scale`).
+
 `MenuAction` enumerates what an entry does; `perform` turns it into a `ClientCommand`:
 
 | Action | Command |
@@ -349,7 +358,7 @@ level from green (far below the player's combat level) through yellow (equal) to
 | `Walk(tile)` | `WalkTo { tile }` |
 | `Npc { option: "Attack" }` | `Attack { target }` |
 | `Npc { other option }` | `InteractNpc { target }` (walk up and face it) |
-| `ExamineNpc`, `Examine`, `ExamineItem` | the matching examine command |
+| `ExamineNpc`, `Examine`, `ExamineItem`, `ExamineGroundItem` | the matching examine command |
 | `InventoryOption`, `Unequip` | the matching item command |
 | `Object { .. }` | nothing yet (printed) |
 
@@ -579,6 +588,7 @@ from a contact sheet (`FRAMES=1 sprite_sheet`).
 | [`chat.rs`](../osrs_core/src/chat.rs) | `ChatLog` keeps the last 100 messages; the interface draws the newest lines inside the chatbox (`panes::chat`). |
 | [`panes/`](../osrs_core/src/panes/mod.rs) | The ports of the game's interface scripts (7.8): one file per pane. |
 | [`overheads.rs`](../osrs_core/src/overheads.rs) | The prayer icon over the player's head (cache sprite `headicons_prayer`, drawn at 1.44 times its size, above `HEAD_HEIGHT`), chosen by `overhead_frame` from the active prayers. |
+| [`click_cross.rs`](../osrs_core/src/click_cross.rs) | The yellow or red cross played where the world was clicked (7.7); `ground_click` starts it through the `ClickCross` resource. |
 | [`sound_fx.rs`](../osrs_core/src/sound_fx.rs) | Plays the server's sound effects (7.5). |
 | [`tile_marks.rs`](../osrs_core/src/tile_marks.rs) | Gizmo outlines: dark blue on the player's server tile, light blue on the tile under the cursor (unless the cursor is over the interface). |
 
