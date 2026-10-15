@@ -260,7 +260,7 @@ The editor shows its edits through the same decoders the game uses:
 * After every change it runs `compile::build_with(project, base, Compression::None)` and puts the
   containers in the overlay.
 * The caches the world, minimap and thumbnails are drawn from are the base cache opened
-  [`with_overlay`](../osrs_cache/src/cache.rs). `Cache::read_raw` answers from the overlay first.
+  [`with_overlay`](../osrs_cache/src/cache.rs). Reads are answered from the overlay first, decoded straight from its bytes without copying them.
   * The square loader thread gets one as well, through `SquareStream::spawn_with_cache`.
 * The changed square and its eight neighbours are then decoded again.
 
@@ -291,7 +291,7 @@ The crate is a library (`lib.rs`: what the editor knows, testable without a wind
 | `picker.rs` | the NPC model picker's own window (a second Bevy window with its own egui context) |
 | `thumbs.rs` | NPC thumbnails, drawn on the CPU from the model's coloured triangles |
 | `preview.rs` | the minimap preview (`MinimapSource` through the overlay) and sprite textures |
-| `camera.rs` | the fly camera |
+| `camera.rs` | `osrs_render::fly`'s camera, with the editor's rules for when it looks and flies |
 
 The UI is [`bevy_egui`](https://github.com/vladbat00/bevy_egui) 0.43 (egui 0.36).
 

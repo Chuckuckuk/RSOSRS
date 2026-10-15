@@ -37,6 +37,8 @@ pub mod spotanim;
 pub mod squares;
 pub mod terrain_mesh;
 pub mod textures;
+#[doc(hidden)]
+pub mod testing;
 pub mod ui;
 pub mod writer;
 pub mod xtea;

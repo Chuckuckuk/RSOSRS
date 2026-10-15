@@ -370,18 +370,8 @@ fn main() {
         let (first_collision, mut first_locs) = square_map(&source, (sx, sy));
         let mut map = CollisionMap::new(first_collision).expect("a square's arrays match its size");
         let mut loaded: HashSet<(i32, i32)> = HashSet::from([(sx, sy)]);
-        for dz in -radius..=radius {
-            for dx in -radius..=radius {
-                let square = (sx + dx, sy + dz);
-                if loaded.insert(square) {
-                    let (collision, locs) = square_map(&source, square);
-                    first_locs.extend(locs);
-                    if let Err(e) = map.merge(collision) {
-                        eprintln!("[server] map square ({}, {}) rejected: {e}", square.0, square.1);
-                    }
-                }
-            }
-        }
+        let around = (-radius..=radius).flat_map(|dz| (-radius..=radius).map(move |dx| (sx + dx, sy + dz)));
+        merge_squares(&source, &mut map, &mut loaded, &mut first_locs, around);
         let mut registry = Registry::builtin();
 
         // who stands where in the open world: what a cache built by the map editor says, else the
@@ -399,16 +389,7 @@ fn main() {
             resolve_cache_npcs(&mut registry, &source, &mut npc_spawns);
         }
         let registry = std::rc::Rc::new(registry);
-        for s in &npc_spawns {
-            let square = square_of(s.x, s.z);
-            if loaded.insert(square) {
-                let (collision, locs) = square_map(&source, square);
-                first_locs.extend(locs);
-                if let Err(e) = map.merge(collision) {
-                    eprintln!("[server] map square ({}, {}) rejected: {e}", square.0, square.1);
-                }
-            }
-        }
+        merge_squares(&source, &mut map, &mut loaded, &mut first_locs, npc_spawns.iter().map(|s| square_of(s.x, s.z)));
 
         let mut server = match &scenario {
             Some(scenario) => {
@@ -652,6 +633,35 @@ fn open_world_seed() -> i32 {
 /// `CollisionMap` takes, and its ground-level objects that can change (free-standing ones such
 /// as trees, and wall pieces with an option such as doors), for the scenery index. A square that cannot be decoded is solid and empty, so nobody is ever walked onto
 /// ground nobody has seen.
+/// Loads each of `squares` not `loaded` yet into `map`, its interactive objects into `locs`. The
+/// squares are decoded in parallel (each reads the nine squares around it from the cache).
+fn merge_squares(
+    source: &MapSource,
+    map: &mut CollisionMap,
+    loaded: &mut HashSet<(i32, i32)>,
+    locs: &mut Vec<Loc>,
+    squares: impl IntoIterator<Item = (i32, i32)>,
+) {
+    let fresh: Vec<(i32, i32)> = squares.into_iter().filter(|&square| loaded.insert(square)).collect();
+    if fresh.is_empty() {
+        return;
+    }
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let decoded: Vec<(CollisionMapData, Vec<Loc>)> = std::thread::scope(|scope| {
+        let jobs: Vec<_> = fresh
+            .chunks(fresh.len().div_ceil(threads))
+            .map(|chunk| scope.spawn(move || chunk.iter().map(|&square| square_map(source, square)).collect::<Vec<_>>()))
+            .collect();
+        jobs.into_iter().flat_map(|job| job.join().expect("decoding a map square panicked")).collect()
+    });
+    for (square, (collision, square_locs)) in fresh.into_iter().zip(decoded) {
+        locs.extend(square_locs);
+        if let Err(e) = map.merge(collision) {
+            eprintln!("[server] map square ({}, {}) rejected: {e}", square.0, square.1);
+        }
+    }
+}
+
 fn square_map(source: &MapSource, square: (i32, i32)) -> (CollisionMapData, Vec<Loc>) {
     let cells = (SQUARE * SQUARE) as usize;
     let (flags, locs) = match source.neighbourhood(square.0, square.1) {

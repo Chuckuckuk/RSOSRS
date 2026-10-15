@@ -13,15 +13,9 @@
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
-use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+use bevy::window::{CursorOptions, PrimaryWindow};
+use osrs_render::fly::{grab_cursor, FlyCamera};
 use osrs_render::world::{load_world, spawn_world, OnPlane, ScrollingTextures, WorldData, WorldRenderPlugin};
-
-#[derive(Component)]
-struct FlyCamera {
-    speed: f32,
-    yaw: f32,
-    pitch: f32,
-}
 
 #[derive(Resource, Default)]
 struct ScreenshotState {
@@ -96,8 +90,7 @@ fn setup(
         }
     }
     let look = Transform::from_translation(eye).looking_at(target, Vec3::Y);
-    let (yaw, pitch, _) = look.rotation.to_euler(EulerRot::YXZ);
-    commands.spawn((Camera3d::default(), look, FlyCamera { speed: extent * 0.15, yaw, pitch }));
+    commands.spawn((Camera3d::default(), look, FlyCamera::facing(&look, extent * 0.15)));
 }
 
 fn view_controls(
@@ -147,40 +140,13 @@ fn fly_camera(
     let Ok((mut tf, mut cam)) = cams.single_mut() else { return };
     let looking = buttons.pressed(MouseButton::Right);
     if let Ok(mut cursor) = windows.single_mut() {
-        cursor.grab_mode = if looking { CursorGrabMode::Locked } else { CursorGrabMode::None };
-        cursor.visible = !looking;
+        grab_cursor(&mut cursor, looking);
     }
     if looking {
-        cam.yaw -= motion.delta.x * 0.003;
-        cam.pitch = (cam.pitch - motion.delta.y * 0.003).clamp(-1.55, 1.55);
-        tf.rotation = Quat::from_euler(EulerRot::YXZ, cam.yaw, cam.pitch, 0.0);
+        cam.look(&mut tf, motion.delta);
     }
-    if scroll.delta.y != 0.0 {
-        cam.speed = (cam.speed * (1.0 + scroll.delta.y * 0.1)).clamp(0.5, 2000.0);
-    }
-    let mut dir = Vec3::ZERO;
-    let fwd = *tf.forward();
-    let right = *tf.right();
-    if keys.pressed(KeyCode::KeyW) {
-        dir += fwd;
-    }
-    if keys.pressed(KeyCode::KeyS) {
-        dir -= fwd;
-    }
-    if keys.pressed(KeyCode::KeyD) {
-        dir += right;
-    }
-    if keys.pressed(KeyCode::KeyA) {
-        dir -= right;
-    }
-    if keys.pressed(KeyCode::KeyE) {
-        dir += Vec3::Y;
-    }
-    if keys.pressed(KeyCode::KeyQ) {
-        dir -= Vec3::Y;
-    }
-    let boost = if keys.pressed(KeyCode::ShiftLeft) { 4.0 } else { 1.0 };
-    tf.translation += dir.normalize_or_zero() * cam.speed * boost * time.delta_secs();
+    cam.zoom(scroll.delta.y, 2000.0);
+    cam.fly(&mut tf, &keys, time.delta_secs());
 }
 
 fn screenshot_and_exit(

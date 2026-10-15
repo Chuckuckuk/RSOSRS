@@ -13,29 +13,8 @@ use osrs_core::data::{read_npc_spawns, NpcSpawnPoint};
 use osrs_map_editor::compile::{self, Stage};
 use osrs_map_editor::project::{MapProject, MarkerDef};
 use osrs_render::streaming::SquareLoader;
-use std::path::{Path, PathBuf};
+use osrs_cache::testing::{stamp, temp_dir as temp};
 use std::sync::Arc;
-
-fn temp(tag: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("osrs_compile_{tag}_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    d
-}
-
-/// Size and modification time of every cache file in `dir`.
-fn stamp(dir: &Path) -> Vec<(String, u64, std::time::SystemTime)> {
-    let mut out: Vec<_> = std::fs::read_dir(dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| osrs_cache::writer::is_cache_file(&e.file_name().to_string_lossy()))
-        .map(|e| {
-            let m = e.metadata().unwrap();
-            (e.file_name().to_string_lossy().into_owned(), m.len(), m.modified().unwrap())
-        })
-        .collect();
-    out.sort();
-    out
-}
 
 #[test]
 fn a_compiled_cache_has_the_edits_and_the_base_is_untouched() {

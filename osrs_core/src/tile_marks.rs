@@ -60,21 +60,9 @@ fn find_hover_tile(
     hover.0 = picker.0.pick_all(&*world, ray).map(|click| click.tile);
 }
 
-/// The four corners of tile (`x`, `z`) in render space, lifted a little, if its square is loaded.
-fn corners(world: &StreamedWorld, x: i32, z: i32) -> Option<[Vec3; 4]> {
-    let [sw, se, nw, ne] = world.tile_corners(x, z)?.map(|h| -(h as f32) / 128.0 + LIFT);
-    let (fx, fz) = (x as f32, -(z as f32));
-    Some([
-        Vec3::new(fx, sw, fz),
-        Vec3::new(fx + 1.0, se, fz),
-        Vec3::new(fx + 1.0, ne, fz - 1.0),
-        Vec3::new(fx, nw, fz - 1.0),
-    ])
-}
-
 fn draw_marks(mut gizmos: Gizmos, world: Res<StreamedWorld>, server: NonSend<ServerLink>, hover: Res<HoverTile>) {
     let outline = |gizmos: &mut Gizmos, tile: (i32, i32), colour: Color| {
-        if let Some([a, b, c, d]) = corners(&world, tile.0, tile.1) {
+        if let Some([a, b, c, d]) = world.block_corners(tile.0, tile.1, 1, 1, LIFT) {
             gizmos.linestrip([a, b, c, d, a], colour);
         }
     };

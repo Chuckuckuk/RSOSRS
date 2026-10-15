@@ -119,14 +119,26 @@ impl Cache {
 
     /// Raw (still compressed/encrypted) container bytes of `index/group`.
     pub fn read_raw(&self, index: u8, group: u32) -> Result<Vec<u8>> {
+        self.with_raw(index, group, <[u8]>::to_vec)
+    }
+
+    /// `f` of the raw container of `index/group`. A container held in memory (an overlay's, a
+    /// bundle's) is lent to `f` as it is, not copied: the object definitions group alone is
+    /// several megabytes.
+    fn with_raw<R>(&self, index: u8, group: u32, f: impl FnOnce(&[u8]) -> R) -> Result<R> {
         crate::bundle::record(index, group);
         // groups replaced in memory (the map editor's uncompiled edits)
         if let Some(raw) = self.overlay.as_ref().and_then(|o| o.get(index, group)) {
-            return Ok(raw.to_vec());
+            return Ok(f(&raw));
         }
         if let Some(bundle) = &self.bundle {
-            return bundle.get(index, group).map(<[u8]>::to_vec).ok_or_else(|| crate::bundle::missing(index, group));
+            return bundle.get(index, group).map(f).ok_or_else(|| crate::bundle::missing(index, group));
         }
+        Ok(f(&self.read_sectors(index, group)?))
+    }
+
+    /// The container of `index/group` as the data file stores it, its sector chain followed.
+    fn read_sectors(&self, index: u8, group: u32) -> Result<Vec<u8>> {
         let (len, mut sector) = self.idx_entry(index, group)?;
         let len = len as usize;
         let mut out = Vec::with_capacity(len);
@@ -159,11 +171,11 @@ impl Cache {
 
     /// Decoded container bytes of `index/group`.
     pub fn read_group(&self, index: u8, group: u32) -> Result<Vec<u8>> {
-        container::decode(&self.read_raw(index, group)?, None)
+        self.read_group_keyed(index, group, None)
     }
 
     pub fn read_group_keyed(&self, index: u8, group: u32, key: Option<&xtea::Key>) -> Result<Vec<u8>> {
-        container::decode(&self.read_raw(index, group)?, key)
+        self.with_raw(index, group, |raw| container::decode(raw, key))?
     }
 
     /// Split a multi-file group into its files.

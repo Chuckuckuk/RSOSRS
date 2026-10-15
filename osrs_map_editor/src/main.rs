@@ -36,10 +36,10 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 use osrs_cache::overlay::Overlay;
 use osrs_cache::Cache;
 use osrs_map_editor::project::MapProject;
-use std::sync::Arc;
 use osrs_render::streaming::{SquareStream, StreamedWorld};
 use osrs_render::world::{MaterialCache, TextureStore, WorldRenderPlugin};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 struct Args {
     project: String,
@@ -160,8 +160,13 @@ fn main() {
     let open = || Cache::open(&base_dir).unwrap_or_else(|e| fail("could not open the cache", e));
     let base = open();
     let overlay = Overlay::new();
-    let catalog = catalog::Catalog::load(&base).unwrap_or_else(|e| fail("could not read the cache's definitions", e));
-    let textures = osrs_cache::textures::load_textures(&base).unwrap_or_else(|e| fail("could not read the cache's textures", e));
+    // the two biggest reads of startup, side by side
+    let (catalog, textures) = std::thread::scope(|scope| {
+        let textures = scope.spawn(|| osrs_cache::textures::load_textures(&base));
+        let catalog = catalog::Catalog::load(&base).unwrap_or_else(|e| fail("could not read the cache's definitions", e));
+        let textures = textures.join().expect("reading the textures panicked");
+        (catalog, textures.unwrap_or_else(|e| fail("could not read the cache's textures", e)))
+    });
     let picker = world::EditorPicker::new(&catalog);
     let mut editor = editor::Editor::new(project, path, base, Arc::clone(&overlay));
     editor.status = format!("{} objects, {} NPCs, {} icons", catalog.objects.len(), catalog.npcs.len(), catalog.areas.len());

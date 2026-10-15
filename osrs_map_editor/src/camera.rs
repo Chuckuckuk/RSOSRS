@@ -1,16 +1,11 @@
-//! A free-flying camera, as in `osrs_viewer`: WASD to move, Q/E down and up, hold the right mouse
-//! button to look around, Shift for speed, the wheel to change it.
+//! The editor's camera: `osrs_render`'s fly camera, looking while the right mouse button is held
+//! (begun over the world), flying unless a text field has the keys or Ctrl is held (shortcuts).
 
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-
-#[derive(Component)]
-pub struct FlyCamera {
-    pub speed: f32,
-    yaw: f32,
-    pitch: f32,
-}
+use bevy::window::{CursorOptions, PrimaryWindow};
+pub use osrs_render::fly::FlyCamera;
+use osrs_render::fly::grab_cursor;
 
 /// Whether every plane is drawn (roofs on), or only those up to the plane being edited.
 #[derive(Resource)]
@@ -26,16 +21,13 @@ pub fn looking_at(x: i32, z: i32) -> Transform {
 
 pub fn spawn_camera(commands: &mut Commands, at: (i32, i32)) {
     let look = looking_at(at.0, at.1);
-    let (yaw, pitch, _) = look.rotation.to_euler(EulerRot::YXZ);
-    commands.spawn((Camera3d::default(), look, FlyCamera { speed: 20.0, yaw, pitch }));
+    commands.spawn((Camera3d::default(), look, FlyCamera::facing(&look, 20.0)));
 }
 
 /// Moves the camera to look at tile (`x`, `z`).
 pub fn jump_to(transform: &mut Transform, camera: &mut FlyCamera, x: i32, z: i32) {
     *transform = looking_at(x, z);
-    let (yaw, pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
-    camera.yaw = yaw;
-    camera.pitch = pitch;
+    camera.face(transform);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -60,46 +52,18 @@ pub fn fly_camera(
         *looking = false;
     }
     if let Ok(mut cursor) = windows.single_mut() {
-        cursor.grab_mode = if *looking { CursorGrabMode::Locked } else { CursorGrabMode::None };
-        cursor.visible = !*looking;
+        grab_cursor(&mut cursor, *looking);
     }
     if *looking {
-        cam.yaw -= motion.delta.x * 0.003;
-        cam.pitch = (cam.pitch - motion.delta.y * 0.003).clamp(-1.55, 1.55);
-        tf.rotation = Quat::from_euler(EulerRot::YXZ, cam.yaw, cam.pitch, 0.0);
+        cam.look(&mut tf, motion.delta);
     }
-    if scroll.delta.y != 0.0 && hover.in_world {
-        cam.speed = (cam.speed * (1.0 + scroll.delta.y * 0.1)).clamp(0.5, 500.0);
+    if hover.in_world {
+        cam.zoom(scroll.delta.y, 500.0);
     }
-    // typing in a text field is not flying
-    if contexts.ctx_mut().is_ok_and(|ctx| ctx.egui_wants_keyboard_input()) {
-        return;
-    }
+    // typing in a text field is not flying, nor is Ctrl held for a shortcut
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
-    if ctrl {
+    if ctrl || contexts.ctx_mut().is_ok_and(|ctx| ctx.egui_wants_keyboard_input()) {
         return;
     }
-    let mut dir = Vec3::ZERO;
-    let fwd = *tf.forward();
-    let right = *tf.right();
-    if keys.pressed(KeyCode::KeyW) {
-        dir += fwd;
-    }
-    if keys.pressed(KeyCode::KeyS) {
-        dir -= fwd;
-    }
-    if keys.pressed(KeyCode::KeyD) {
-        dir += right;
-    }
-    if keys.pressed(KeyCode::KeyA) {
-        dir -= right;
-    }
-    if keys.pressed(KeyCode::KeyE) {
-        dir += Vec3::Y;
-    }
-    if keys.pressed(KeyCode::KeyQ) {
-        dir -= Vec3::Y;
-    }
-    let boost = if keys.pressed(KeyCode::ShiftLeft) { 4.0 } else { 1.0 };
-    tf.translation += dir.normalize_or_zero() * cam.speed * boost * time.delta_secs();
+    cam.fly(&mut tf, &keys, time.delta_secs());
 }

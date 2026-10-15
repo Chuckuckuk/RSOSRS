@@ -158,19 +158,8 @@ pub fn shortcuts(
     }
 }
 
-/// The four corners of a `w` x `h` block of tiles from (`x`, `z`), on the ground.
-fn block(world: &StreamedWorld, x: i32, z: i32, w: i32, h: i32) -> Option<[Vec3; 4]> {
-    let y = |tx: i32, tz: i32, corner: usize| world.tile_corners(tx, tz).map(|c| -(c[corner] as f32) / 128.0 + LIFT);
-    Some([
-        Vec3::new(x as f32, y(x, z, 0)?, -(z as f32)),
-        Vec3::new((x + w) as f32, y(x + w - 1, z, 1)?, -(z as f32)),
-        Vec3::new((x + w) as f32, y(x + w - 1, z + h - 1, 3)?, -((z + h) as f32)),
-        Vec3::new(x as f32, y(x, z + h - 1, 2)?, -((z + h) as f32)),
-    ])
-}
-
 fn outline(gizmos: &mut Gizmos, world: &StreamedWorld, x: i32, z: i32, w: i32, h: i32, colour: Color) {
-    if let Some([a, b, c, d]) = block(world, x, z, w, h) {
+    if let Some([a, b, c, d]) = world.block_corners(x, z, w, h, LIFT) {
         gizmos.linestrip([a, b, c, d, a], colour);
     }
 }

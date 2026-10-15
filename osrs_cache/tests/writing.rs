@@ -6,7 +6,7 @@
 use osrs_cache::locs::{self, Placement};
 use osrs_cache::reftable::RefTable;
 use osrs_cache::*;
-use std::path::{Path, PathBuf};
+use osrs_cache::testing::{stamp, temp_dir as temp};
 
 /// Always the installed game's cache: these tests build on it, whatever cache is active.
 fn live() -> Option<Cache> {
@@ -85,26 +85,5 @@ fn a_group_written_into_a_copy_reads_back_and_the_base_is_untouched() {
     assert_eq!(copy_maps.groups[&gid].crc, osrs_cache::reftable::crc32(&packed));
     assert_eq!(copy.read_raw(idx::MAPS, (50 << 8) | 51).unwrap(), base.read_raw(idx::MAPS, (50 << 8) | 51).unwrap());
     let _ = std::fs::remove_dir_all(&root);
-}
-
-fn temp(tag: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("osrs_compile_{tag}_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    d
-}
-
-/// Size and modification time of every cache file in `dir`.
-fn stamp(dir: &Path) -> Vec<(String, u64, std::time::SystemTime)> {
-    let mut out: Vec<_> = std::fs::read_dir(dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| osrs_cache::writer::is_cache_file(&e.file_name().to_string_lossy()))
-        .map(|e| {
-            let m = e.metadata().unwrap();
-            (e.file_name().to_string_lossy().into_owned(), m.len(), m.modified().unwrap())
-        })
-        .collect();
-    out.sort();
-    out
 }
 

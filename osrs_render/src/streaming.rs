@@ -354,6 +354,20 @@ impl StreamedWorld {
         Some([at(0, 0), at(1, 0), at(0, 1), at(1, 1)])
     }
 
+    /// The four outer corners (south-west, south-east, north-east, north-west, so they draw as a
+    /// loop) in render space of the `w` x `h` block of tiles whose south-west tile is (`x`, `z`),
+    /// raised `lift` tiles off the ground, if its squares are loaded. A tile outline is a 1 x 1
+    /// block.
+    pub fn block_corners(&self, x: i32, z: i32, w: i32, h: i32, lift: f32) -> Option<[Vec3; 4]> {
+        let y = |tx: i32, tz: i32, corner: usize| self.tile_corners(tx, tz).map(|c| -(c[corner] as f32) / 128.0 + lift);
+        Some([
+            Vec3::new(x as f32, y(x, z, 0)?, -(z as f32)),
+            Vec3::new((x + w) as f32, y(x + w - 1, z, 1)?, -(z as f32)),
+            Vec3::new((x + w) as f32, y(x + w - 1, z + h - 1, 3)?, -((z + h) as f32)),
+            Vec3::new(x as f32, y(x, z + h - 1, 2)?, -((z + h) as f32)),
+        ])
+    }
+
     /// Where an object `w` x `h` tiles placed with its south-west tile at (`x`, `z`) stands: the
     /// middle of its footprint, at the average height of the footprint's four outer corners (as
     /// the map loader places objects), if its square is loaded.

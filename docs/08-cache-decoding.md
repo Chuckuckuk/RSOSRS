@@ -57,7 +57,7 @@ chapter 11.5).
    a `Mutex`.
 2. **Sector chain.** `.dat2` is divided into 520-byte sectors. Each sector starts with a header
    (group id, chunk number, next sector, archive id; 8 bytes, or 10 when the group id needs 32
-   bits) followed by data. `read_raw` follows the chain, checking every header, until it has
+   bits) followed by data. The reader follows the chain, checking every header, until it has
    `length` bytes. The file handle is behind a `Mutex` because seeking mutates it.
 3. **Container.** [`container::decode`](../osrs_cache/src/container.rs) reads
    `[compression u8][length u32][uncompressed length u32, if compressed][payload]`. Compression 0
