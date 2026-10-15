@@ -115,6 +115,14 @@ pub fn footprint(def: &ObjectDef, orientation: u8) -> (u8, u8) {
     }
 }
 
+/// How far (model units, 128 to a tile) a face is lifted off its plane per rank among the faces
+/// that share it (capped), and how close two planes must be to count as the same; see the lift in
+/// `build_models`. A step must clear the graphics card's precision at world coordinates: at x of
+/// 3200 a position in `f32` moves in steps of 0.00024 tile, about 0.03 model units.
+const LIFT_PER_RANK: f32 = 0.15;
+const MAX_LIFT_RANK: usize = 12;
+const COPLANAR_WITHIN: f32 = 0.5;
+
 /// Wall decoration stand-off the client uses when the tile has no wall to read it from.
 pub const DEFAULT_DECOR_DISPLACEMENT: u8 = 16;
 
@@ -280,6 +288,8 @@ pub fn build_models(
         tex: i32,
         /// texture-space triangle (P, M, N) as indices into the merged vertex arrays
         pmn: [usize; 3],
+        /// the model's draw priority for this face: higher is painted over lower
+        priority: u8,
     }
     let mut faces: Vec<Face> = Vec::new();
     let mut skin: Vec<u8> = Vec::new();
@@ -336,6 +346,7 @@ pub fn build_models(
                 flat: m.render_type.get(f).map(|r| r & 1 == 1).unwrap_or(false),
                 tex,
                 pmn,
+                priority: m.priority.get(f).copied().unwrap_or(0),
             });
         }
     }
@@ -456,11 +467,54 @@ pub fn build_models(
         [(da * bb - db * ab) / det, (db * aa - da * ab) / det]
     };
 
+    // The client paints faces in order (higher priority over lower, later over earlier), so a
+    // face lying exactly on another one wins by order. A depth buffer has no order and would
+    // fight, so a face that shares its plane (and facing) with others is lifted off it by its
+    // rank among them: priority first, then position in the model. Faces alone on their plane
+    // stay put. The lifts are far below what a pixel resolves, but above the depth precision.
+    let planes: Vec<Option<([f32; 3], f32)>> = faces
+        .iter()
+        .map(|f| {
+            let (x, y, z) = face_normal(f);
+            let len = (x * x + y * y + z * z).sqrt();
+            (len > 1e-6).then(|| {
+                let n = [x / len, y / len, z / len];
+                (n, n[0] * vx[f.a] + n[1] * vy[f.a] + n[2] * vz[f.a])
+            })
+        })
+        .collect();
+    let lifts: Vec<[f32; 3]> = (0..faces.len())
+        .map(|i| {
+            let Some((n, d)) = planes[i] else { return [0.0; 3] };
+            // faces of one colour need no order among themselves: count the distinct
+            // looks painted before this one on the same plane
+            let mut below: Vec<(u16, i32, u8)> = Vec::new();
+            for j in 0..faces.len() {
+                let Some((m, e)) = planes[j] else { continue };
+                if j != i
+                    && (faces[j].priority, j) < (faces[i].priority, i)
+                    && n[0] * m[0] + n[1] * m[1] + n[2] * m[2] > 0.999
+                    && (d - e).abs() < COPLANAR_WITHIN
+                {
+                    let look = (faces[j].hsl, faces[j].tex, faces[j].alpha);
+                    if !below.contains(&look) {
+                        below.push(look);
+                    }
+                }
+            }
+            let rank = below.len();
+            let k = rank.min(MAX_LIFT_RANK) as f32 * LIFT_PER_RANK / 128.0;
+            // model space has y and z the other way round from render space
+            [n[0] * k, -n[1] * k, -n[2] * k]
+        })
+        .collect();
+
     let mut out = LocMesh::default();
     if shape.keep_rig {
         out.rig = Some(Rig { positions: (0..vx.len()).map(|i| [vx[i], vy[i], vz[i]]).collect(), skin });
     }
-    for f in &faces {
+    for (index, f) in faces.iter().enumerate() {
+        let up = lifts[index];
         if f.tex >= 0 {
             let lights = if f.flat {
                 let l = intensity(face_normal(f));
@@ -475,7 +529,7 @@ pub fn build_models(
             let target = out.textured.entry(f.tex as u32).or_default();
             let base = target.positions.len() as u32;
             for (k, v) in [f.a, f.b, f.c].into_iter().enumerate() {
-                target.positions.push([vx[v] / 128.0, -vy[v] / 128.0, -vz[v] / 128.0]);
+                target.positions.push([vx[v] / 128.0 + up[0], -vy[v] / 128.0 + up[1], -vz[v] / 128.0 + up[2]]);
                 target.source.push(v as u32);
                 let shade = (lights[k] / 128.0).clamp(0.05, 1.0).powf(BRIGHTNESS);
                 let lin = srgb_to_linear(shade);
@@ -499,7 +553,7 @@ pub fn build_models(
         };
         let base = target.positions.len() as u32;
         for (k, v) in [f.a, f.b, f.c].into_iter().enumerate() {
-            target.positions.push([vx[v] / 128.0, -vy[v] / 128.0, -vz[v] / 128.0]);
+            target.positions.push([vx[v] / 128.0 + up[0], -vy[v] / 128.0 + up[1], -vz[v] / 128.0 + up[2]]);
             target.source.push(v as u32);
             target.colors.push(color(f.hsl, lights[k], alpha));
         }

@@ -26,7 +26,8 @@
 //!        OSRS_UI_SCALE=n                 whole-number interface scale (default: largest that fits 765x503)
 //!        OSRS_WINDOW=WxH                 window size in pixels (scale factor forced to 1), e.g. 900x600 to test
 //!                                        the modern layout's narrow stone arrangement (< 948 px wide)
-//!        OSRS_MAX_PLANE=n                hide terrain and scenery above plane n (to look under roofs)
+//!        OSRS_MAX_PLANE=n                hide terrain and scenery above plane n (to look under roofs;
+//!                                        roofs also come off by themselves when the view crosses one)
 //! controls: F10 cycles the interface layout (fixed, classic, modern); G toggles the tile grid; left-click ground to walk there; right-click ground for the "Walk here" menu;
 //!           hold right mouse and drag to orbit the character, scroll to zoom
 //!
@@ -467,7 +468,7 @@ fn main() {
         primary_window: Some(window_from_env(window_title(&launch))),
         ..default()
     }))
-    .add_plugins((WorldRenderPlugin, ModelAnimationPlugin, ground_click::GroundClickPlugin, click_cross::ClickCrossPlugin, chat::ChatPlugin, combat_fx::CombatFxPlugin, interface::InterfacePlugin, overheads::OverheadPlugin, player_look::PlayerLookPlugin, projectiles::ProjectilePlugin, sound_fx::SoundPlugin, tile_marks::TileMarksPlugin))
+    .add_plugins((WorldRenderPlugin, osrs_render::occlusion::OcclusionPlugin, ModelAnimationPlugin, ground_click::GroundClickPlugin, click_cross::ClickCrossPlugin, chat::ChatPlugin, combat_fx::CombatFxPlugin, interface::InterfacePlugin, overheads::OverheadPlugin, player_look::PlayerLookPlugin, projectiles::ProjectilePlugin, sound_fx::SoundPlugin, tile_marks::TileMarksPlugin))
     .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.03)))
     .insert_resource(ScreenshotState { path: std::env::var("OSRS_SCREENSHOT").ok(), shot: false })
     .insert_resource(scene)
@@ -733,12 +734,14 @@ fn orbit_camera(
     scroll: Res<AccumulatedMouseScroll>,
     players: Query<&Transform, (With<Player>, Without<OrbitCamera>)>,
     mut cams: Query<(&mut Transform, &mut OrbitCamera), Without<Player>>,
+    mut occlusion: ResMut<osrs_render::occlusion::OcclusionTarget>,
 ) {
     let Ok((mut tf, mut cam)) = cams.single_mut() else { return };
     // follow the character (about 1.5 tiles tall) as the server moves it
     if let Ok(player) = players.single() {
         cam.target = player.translation + Vec3::Y * 0.75;
     }
+    occlusion.point = Some(cam.target);
     // the middle button turns the camera; the right one is the context menu's
     if buttons.pressed(MouseButton::Middle) {
         cam.yaw -= motion.delta.x * 0.005;
