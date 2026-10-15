@@ -48,8 +48,8 @@ the server thread and:
 * **with a scenario**: builds the world with `build_scenario_on` (chapter 6.7) and starts the tick
   driver **paused**. A scenario is a fight that begins at once, and the client needs several
   seconds to load and compile shaders; `start_scenario` (below) lets it go;
-* **without one**: creates the `World` with seed 12345 and a new-account player at the spawn,
-  spawns a "man" NPC on the nearest open tile to `(spawn.x + 4, spawn.z - 3)`, and gives the
+* **without one**: creates the `World` with seed 12345 and a new-account player at the spawn
+  (with Firemaking raised to 50), spawns a "man" NPC on the nearest open tile to `(spawn.x + 4, spawn.z - 3)`, and gives the
   player a starter kit (bronze sword and helm, whip, magic shortbow, sharks, karambwans, prayer
   potions, 150 bronze arrows);
 * tells the server every object's name (for examine);

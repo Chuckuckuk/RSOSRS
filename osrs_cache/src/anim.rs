@@ -337,6 +337,9 @@ pub struct Clip {
     pub delays: Vec<u16>,
     /// Posed vertex positions of each frame, parallel to the rig's vertices.
     pub frames: Vec<Positions>,
+    /// The frame a looping clip returns to after its last (the end less the sequence's loop
+    /// step): what comes before it plays once. `None` loops the whole clip.
+    pub loop_start: Option<usize>,
 }
 
 impl Clip {
@@ -347,7 +350,15 @@ impl Clip {
         if seq.frames.is_empty() {
             return fmt_err(format!("sequence {sequence_id} has no frames"));
         }
-        let mut clip = Clip { sequence: sequence_id, ..Default::default() };
+        // The sequence's loop value is how many frames the client steps back from the end when it
+        // runs out (so 10061, 17 frames and 8, repeats frames 9..16); a step as long as the clip
+        // (or 0) means the whole clip loops.
+        let loop_start = seq
+            .loop_offset
+            .map(usize::from)
+            .filter(|&step| step > 0 && step < seq.frames.len())
+            .map(|step| seq.frames.len() - step);
+        let mut clip = Clip { sequence: sequence_id, loop_start, ..Default::default() };
         for (delay, (group, file)) in seq.delays.iter().zip(&seq.frames) {
             let frame = anims.frame(*group, *file)?;
             let Some(base) = anims.base(frame.base) else {
@@ -366,10 +377,17 @@ impl Clip {
         self.delays.iter().map(|d| *d as u32).sum()
     }
 
-    /// Index of the frame showing at `ticks` into the (looping) clip.
+    /// Index of the frame showing at `ticks` into the (looping) clip. Past the end it goes back to
+    /// `loop_start` (the whole clip if it has none).
     pub fn frame_at(&self, ticks: f32) -> usize {
         let total = self.duration().max(1) as f32;
-        let mut t = ticks.rem_euclid(total);
+        let mut t = match self.loop_start {
+            Some(start) if ticks >= total => {
+                let intro: f32 = self.delays.iter().take(start).map(|d| *d as f32).sum();
+                intro + (ticks - intro).rem_euclid((total - intro).max(1.0))
+            }
+            _ => ticks.rem_euclid(total),
+        };
         for (i, d) in self.delays.iter().enumerate() {
             if t < *d as f32 {
                 return i;
@@ -377,5 +395,30 @@ impl Clip {
             t -= *d as f32;
         }
         self.delays.len().saturating_sub(1)
+    }
+}
+
+#[cfg(test)]
+mod clip_tests {
+    use super::*;
+
+    fn clip(delays: &[u16], loop_start: Option<usize>) -> Clip {
+        Clip { delays: delays.to_vec(), frames: vec![Vec::new(); delays.len()], loop_start, ..Default::default() }
+    }
+
+    #[test]
+    fn a_clip_without_a_loop_start_repeats_whole() {
+        let c = clip(&[5, 5, 5, 5], None);
+
+        assert_eq!([0.0, 5.0, 15.0, 20.0, 25.0].map(|t| c.frame_at(t)), [0, 1, 3, 0, 1]);
+    }
+
+    #[test]
+    fn a_clip_with_a_loop_start_plays_its_intro_once() {
+        // 3 intro frames, then frames 3 and 4 repeat
+        let c = clip(&[5, 5, 5, 5, 5], Some(3));
+
+        assert_eq!([0.0, 12.0, 17.0, 22.0].map(|t| c.frame_at(t)), [0, 2, 3, 4]);
+        assert_eq!([25.0, 30.0, 35.0, 40.0, 1000.0].map(|t| c.frame_at(t)), [3, 4, 3, 4, 4]);
     }
 }

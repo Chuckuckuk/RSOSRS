@@ -17,7 +17,7 @@
 
 use std::rc::Rc;
 
-use super::firemaking::{LightAction, TendAction, ASHES, BONFIRE_LOC, FIRE_LOC};
+use super::firemaking::{LightAction, RestAction, TendAction, ASHES, BONFIRE_LOC, FIRE_LOC};
 use super::gathering::GatherAction;
 use super::scenery::{Loc, LocKey};
 use super::world::World;
@@ -44,6 +44,8 @@ pub enum PlayerAction {
     Light(LightAction),
     /// Adding logs to a fire (making it a bonfire, or feeding one).
     Tend(TendAction),
+    /// Walking up to a bonfire to rest by it.
+    Rest(RestAction),
     /// Walking onto a ground item to pick it up (by its uid).
     Take { uid: u32 },
 }
@@ -258,6 +260,7 @@ impl World {
         for fire in expired.spawned {
             if fire.id == FIRE_LOC || fire.id == BONFIRE_LOC {
                 self.drop_ground_item(ASHES, 1, fire.tile);
+                self.end_respawn_redirect_for(&fire);
             }
         }
         self.ground_items.advance();
@@ -271,6 +274,7 @@ impl World {
             Some(PlayerAction::Door(door)) => self.run_door(door),
             Some(PlayerAction::Light(light)) => self.run_light_action(light),
             Some(PlayerAction::Tend(tend)) => self.run_tend_action(tend),
+            Some(PlayerAction::Rest(rest)) => self.run_rest_action(rest),
             Some(PlayerAction::Take { uid }) => self.run_take_action(uid),
             None => false,
         }
@@ -282,6 +286,7 @@ impl World {
             Some(PlayerAction::Gather(gather)) => Some(gather.loc),
             Some(PlayerAction::Door(door)) => Some(self.scenery_state.current(&door.leaf)),
             Some(PlayerAction::Tend(tend)) => self.scenery_state.spawned_at(tend.tile).map(|fire| fire.loc),
+            Some(PlayerAction::Rest(rest)) => self.scenery_state.spawned_at(rest.tile).map(|fire| fire.loc),
             Some(PlayerAction::Light(_)) | Some(PlayerAction::Take { .. }) | None => None,
         }
     }

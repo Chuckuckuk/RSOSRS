@@ -33,6 +33,13 @@ pub const ENCOUNTER_CLOCK_ID: EntityId = EntityId(u32::MAX);
 /// attacking them unprompted (reference section 4, "tolerance").
 pub const TOLERANCE_TICKS: i32 = 1000;
 
+/// A respawn point that holds while an object (the `anchor`) stands.
+#[derive(Debug, Clone, Copy)]
+struct RespawnRedirect {
+    tile: TileCoord,
+    anchor: Loc,
+}
+
 /// How many ticks after a death is confirmed the player is carried off to its respawn point: the
 /// death animation plays out first. (The wiki gives no figure; this is a stand-in.)
 pub const RESPAWN_DELAY_TICKS: i32 = 4;
@@ -73,6 +80,9 @@ pub struct World {
     dead: HashSet<Combatant>,
     /// Where a dead player comes back (Lumbridge, in the open world).
     respawn_tile: TileCoord,
+    /// A temporary respawn point that wins over `respawn_tile` while the object it is tied to
+    /// stands (a bonfire the player rested at).
+    respawn_redirect: Option<RespawnRedirect>,
     /// Ticks until the dead player is respawned, once its death is confirmed.
     respawn_in: Option<i32>,
     registry: Rc<Registry>,
@@ -182,6 +192,7 @@ impl World {
             dying: Vec::new(),
             dead: HashSet::new(),
             respawn_tile: player_start,
+            respawn_redirect: None,
             respawn_in: None,
             registry: Rc::new(Registry::new()),
             aggro_region_ticks: 0,
@@ -224,6 +235,35 @@ impl World {
 
     pub fn respawn_tile(&self) -> TileCoord {
         self.respawn_tile
+    }
+
+    /// Sends the player to `tile` instead of `respawn_tile` when it dies, for as long as the made
+    /// object `anchor` stands. It replaces any redirect there was.
+    pub fn redirect_respawn(&mut self, tile: TileCoord, anchor: Loc) {
+        self.respawn_redirect = Some(RespawnRedirect { tile, anchor });
+    }
+
+    /// Where the player would come back right now: the redirect if one is in force, else
+    /// `respawn_tile`.
+    pub fn respawn_point(&self) -> TileCoord {
+        self.respawn_redirect.map_or(self.respawn_tile, |redirect| redirect.tile)
+    }
+
+    /// Counts a respawn at the redirect against its object; the last one burns it out.
+    fn use_up_respawn_anchor(&mut self) {
+        let Some(anchor) = self.respawn_redirect.map(|redirect| redirect.anchor) else { return };
+        if self.scenery_state.use_respawn(&anchor) == Some(0) {
+            self.scenery_state.despawn(&anchor);
+            self.drop_ground_item(super::firemaking::ASHES, 1, anchor.tile);
+            self.end_respawn_redirect_for(&anchor);
+        }
+    }
+
+    /// Drops the redirect if the object it was tied to is `gone`.
+    pub(super) fn end_respawn_redirect_for(&mut self, gone: &Loc) {
+        if self.respawn_redirect.is_some_and(|redirect| redirect.anchor == *gone) {
+            self.respawn_redirect = None;
+        }
     }
 
     /// Whether aggressive monsters currently consider the player tolerated (10+ minutes nearby).
@@ -646,8 +686,9 @@ impl World {
         self.respawn_in = None;
 
         let registry = Rc::clone(&self.registry);
-        let tile = self.respawn_tile;
+        let tile = self.respawn_point();
         self.player.respawn(&registry, &mut self.map, tile);
+        self.use_up_respawn_anchor();
         self.dead.remove(&Combatant::Player);
         self.dying.retain(|who| *who != Combatant::Player);
         self.aggro_region_ticks = 0;

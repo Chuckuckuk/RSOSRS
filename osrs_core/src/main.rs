@@ -272,7 +272,9 @@ fn load_scene(spawn: (i32, i32), radius: i32) -> osrs_cache::Result<(Scene, Firs
             first.push(loader.load(around.0 + dx, around.1 + dz)?);
         }
     }
-    let (left_click, names) = loader.object_info();
+    let (mut left_click, names) = loader.object_info();
+    // a bonfire is rested at on a left-click; its other options are in the right-click menu
+    left_click.insert(osrs_core::sim::BONFIRE_LOC, osrs_core::sim::BONFIRE_OPTIONS[0].to_owned());
     drop(loader);
 
     let cache = Cache::open_default()?;
@@ -389,6 +391,8 @@ fn main() {
             None => {
                 let mut world = World::new(map, open_world_seed(), spawn, PlayerConfig::new_account());
                 world.set_registry(registry);
+                // enough Firemaking for the bonfire logs (level 50 is maple and below)
+                world.player.skills.set_base(osrs_core::model::Skill::Firemaking, 50);
                 // a man (level 2) stands about in Lumbridge square, a few tiles from where you arrive
                 let man_at = nearest_open_tile(&world.map, TileCoord::new(spawn.x + 4, spawn.z - 3));
                 match man_at.map(|at| world.spawn_npc_def("man", at)) {
@@ -964,7 +968,14 @@ fn sync_player(
             let diff = (wanted - player.facing + PI).rem_euclid(TAU) - PI;
             -diff * 2048.0 / TAU
         };
-        let clip = if !moving_on && snapshot.player.action_animation.is_some() {
+        // The task's clip is baked into CLIP_ACTION off-thread (see `player_look`), so for a few
+        // frames after the task starts the slot still holds the previous one (the default chop):
+        // it is shown only once it is the sequence the server named.
+        let action_ready = snapshot
+            .player
+            .action_animation
+            .is_some_and(|sequence| model.sequence_of(CLIP_ACTION) == Some(sequence));
+        let clip = if !moving_on && action_ready {
             // standing at a task: its animation, looped until the server says it has stopped
             CLIP_ACTION
         } else if !moving_on {
