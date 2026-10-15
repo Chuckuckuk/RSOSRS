@@ -6,7 +6,52 @@
       "action": "Chop down",
       "locs": [
         { "loc": 1276, "depleted": 1342 },
-        { "loc": 1278, "depleted": 1342 }
+        { "loc": 1277, "depleted": 1343 },
+        { "loc": 1278, "depleted": 1342 },
+        { "loc": 1279, "depleted": 1342 },
+        { "loc": 1280, "depleted": 1343 },
+        { "loc": 1330, "depleted": 1355 },
+        { "loc": 1331, "depleted": 1355 },
+        { "loc": 1332, "depleted": 1355 },
+        { "loc": 14308, "depleted": 1342 },
+        { "loc": 14309, "depleted": 1342 },
+        { "loc": 36672, "depleted": 36673 },
+        { "loc": 36674, "depleted": 36675 },
+        { "loc": 36677, "depleted": 36678 },
+        { "loc": 36679, "depleted": 36680 },
+        { "loc": 3879, "depleted": 3880 },
+        { "loc": 3881, "depleted": 3880 },
+        { "loc": 3882, "depleted": 3880 },
+        { "loc": 3883, "depleted": 3884 },
+        { "loc": 40750, "depleted": 40751 },
+        { "loc": 40752, "depleted": 40753 },
+        { "loc": 42393, "depleted": 42394 },
+        { "loc": 51762, "depleted": 51763 },
+        { "loc": 51764, "depleted": 51765 },
+        { "loc": 52823, "depleted": 1342 },
+        { "loc": 53188, "depleted": 53189 },
+        { "loc": 1282, "depleted": 1347 },
+        { "loc": 1283, "depleted": 1347 },
+        { "loc": 1284, "depleted": 6212 },
+        { "loc": 1285, "depleted": 1349 },
+        { "loc": 1286, "depleted": 1351 },
+        { "loc": 1289, "depleted": 1353 },
+        { "loc": 1290, "depleted": 1354 },
+        { "loc": 1291, "depleted": 23054 },
+        { "loc": 1365, "depleted": 1352 },
+        { "loc": 1383, "depleted": 1358 },
+        { "loc": 1384, "depleted": 1353 },
+        { "loc": 5904, "depleted": 5905 },
+        { "loc": 51766, "depleted": 51767 },
+        { "loc": 62208, "depleted": 62209 },
+        { "loc": 62210, "depleted": 62211 },
+        { "loc": 62212, "depleted": 62213 },
+        { "loc": 62214, "depleted": 62215 },
+        { "loc": 3648, "depleted": 3649 },
+        { "loc": 1318, "depleted": 1355 },
+        { "loc": 1319, "depleted": 1355 },
+        { "loc": 2091, "depleted": 1342 },
+        { "loc": 2092, "depleted": 1355 }
       ],
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 1, "message": "You need a {skill} level of {level} to chop down this tree." } },
@@ -31,7 +76,588 @@
       "respawn_ticks": [59, 98],
       "pet": { "item": "beaver", "base_chance": 317647 },
       "start_message": "You swing your axe at the tree.",
-      "success_message": "You get some logs."
+      "success_message": "You get some logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Tree, Dead tree, Dying tree and Evergreen tree pages (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Respawn 36-60 s. The dead, dying and evergreen charts stop at dragon; their crystal row is taken as the tree's."
+    },
+    {
+      "id": "achey_tree",
+      "skill": "woodcutting",
+      "action": "Chop",
+      "locs": [
+        { "loc": 2023, "depleted": 3371 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 1, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 250,
+      "product": "achey_tree_logs",
+      "chances": {
+        "bronze_axe":  [64, 200],
+        "iron_axe":    [96, 300],
+        "steel_axe":   [128, 400],
+        "black_axe":   [144, 450],
+        "mithril_axe": [160, 500],
+        "adamant_axe": [192, 600],
+        "rune_axe":    [224, 700],
+        "dragon_axe":  [240, 750],
+        "crystal_axe": [250, 800]
+      },
+      "depletion": "every_success",
+      "respawn_ticks": [59, 98],
+      "pet": { "item": "beaver", "base_chance": 317647 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some achey tree logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Achey Tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Respawn 35.4-58.8 s."
+    },
+    {
+      "id": "burnt_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 30852, "depleted": 30855 },
+        { "loc": 30854, "depleted": 30856 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 1, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more charcoal." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 250,
+      "product": "charcoal",
+      "chances": {
+        "bronze_axe":  [64, 200],
+        "iron_axe":    [96, 300],
+        "steel_axe":   [128, 400],
+        "black_axe":   [144, 450],
+        "mithril_axe": [160, 500],
+        "adamant_axe": [192, 600],
+        "rune_axe":    [224, 700],
+        "dragon_axe":  [240, 750],
+        "crystal_axe": [250, 800]
+      },
+      "depletion": "every_success",
+      "respawn_ticks": [59, 98],
+      "pet": { "item": "beaver", "base_chance": 317647 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some charcoal.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Burnt tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Respawn 35.4-58.8 s. Its chart stops at dragon (crystal taken as the tree's), and the Beaver page has no burnt tree (taken as a regular tree's)."
+    },
+    {
+      "id": "oak_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 10820, "depleted": 1356 },
+        { "loc": 42395, "depleted": 42396 },
+        { "loc": 51772, "depleted": 51773 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 15, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 375,
+      "product": "oak_logs",
+      "chances": {
+        "bronze_axe":  [32, 100],
+        "iron_axe":    [48, 150],
+        "steel_axe":   [64, 200],
+        "black_axe":   [72, 225],
+        "mithril_axe": [80, 250],
+        "adamant_axe": [96, 300],
+        "rune_axe":    [112, 350],
+        "dragon_axe":  [120, 375],
+        "crystal_axe": [125, 400]
+      },
+      "depletion": { "timer": { "ticks": 45 } },
+      "respawn_ticks": [14, 14],
+      "pet": { "item": "beaver", "base_chance": 361146 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some oak logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Oak tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+    },
+    {
+      "id": "willow_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 10819, "depleted": 9711 },
+        { "loc": 10829, "depleted": 9471 },
+        { "loc": 10831, "depleted": 9471 },
+        { "loc": 10833, "depleted": 9471 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 30, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 675,
+      "product": "willow_logs",
+      "chances": {
+        "bronze_axe":  [16, 50],
+        "iron_axe":    [24, 75],
+        "steel_axe":   [32, 100],
+        "black_axe":   [36, 112],
+        "mithril_axe": [40, 125],
+        "adamant_axe": [48, 150],
+        "rune_axe":    [56, 175],
+        "dragon_axe":  [60, 187],
+        "crystal_axe": [64, 195]
+      },
+      "depletion": { "timer": { "ticks": 50 } },
+      "respawn_ticks": [14, 14],
+      "pet": { "item": "beaver", "base_chance": 289286 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some willow logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Willow tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+    },
+    {
+      "id": "teak_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 9036, "depleted": 9037 },
+        { "loc": 36686, "depleted": 36687 },
+        { "loc": 40758, "depleted": 40759 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 35, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 850,
+      "product": "teak_logs",
+      "chances": {
+        "bronze_axe":  [15, 46],
+        "iron_axe":    [23, 70],
+        "steel_axe":   [31, 93],
+        "black_axe":   [35, 102],
+        "mithril_axe": [39, 117],
+        "adamant_axe": [47, 140],
+        "rune_axe":    [55, 164],
+        "dragon_axe":  [60, 190],
+        "crystal_axe": [60, 200]
+      },
+      "depletion": { "timer": { "ticks": 50 } },
+      "respawn_ticks": [15, 15],
+      "pet": { "item": "beaver", "base_chance": 264336 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some teak logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Teak tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+    },
+    {
+      "id": "mature_juniper_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 27499, "depleted": 27500 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 42, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 350,
+      "product": "juniper_logs",
+      "chances": {
+        "bronze_axe":  [64, 200],
+        "iron_axe":    [96, 300],
+        "steel_axe":   [128, 400],
+        "black_axe":   [144, 450],
+        "mithril_axe": [160, 500],
+        "adamant_axe": [192, 600],
+        "rune_axe":    [224, 700],
+        "dragon_axe":  [240, 750],
+        "crystal_axe": [250, 800]
+      },
+      "depletion": { "chance": { "one_in": 16 } },
+      "respawn_ticks": [15, 15],
+      "pet": { "item": "beaver", "base_chance": 360000 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some juniper logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Mature juniper tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Depletes 1 in 16 per log (wiki Woodcutting). The wiki has no chart or respawn time for it: both are rsmod's (the regular tree's chart, 15 ticks)."
+    },
+    {
+      "id": "maple_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 10832, "depleted": 9712 },
+        { "loc": 36681, "depleted": 36682 },
+        { "loc": 40754, "depleted": 40755 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 45, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 1000,
+      "product": "maple_logs",
+      "chances": {
+        "bronze_axe":  [8, 25],
+        "iron_axe":    [12, 37],
+        "steel_axe":   [16, 50],
+        "black_axe":   [18, 56],
+        "mithril_axe": [20, 62],
+        "adamant_axe": [24, 75],
+        "rune_axe":    [28, 87],
+        "dragon_axe":  [30, 93],
+        "crystal_axe": [32, 100]
+      },
+      "depletion": { "timer": { "ticks": 100 } },
+      "respawn_ticks": [59, 59],
+      "pet": { "item": "beaver", "base_chance": 221918 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some maple logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Maple tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+    },
+    {
+      "id": "hollow_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 10821, "depleted": 2310 },
+        { "loc": 10830, "depleted": 4061 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 45, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more bark." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 825,
+      "product": "bark",
+      "chances": {
+        "bronze_axe":  [18, 26],
+        "iron_axe":    [28, 40],
+        "steel_axe":   [36, 54],
+        "black_axe":   [42, 57],
+        "mithril_axe": [46, 68],
+        "adamant_axe": [59, 81],
+        "rune_axe":    [64, 94],
+        "dragon_axe":  [67, 101],
+        "crystal_axe": [67, 101]
+      },
+      "depletion": { "timer": { "ticks": 60 } },
+      "respawn_ticks": [43, 43],
+      "pet": { "item": "beaver", "base_chance": 214367 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some bark.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Hollow tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Its chart stops at dragon; crystal is taken as dragon."
+    },
+    {
+      "id": "mahogany_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 9034, "depleted": 9035 },
+        { "loc": 36688, "depleted": 36689 },
+        { "loc": 40760, "depleted": 40761 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 50, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 1250,
+      "product": "mahogany_logs",
+      "chances": {
+        "bronze_axe":  [8, 25],
+        "iron_axe":    [12, 38],
+        "steel_axe":   [16, 50],
+        "black_axe":   [18, 54],
+        "mithril_axe": [20, 63],
+        "adamant_axe": [25, 75],
+        "rune_axe":    [29, 88],
+        "dragon_axe":  [34, 94],
+        "crystal_axe": [36, 97]
+      },
+      "depletion": { "timer": { "ticks": 100 } },
+      "respawn_ticks": [14, 14],
+      "pet": { "item": "beaver", "base_chance": 220623 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some mahogany logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Mahogany tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+    },
+    {
+      "id": "arctic_pine_tree",
+      "skill": "woodcutting",
+      "action": "Cut down",
+      "locs": [
+        { "loc": 3037, "depleted": 21274 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 54, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 400,
+      "product": "arctic_pine_logs",
+      "chances": {
+        "bronze_axe":  [8, 25],
+        "iron_axe":    [12, 37],
+        "steel_axe":   [16, 50],
+        "black_axe":   [18, 56],
+        "mithril_axe": [20, 62],
+        "adamant_axe": [24, 75],
+        "rune_axe":    [28, 87],
+        "dragon_axe":  [30, 93],
+        "crystal_axe": [32, 100]
+      },
+      "depletion": { "timer": { "ticks": 140 } },
+      "respawn_ticks": [14, 14],
+      "pet": { "item": "beaver", "base_chance": 145758 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some arctic pine logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Arctic pine tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+    },
+    {
+      "id": "yew_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 10822, "depleted": 9714 },
+        { "loc": 36683, "depleted": 36684 },
+        { "loc": 40756, "depleted": 40757 },
+        { "loc": 42391, "depleted": 42392 },
+        { "loc": 57790, "depleted": 57791 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 60, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 1750,
+      "product": "yew_logs",
+      "chances": {
+        "bronze_axe":  [4, 12],
+        "iron_axe":    [6, 19],
+        "steel_axe":   [8, 25],
+        "black_axe":   [9, 28],
+        "mithril_axe": [10, 31],
+        "adamant_axe": [12, 37],
+        "rune_axe":    [14, 44],
+        "dragon_axe":  [15, 47],
+        "crystal_axe": [16, 50]
+      },
+      "depletion": { "timer": { "ticks": 190 } },
+      "respawn_ticks": [99, 99],
+      "pet": { "item": "beaver", "base_chance": 145013 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some yew logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Yew tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+    },
+    {
+      "id": "camphor_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 58557, "depleted": 58558 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 66, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 1435,
+      "product": "camphor_logs",
+      "chances": {
+        "bronze_axe":  [8, 23],
+        "iron_axe":    [11, 36],
+        "steel_axe":   [15, 47],
+        "black_axe":   [17, 71],
+        "mithril_axe": [19, 59],
+        "adamant_axe": [23, 71],
+        "rune_axe":    [27, 83],
+        "dragon_axe":  [32, 89],
+        "crystal_axe": [34, 93]
+      },
+      "depletion": { "timer": { "ticks": 200 } },
+      "respawn_ticks": [99, 99],
+      "pet": { "item": "beaver", "base_chance": 145013 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some camphor logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Camphor tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Stump from the wiki infobox."
+    },
+    {
+      "id": "magic_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 10834, "depleted": 9713 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 75, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 2500,
+      "product": "magic_logs",
+      "chances": {
+        "bronze_axe":  [2, 6],
+        "iron_axe":    [3, 9],
+        "steel_axe":   [4, 12],
+        "black_axe":   [5, 13],
+        "mithril_axe": [5, 15],
+        "adamant_axe": [6, 18],
+        "rune_axe":    [7, 21],
+        "dragon_axe":  [7, 22],
+        "crystal_axe": [8, 23]
+      },
+      "depletion": { "timer": { "ticks": 390 } },
+      "respawn_ticks": [199, 199],
+      "pet": { "item": "beaver", "base_chance": 72321 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some magic logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Magic tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+    },
+    {
+      "id": "ironwood_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 58559, "depleted": 58560 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 80, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 1750,
+      "product": "ironwood_logs",
+      "chances": {
+        "bronze_axe":  [6, 21],
+        "iron_axe":    [10, 38],
+        "steel_axe":   [13, 42],
+        "black_axe":   [15, 46],
+        "mithril_axe": [17, 53],
+        "adamant_axe": [21, 63],
+        "rune_axe":    [24, 75],
+        "dragon_axe":  [29, 80],
+        "crystal_axe": [30, 83]
+      },
+      "depletion": { "timer": { "ticks": 400 } },
+      "respawn_ticks": [199, 199],
+      "pet": { "item": "beaver", "base_chance": 72321 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some ironwood logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Ironwood tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Stump from the wiki infobox."
+    },
+    {
+      "id": "redwood_tree",
+      "skill": "woodcutting",
+      "action": "Cut",
+      "locs": [
+        { "loc": 29668, "depleted": 29669 },
+        { "loc": 29670, "depleted": 29671 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 90, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 3800,
+      "product": "redwood_logs",
+      "chances": {
+        "bronze_axe":  [2, 6],
+        "iron_axe":    [3, 9],
+        "steel_axe":   [4, 12],
+        "black_axe":   [4, 14],
+        "mithril_axe": [5, 15],
+        "adamant_axe": [6, 18],
+        "rune_axe":    [7, 21],
+        "dragon_axe":  [7, 30],
+        "crystal_axe": [8, 35]
+      },
+      "depletion": { "timer": { "ticks": 440 } },
+      "respawn_ticks": [199, 199],
+      "pet": { "item": "beaver", "base_chance": 72321 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some redwood logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Redwood tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Depleted forms from the wiki infobox."
+    },
+    {
+      "id": "rosewood_tree",
+      "skill": "woodcutting",
+      "action": "Chop down",
+      "locs": [
+        { "loc": 58561, "depleted": 58562 }
+      ],
+      "requirements": [
+        { "level": { "skill": "woodcutting", "level": 92, "message": "You need a {skill} level of {level} to chop down this tree." } },
+        { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+      ],
+      "roll_interval_ticks": 4,
+      "xp_tenths": 2125,
+      "product": "rosewood_logs",
+      "chances": {
+        "bronze_axe":  [6, 18],
+        "iron_axe":    [9, 28],
+        "steel_axe":   [12, 37],
+        "black_axe":   [13, 40],
+        "mithril_axe": [15, 47],
+        "adamant_axe": [18, 56],
+        "rune_axe":    [21, 66],
+        "dragon_axe":  [25, 70],
+        "crystal_axe": [27, 73]
+      },
+      "depletion": { "timer": { "ticks": 458 } },
+      "respawn_ticks": [205, 205],
+      "pet": { "item": "beaver", "base_chance": 72321 },
+      "start_message": "You swing your axe at the tree.",
+      "success_message": "You get some rosewood logs.",
+      "attempt_sound": 2735,
+      "depleted_sound": 2734,
+      "notes": "OSRS wiki Rosewood tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Despawn 4 min 34.8 s and respawn 2 min 3 s from the wiki Woodcutting page. Stump from the wiki infobox."
     }
   ]
 }

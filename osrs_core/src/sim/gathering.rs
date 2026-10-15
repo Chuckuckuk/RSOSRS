@@ -16,10 +16,12 @@
 //!
 //! Random draws come from the player's own skilling generator, never the encounter's, so
 //! gathering cannot change a fight's rolls. Per attempt they are drawn in this order: the attempt
-//! (`0..256`), then on a success the pet (`0..N`), then if it depletes the respawn time.
+//! (`0..256`), then on a success the pet (`0..N`), then for a node that depletes by chance the
+//! depletion (`0..N`), then if it depletes the respawn time.
 
 use std::rc::Rc;
 
+use super::events::Combatant;
 use super::objects::{Approach, PlayerAction};
 use super::player::Player;
 use super::scenery::Loc;
@@ -158,6 +160,7 @@ impl World {
             return true;
         }
         self.player.skill_clock = node.roll_interval_ticks;
+        self.play_sound(node.attempt_sound, Combatant::Player, 0);
         let draw = self.player.skilling_rng.next_range(0, 256);
         if !rules::attempt_succeeds(numerator, draw) {
             self.player.action = Some(PlayerAction::Gather(gather));
@@ -201,8 +204,10 @@ impl World {
         let depletes = match node.depletion {
             DepletionDef::EverySuccess => true,
             DepletionDef::Timer { .. } => self.scenery_state.timer_expired(loc),
+            DepletionDef::Chance { one_in: n } => one_in(&mut self.player.skilling_rng, n),
         };
         if depletes {
+            self.play_sound(node.depleted_sound, Combatant::Player, 0);
             if let Some(replacement) = node.depleted_form(loc.id) {
                 let [min, max] = node.respawn_ticks;
                 let respawn = self.player.skilling_rng.next_range(min, max + 1);
@@ -397,6 +402,52 @@ mod tests {
 
         assert_eq!(logs(&world), 3);
         assert!(world.player.action().is_none());
+    }
+
+    #[test]
+    fn a_tree_that_depletes_by_chance_falls_on_a_success_that_rolls_it() {
+        // one_in 1: the first log fells it; a huge one_in: it never falls
+        let sure_fall = sure_tree(|n| n.depletion = DepletionDef::Chance { one_in: 1 });
+        let mut world = woods_with(1, &["bronze_axe"], &[sure_fall]);
+        chop(&mut world).unwrap();
+        run_until(&mut world, 20, |w| logs(w) == 1);
+        assert!(world.scenery_changes().next().is_some(), "felled by its first log");
+
+        let never = sure_tree(|n| n.depletion = DepletionDef::Chance { one_in: i32::MAX });
+        let mut world = woods_with(1, &["bronze_axe"], &[never]);
+        chop(&mut world).unwrap();
+        run_until(&mut world, 40, |w| logs(w) == 5);
+        assert_eq!(logs(&world), 5);
+        assert!(world.scenery_changes().next().is_none(), "still standing");
+    }
+
+    /// The sounds among the events since the last call.
+    fn sounds(world: &mut World) -> Vec<u32> {
+        world
+            .take_events()
+            .into_iter()
+            .filter_map(|event| match event {
+                WorldEvent::Sound { sound, from: Combatant::Player, .. } => Some(sound),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_swing_sounds_and_the_tree_falls_with_a_crash() {
+        let mut world = woods_with(1, &["bronze_axe"], &[hopeless_tree()]);
+        chop(&mut world).unwrap();
+        run_until(&mut world, 20, |w| w.player_action_animation().is_some());
+        sounds(&mut world);
+        for _ in 0..8 {
+            world.run_tick();
+        }
+        assert_eq!(sounds(&mut world), vec![2735, 2735], "a chop with each of the two attempts");
+
+        let mut world = woods_with(1, &["bronze_axe"], &[sure_tree(|_| {})]);
+        chop(&mut world).unwrap();
+        run_until(&mut world, 20, |w| logs(w) == 1);
+        assert_eq!(sounds(&mut world), vec![2735, 2734], "the chop that got the log, then the fall");
     }
 
     #[test]
