@@ -338,3 +338,4 @@ pub mod world;
 
 pub mod pick;
 pub mod streaming;
+pub mod occlusion;

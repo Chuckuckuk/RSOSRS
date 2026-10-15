@@ -314,7 +314,24 @@ pub struct MaterialCache {
     terrain: Option<Handle<StandardMaterial>>,
     opaque: Option<Handle<StandardMaterial>>,
     blend: Option<Handle<StandardMaterial>>,
-    textured: HashMap<(u32, bool), Option<Handle<StandardMaterial>>>,
+    /// The same two for decorations (see [`DECOR_DEPTH_BIAS`]).
+    decor_opaque: Option<Handle<StandardMaterial>>,
+    decor_blend: Option<Handle<StandardMaterial>>,
+    /// By texture id, whether it is for an object (rather than terrain), and whether for a decoration.
+    textured: HashMap<(u32, bool, bool), Option<Handle<StandardMaterial>>>,
+}
+
+/// How far decorations are pulled toward the camera in the depth buffer (wgpu's constant bias, in
+/// units of the depth value's own precision, so it scales with distance: about 0.02 tiles at 8
+/// tiles away). The client paints a wall decoration or floor decoration after the wall or ground
+/// it sits on, so its faces may lie in, or just behind, that surface; the depth buffer needs the
+/// nudge to give the same picture instead of z-fighting.
+const DECOR_DEPTH_BIAS: f32 = 20_000.0;
+
+/// Whether shape `kind` is drawn on top of a surface: wall decorations (4..=8) and floor
+/// decorations (22).
+fn is_decoration(kind: u8) -> bool {
+    matches!(kind, 4..=8 | 22)
 }
 
 /// Spawn terrain and objects of `world`. Entities carry [`OnPlane`]; scrolling textures register in
@@ -361,16 +378,22 @@ pub fn spawn_parts(
     // (models are double-skinned where the client wants a two-sided surface).
     let mut material_for = |id: u32,
                             object: bool,
+                            decor: bool,
                             shared: &mut MaterialCache,
                             materials: &mut Assets<StandardMaterial>,
                             images: &mut Assets<Image>| {
         shared
             .textured
-            .entry((id, object))
+            .entry((id, object, decor))
             .or_insert_with(|| {
                 let t = textures.0.get(&id)?;
                 let cull = if object { OBJECT_CULL } else { None };
                 let handle = texture_material(t, cull, images, materials);
+                if decor {
+                    if let Some(mut m) = materials.get_mut(&handle) {
+                        m.depth_bias = DECOR_DEPTH_BIAS;
+                    }
+                }
                 if t.scroll_dir != 0 && t.scroll_speed != 0 {
                     scrolling.0.push((handle.clone(), t.scroll_dir, t.scroll_speed));
                 }
@@ -406,7 +429,7 @@ pub fn spawn_parts(
                 .id(),
         );
         for (id, m) in &t.textured {
-            let Some(mat) = material_for(*id, false, shared, materials, images) else { continue };
+            let Some(mat) = material_for(*id, false, false, shared, materials, images) else { continue };
             spawned.push(
                 commands
                     .spawn((
@@ -443,13 +466,39 @@ pub fn spawn_parts(
             })
         })
         .clone();
+    let decor_opaque_mat = shared
+        .decor_opaque
+        .get_or_insert_with(|| {
+            materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                unlit: true,
+                cull_mode: OBJECT_CULL,
+                depth_bias: DECOR_DEPTH_BIAS,
+                ..default()
+            })
+        })
+        .clone();
+    let decor_blend_mat = shared
+        .decor_blend
+        .get_or_insert_with(|| {
+            materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                unlit: true,
+                cull_mode: OBJECT_CULL,
+                alpha_mode: AlphaMode::Blend,
+                depth_bias: DECOR_DEPTH_BIAS,
+                ..default()
+            })
+        })
+        .clone();
     type Handles = (Option<Handle<Mesh>>, Vec<(Handle<StandardMaterial>, Handle<Mesh>)>);
     let mut handles: HashMap<ObjectKey, Handles> = HashMap::new();
     for (key, lm) in &objects.meshes {
+        let decor = is_decoration(key.1);
         let o = (!lm.opaque.is_empty()).then(|| meshes.add(to_bevy_mesh(&lm.opaque)));
         let mut tx = Vec::new();
         for (id, m) in &lm.textured {
-            if let Some(mat) = material_for(*id, true, shared, materials, images) {
+            if let Some(mat) = material_for(*id, true, decor, shared, materials, images) {
                 tx.push((mat, meshes.add(to_bevy_mesh(m))));
             }
         }
@@ -459,6 +508,7 @@ pub fn spawn_parts(
         let pos = *pos + offset;
         let placed = PlacedLoc { id: key.0, tile: tile_under(pos) };
         let (o, tx) = &handles[key];
+        let decor = is_decoration(key.1);
         for (mat, h) in tx {
             spawned.push(
                 commands
@@ -477,7 +527,7 @@ pub fn spawn_parts(
                 commands
                     .spawn((
                         Mesh3d(h.clone()),
-                        MeshMaterial3d(opaque_mat.clone()),
+                        MeshMaterial3d(if decor { decor_opaque_mat.clone() } else { opaque_mat.clone() }),
                         Transform::from_translation(pos),
                         OnPlane(*plane),
                         placed,
@@ -500,7 +550,7 @@ pub fn spawn_parts(
                 commands
                     .spawn((
                         Mesh3d(meshes.add(to_bevy_mesh(tm))),
-                        MeshMaterial3d(blend_mat.clone()),
+                        MeshMaterial3d(if decor { decor_blend_mat.clone() } else { blend_mat.clone() }),
                         Transform::from_translation(pos),
                         OnPlane(*plane),
                         SortedFaces { faces, origin: pos, last_eye: None },

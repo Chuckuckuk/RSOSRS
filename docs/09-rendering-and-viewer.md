@@ -101,6 +101,12 @@ entity it made, so a streamed square can be despawned as a unit.
 * Materials come from a `MaterialCache` resource so that one terrain material, one opaque, one
   blended and one per texture are shared by every square, rather than duplicated per square.
 * Textures that scroll (water, lava) are registered in `ScrollingTextures`.
+* **Decorations are biased toward the camera.** Wall decorations (kinds 4-8) and floor decorations
+  (kind 22) use their own copies of the opaque, blended and textured materials with
+  `depth_bias = DECOR_DEPTH_BIAS`. The client paints a decoration after the wall or ground under
+  it, so its faces may lie in that surface, or just behind it; a depth buffer has no draw order
+  and would z-fight (a banner cut by the wall's texture). The bias is wgpu's constant bias in
+  units of the depth value's precision, so it grows with distance (about 0.02 tiles at 8 tiles).
 
 ### Systems added by `WorldRenderPlugin`
 
@@ -136,7 +142,8 @@ The client does not load a fixed block. It loads squares as the player walks.
 in render space. Since render space is world tile space (with z flipped), squares are spawned at
 their real location and nothing ever needs re-positioning.
 
-Only plane 0 is streamed for heights and picking.
+Only plane 0 is streamed for heights and picking. Each square also keeps which ground-level tiles
+have a roof over them (tile flag 4); `StreamedWorld::roofed(x, z)` answers for a world tile.
 
 ---
 
@@ -172,6 +179,19 @@ For streamed worlds, `Picker::streamed(plane, left_click, names)` starts empty a
 
 Tests in [`osrs_render/tests/pick.rs`](../osrs_render/tests/pick.rs) check picking against real
 Lumbridge geometry.
+
+---
+
+## 9.4b Removing roofs: [`occlusion.rs`](../osrs_render/src/occlusion.rs)
+
+`OcclusionPlugin` adds one system. The app sets `OcclusionTarget.point` each frame (the client's
+orbit camera does, from the character) and `plane` (the character's plane, 0).
+
+`remove_roofs` follows the real client's rule. The roofs come off when the character's tile is roofed, or, if the camera is not looking steeply down, when any tile on the line from the camera to him is. Everything on an `OnPlane` above the character's plane is then hidden (terrain and objects, so an upper floor's walkable tiles no longer show beside the walls of the floor below), and shown again when the line of sight clears. Entities that arrive while the roofs are off (streamed squares) are hidden too.
+
+Objects between the camera and the character are left alone: geometry may block the camera, as
+in the real game. `RoofHidden` marks what was hidden, and only that is restored, so an entity
+somebody else has hidden (a felled tree) stays hidden.
 
 ---
 

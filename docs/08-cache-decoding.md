@@ -259,7 +259,17 @@ client's `getModel` and `light` routines:
    of each vertex colour is scaled by it. Flat-shaded faces use the face normal.
 8. **Texture coordinates** for textured faces: a planar projection where u runs from the
    texture triangle's P to M and v from P to N (least squares in the face plane).
-9. **Split** into a `LocMesh`: `opaque`, `translucent` (faces with alpha) and `textured` (one
+9. **Lift overlapping faces.** Models layer faces on one plane on purpose (a banner's cloth over its
+   backing, a sink's taps over its rim). The client paints faces in order (higher priority over
+   lower, later over earlier in the model), which a depth buffer cannot reproduce: it fights.
+   A face that shares its plane and facing with other faces is moved along its normal by
+   `LIFT_PER_RANK` (0.15 model units, a thousandth of a tile) times its rank: the number of
+   distinct looks (colour, texture, alpha) painted before it on that plane, by priority and then
+   model order, capped at `MAX_LIFT_RANK`. Faces alone on their plane do not move. The step has
+   to exceed what the graphics card can resolve at world coordinates (an `f32` near x = 3200
+   moves in steps of 0.00024 tile), or the layers snap back onto each other. Animated meshes
+   re-pose from the rig and lose the lift, as nothing in them layers faces that way.
+10. **Split** into a `LocMesh`: `opaque`, `translucent` (faces with alpha) and `textured` (one
    `MeshData` per texture id). Each output vertex records which merged vertex it came from
    (`MeshData::source`), and with `keep_rig` the merged vertices and their labels are kept as a
    `Rig` so animations can re-pose them later.
