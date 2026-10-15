@@ -2,13 +2,19 @@
 //!
 //! Layers: [`Cache`] (sector/container IO) -> [`Index`] (reference table) ->
 //! typed decoders ([`model`], [`terrain`], [`config`], [`locs`]).
+//!
+//! Writing, for the map editor: a [`project`] of edits is [`compile`]d into a copy of a cache
+//! ([`writer`], [`reftable`]), never into the installed one; [`active`] picks which cache the
+//! game reads, and [`overlay`] shows uncompiled edits in memory.
 
+pub mod active;
 pub mod anim;
 pub mod bundle;
 pub mod buf;
 pub mod cache;
 pub mod clientscript;
 pub mod collision;
+pub mod compile;
 pub mod config;
 pub mod dbtable;
 pub mod font;
@@ -23,6 +29,9 @@ pub mod locs;
 pub mod minimap;
 pub mod model;
 pub mod npc;
+pub mod overlay;
+pub mod project;
+pub mod reftable;
 pub mod terrain;
 pub mod scene;
 pub mod sound;
@@ -31,6 +40,7 @@ pub mod squares;
 pub mod terrain_mesh;
 pub mod textures;
 pub mod ui;
+pub mod writer;
 pub mod xtea;
 
 pub use cache::{Cache, Index};
