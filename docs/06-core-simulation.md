@@ -315,7 +315,8 @@ scheduler runs (primer 1.7).
   `PendingAttackQueue` (impact delay > 0), or goes to **`roll_on_player`**, which computes the
   reaction multiplier from the player's current prayer, rolls (floor 0), and enqueues into the
   player's `DamageBuffer`. A ground-targeted attack goes through `fire_at_ground` instead, which
-  announces it and queues a strike; its landing uses `roll_on_player` too.
+  announces it and queues a strike; its landing rolls no accuracy, it deals the ground attack's
+  damage (less any prayer reduction) to whoever is on its tiles.
 * **`run_*_movement`** for every NPC kind starts with `advance_incoming`: advance the NPC's own
   pending queue and damage buffer (landing hits and emitting `Hit` events). Then, if alive and not
   hostile: a summoned healer walks to stand beside the monster it heals (`walk_to_leader`), and

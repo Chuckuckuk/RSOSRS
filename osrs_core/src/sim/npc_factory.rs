@@ -29,7 +29,7 @@ pub fn attack_from_def(def: &NpcAttackDef) -> Rc<AttackDefinition> {
 
 /// [`attack_from_def`], heard as `fallback_sound` when the attack names no sound of its own.
 fn attack_sounding(def: &NpcAttackDef, fallback_sound: Option<u32>) -> Rc<AttackDefinition> {
-    let mut attack = AttackDefinition::new(def.name.clone(), def.range, def.telegraph_ticks, def.style)
+    let mut attack = AttackDefinition::targeted(def.name.clone(), def.range, def.telegraph_ticks, def.style)
         .with_damage_type(def.damage_type.unwrap_or_else(|| DamageType::default_for(def.style)))
         .with_max_hit(MaxHitSource::Fixed(def.max_hit))
         .with_prayer_penetration(def.prayer_penetration)
@@ -93,10 +93,11 @@ mod tests {
 
         let magic = attack_from_def(&jad.attacks[2]);
 
-        assert_eq!(magic.style, AttackStyle::Magic);
-        assert_eq!(magic.max_hit, MaxHitSource::Fixed(95));
-        assert_eq!(magic.projectile_travel_ticks, 1);
-        assert_eq!(magic.reaction, ReactionRequirement::prayer_match(ProtectionPrayer::Magic));
+        let targeted = magic.expect_targeted();
+        assert_eq!(targeted.style, AttackStyle::Magic);
+        assert_eq!(targeted.max_hit, MaxHitSource::Fixed(95));
+        assert_eq!(targeted.projectile_travel_ticks, 1);
+        assert_eq!(targeted.reaction, ReactionRequirement::prayer_match(ProtectionPrayer::Magic));
         assert_eq!(magic.animation, Some(2656));
         // speed 8, telegraph 3 -> three busy ticks to resolve plus cooldown to fill the 8 ticks
         assert_eq!(magic.cooldown_ticks, 4);

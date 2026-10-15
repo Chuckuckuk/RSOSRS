@@ -25,7 +25,7 @@ fn tile() -> TileCoord {
 }
 
 fn make_melee_attack(telegraph_ticks: i32, impact_delay_ticks: i32) -> Rc<AttackDefinition> {
-    AttackDefinition::new("Test Melee", 0, telegraph_ticks, AttackStyle::Melee)
+    AttackDefinition::targeted("Test Melee", 0, telegraph_ticks, AttackStyle::Melee)
         .with_prayer_penetration(0.0)
         .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Melee))
         .with_impact_delay_ticks(impact_delay_ticks)
@@ -49,7 +49,7 @@ fn advance(state: &mut NpcCombatState) -> bool {
 }
 
 fn current_multiplier(state: &NpcCombatState, reaction: &PlayerReactionState) -> f32 {
-    get_damage_multiplier(state.current_attack().unwrap(), Some(reaction), tile(), tile())
+    get_damage_multiplier(state.current_attack().unwrap().expect_targeted(), Some(reaction), tile(), tile())
 }
 
 fn alive(_: EntityId) -> bool {

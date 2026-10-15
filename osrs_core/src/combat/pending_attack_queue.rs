@@ -95,14 +95,14 @@ impl PendingAttackQueue {
                     continue;
                 }
 
+                // a defender's queue only ever holds attacks that are rolled against it
+                let attack = roll.attack.expect_targeted();
                 let multiplier = match reaction_state {
-                    Some(_) => {
-                        reaction_resolver::get_damage_multiplier(&roll.attack, reaction_state, roll.hazard_origin_tile, defender.tile)
-                    }
+                    Some(_) => reaction_resolver::get_damage_multiplier(attack, reaction_state, roll.hazard_origin_tile, defender.tile),
                     None => 1.0,
                 };
                 let damage = damage_resolver::roll_with_floor(
-                    &roll.attack,
+                    attack,
                     &roll.attacker_stats,
                     &defender.stats,
                     defender.kind == ActorKind::Npc,
@@ -110,7 +110,7 @@ impl PendingAttackQueue {
                     multiplier,
                     roll.successful_floor,
                 );
-                damage_buffer.enqueue(damage, roll.attack.projectile_travel_ticks, roll.attack.on_hit_status_effect);
+                damage_buffer.enqueue(damage, attack.projectile_travel_ticks, roll.attack.on_hit_status_effect);
             } else {
                 self.pending[i].ticks_remaining -= 1;
                 i += 1;
@@ -133,7 +133,7 @@ mod tests {
     const ATTACKER_TILE: TileCoord = TileCoord { x: 5, z: 5, plane: 0 };
 
     fn make_attack(projectile_travel_ticks: i32, reaction: ReactionRequirement) -> Rc<AttackDefinition> {
-        AttackDefinition::new("Test Doom-style", 10, 0, AttackStyle::Magic)
+        AttackDefinition::targeted("Test Doom-style", 10, 0, AttackStyle::Magic)
             .with_reaction(reaction)
             .with_projectile_travel_ticks(projectile_travel_ticks)
             .shared()
