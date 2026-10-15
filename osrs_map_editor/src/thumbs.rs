@@ -20,7 +20,11 @@ const PER_FRAME: usize = 3;
 pub struct NpcThumbs {
     cache: &'static Cache,
     texture_hsl: HashMap<u32, u16>,
-    made: HashMap<u32, Option<egui::TextureHandle>>,
+    /// Drawn pictures by NPC id (`None`: the model could not be built). Kept for the whole run.
+    pictures: HashMap<u32, Option<Vec<u8>>>,
+    /// The pictures uploaded to the egui context showing them; a texture belongs to one context,
+    /// so these go when the picker window does.
+    textures: HashMap<u32, egui::TextureHandle>,
     budget: usize,
     frame: u64,
 }
@@ -28,30 +32,38 @@ pub struct NpcThumbs {
 impl NpcThumbs {
     pub fn new(cache: &'static Cache) -> NpcThumbs {
         let texture_hsl = Configs::new(cache).and_then(|c| c.texture_average_hsl()).unwrap_or_default();
-        NpcThumbs { cache, texture_hsl, made: HashMap::new(), budget: PER_FRAME, frame: 0 }
+        NpcThumbs { cache, texture_hsl, pictures: HashMap::new(), textures: HashMap::new(), budget: PER_FRAME, frame: 0 }
     }
 
-    /// The thumbnail of `def`, if it is drawn; `None` while it waits its turn or when the model
-    /// cannot be built. `frame` is a number that changes every frame (it refills the budget).
+    /// Forgets the uploaded textures (their context is gone); the pictures stay.
+    pub fn forget_textures(&mut self) {
+        self.textures.clear();
+    }
+
+    /// The thumbnail of `def` in `ctx`, if it is drawn; `None` while it waits its turn or when the
+    /// model cannot be built. `frame` is a number that changes every frame (it refills the budget).
     pub fn get(&mut self, ctx: &egui::Context, def: &NpcDef, frame: u64) -> Option<egui::TextureHandle> {
         if frame != self.frame {
             self.frame = frame;
             self.budget = PER_FRAME;
         }
-        if let Some(made) = self.made.get(&def.id) {
-            return made.clone();
+        if let Some(texture) = self.textures.get(&def.id) {
+            return Some(texture.clone());
         }
-        if self.budget == 0 {
-            ctx.request_repaint();
-            return None;
+        if !self.pictures.contains_key(&def.id) {
+            if self.budget == 0 {
+                ctx.request_repaint();
+                return None;
+            }
+            self.budget -= 1;
+            let picture = build_npc(self.cache, def, &self.texture_hsl).map(|mesh| render(&mesh, SIZE));
+            self.pictures.insert(def.id, picture);
         }
-        self.budget -= 1;
-        let picture = build_npc(self.cache, def, &self.texture_hsl).map(|mesh| render(&mesh, SIZE));
-        let texture = picture.map(|rgba| {
-            ctx.load_texture(format!("npc{}", def.id), egui::ColorImage::from_rgba_unmultiplied([SIZE, SIZE], &rgba), egui::TextureOptions::LINEAR)
-        });
-        self.made.insert(def.id, texture.clone());
-        texture
+        let rgba = self.pictures.get(&def.id)?.as_ref()?;
+        let texture =
+            ctx.load_texture(format!("npc{}", def.id), egui::ColorImage::from_rgba_unmultiplied([SIZE, SIZE], rgba), egui::TextureOptions::LINEAR);
+        self.textures.insert(def.id, texture.clone());
+        Some(texture)
     }
 }
 

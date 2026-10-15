@@ -61,8 +61,9 @@ The **left panel** holds the tools and the palette, which has four tabs:
 * **Resources:** the objects `gathering.json` makes gatherable.
 * **NPCs:** every NPC the cache can draw (it has models of its own and a standing animation),
   one row per name and level. A row with several models ("Bouncer (level 137) ×4") opens a
-  **model picker** of thumbnails drawn from each model (`thumbs.rs`); hovering one shows its size
-  and menu options. A ★ marks NPCs with combat stats in `npcs.json`; a tick-box lists only those.
+  **model picker** in a window of its own (`picker.rs`): thumbnails drawn from each model
+  (`thumbs.rs`), five to a row. Hovering one shows its size and menu options; clicking one
+  chooses it and closes the window. A ★ marks NPCs with combat stats in `npcs.json`; a tick-box lists only those.
 * **Map icons:** every map function, with its sprite.
 
 Choosing an entry switches to the Place tool. An object being placed is drawn where it would go,
@@ -266,6 +267,8 @@ therefore reads the base plus the overlay, whatever cache the game has been swit
 | `tools.rs` | clicks and shortcuts, finding the placement under the mouse, gizmo outlines and posts for NPCs and icons |
 | `ui.rs` | the egui panels, dialogs, compile job, the Play menu, labels over NPCs and icon sprites in the world |
 | `play.rs` | starting the game on a cache |
+| `picker.rs` | the NPC model picker's own window (a second Bevy window with its own egui context) |
+| `thumbs.rs` | NPC thumbnails, drawn on the CPU from the model's coloured triangles |
 | `preview.rs` | the minimap preview (`MinimapSource` through the overlay) and sprite textures |
 | `camera.rs` | the fly camera |
 

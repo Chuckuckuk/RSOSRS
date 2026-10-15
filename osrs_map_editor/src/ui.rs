@@ -5,7 +5,6 @@ use crate::camera::{jump_to, FlyCamera};
 use crate::catalog::{area_label, kind_name, Catalog, KINDS};
 use crate::editor::{default_spawns, Brush, Editor, Selected, Tool};
 use crate::preview::{MinimapPreview, Sprites};
-use crate::thumbs::NpcThumbs;
 use crate::tools::{remove, IconsInView};
 use crate::world::{focus_square, focus_tile, EditorPicker, Hover};
 use bevy::ecs::system::SystemParam;
@@ -104,7 +103,6 @@ pub fn editor_ui(
     mut state: ResMut<UiState>,
     mut minimap: ResMut<MinimapPreview>,
     mut sprites: ResMut<Sprites>,
-    mut thumbs: ResMut<NpcThumbs>,
     mut view: View,
 ) -> Result {
     let ctx = contexts.ctx_mut()?.clone();
@@ -143,74 +141,8 @@ pub fn editor_ui(
         let spawn = state.play_here.then(|| view.cameras.single().ok().map(|(c, t, _, _)| focus_tile(c, t, &view.world, &view.picker.0))).flatten();
         request_play(&mut editor, &mut state, spawn);
     }
-    npc_picker(&ctx, &mut editor, &catalog, &mut state, &mut thumbs);
     dialogs(&ctx, &mut editor, &mut state);
     Ok(())
-}
-
-/// The models of one NPC palette row, as thumbnails; clicking one chooses it for placing.
-fn npc_picker(ctx: &egui::Context, editor: &mut Editor, catalog: &Catalog, state: &mut UiState, thumbs: &mut NpcThumbs) {
-    let Some(g) = state.npc_picker else { return };
-    let Some(group) = catalog.npc_groups.get(g) else {
-        state.npc_picker = None;
-        return;
-    };
-    let mut open = true;
-    let mut picked = None;
-    let level = if group.combat_level > 0 { format!(" (level {})", group.combat_level) } else { String::new() };
-    egui::Window::new(format!("{}{level}: pick a model", group.name))
-        .id(egui::Id::new("npc_picker"))
-        .open(&mut open)
-        .collapsible(false)
-        .default_width(4.0 * (crate::thumbs::SIZE as f32 + 16.0))
-        .show(ctx, |ui| {
-            ui.label("\u{2605} = fights with the stats in data/npcs.json; the others stand and cannot be fought.");
-            egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for n in catalog.group_members(g) {
-                        let size = egui::vec2(crate::thumbs::SIZE as f32, crate::thumbs::SIZE as f32);
-                        let def = n.cache_id.and_then(|id| catalog.npc_defs.get(&id));
-                        ui.vertical(|ui| {
-                            let chosen = editor.brush == Some(Brush::Npc(n.key.clone()));
-                            let texture = def.and_then(|d| thumbs.get(ctx, d, state.frame));
-                            let response = match &texture {
-                                Some(tex) => ui.add(egui::Image::new(tex).fit_to_exact_size(size).sense(egui::Sense::click())),
-                                None => {
-                                    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-                                    let text = if def.is_some() { "\u{2026}" } else { "no model" };
-                                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(14.0), egui::Color32::GRAY);
-                                    response
-                                }
-                            };
-                            if chosen {
-                                ui.painter().rect_stroke(response.rect, 2.0, egui::Stroke::new(2.0, egui::Color32::YELLOW), egui::StrokeKind::Outside);
-                            }
-                            let id = n.cache_id.map_or_else(|| "curated".to_string(), |i| format!("#{i}"));
-                            let star = if n.has_stats { " \u{2605}" } else { "" };
-                            ui.label(format!("{id}{star}"));
-                            let response = match def {
-                                Some(d) => {
-                                    let options: Vec<&str> = d.actions.iter().map(String::as_str).filter(|a| !a.is_empty()).collect();
-                                    response.on_hover_text(format!("size {}  options: {}", d.size.max(1), if options.is_empty() { "none".into() } else { options.join(", ") }))
-                                }
-                                None => response,
-                            };
-                            if response.clicked() {
-                                picked = Some(n.key.clone());
-                            }
-                        });
-                    }
-                });
-            });
-        });
-    if let Some(key) = picked {
-        editor.brush = Some(Brush::Npc(key));
-        editor.tool = Tool::Place;
-        open = false;
-    }
-    if !open {
-        state.npc_picker = None;
-    }
 }
 
 /// Plays the project: on its cache if it has one, else after asking to make one.

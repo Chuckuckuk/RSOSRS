@@ -22,6 +22,7 @@
 mod camera;
 mod catalog;
 mod editor;
+mod picker;
 mod play;
 mod preview;
 mod thumbs;
@@ -185,6 +186,7 @@ fn main() {
     .insert_resource(preview::MinimapPreview::new(shared))
     .insert_resource(preview::Sprites::new(shared))
     .insert_resource(thumbs::NpcThumbs::new(shared))
+    .init_resource::<picker::PickerWindow>()
     .insert_resource(ui_state)
     // OSRS_ROOFS=0 starts with the planes above the edited one hidden (T toggles)
     .insert_resource(camera::ViewState { roofs: std::env::var("OSRS_ROOFS").map_or(true, |v| v != "0") })
@@ -212,7 +214,9 @@ fn main() {
         )
             .chain(),
     )
-    .add_systems(EguiPrimaryContextPass, ui::editor_ui);
+    .add_systems(EguiPrimaryContextPass, ui::editor_ui)
+    .add_systems(Update, picker::manage_picker_window)
+    .add_systems(picker::PickerContextPass, picker::picker_ui);
     app.world_mut().insert_non_send(SquareStream::spawn());
     app.run();
 }
@@ -226,13 +230,24 @@ fn setup(mut commands: Commands, at: Res<StartAt>) {
 
 /// `OSRS_SCREENSHOT=<path.png>`: save a screenshot after `OSRS_SCREENSHOT_DELAY` seconds (default
 /// 10) and exit, as `osrs_viewer` does.
-fn screenshot_and_exit(mut commands: Commands, time: Res<Time>, mut taken: Local<bool>, mut exit: MessageWriter<AppExit>) {
+fn screenshot_and_exit(
+    mut commands: Commands,
+    time: Res<Time>,
+    picker: Res<picker::PickerWindow>,
+    mut taken: Local<bool>,
+    mut exit: MessageWriter<AppExit>,
+) {
     use bevy::render::view::screenshot::{save_to_disk, Screenshot};
     let Ok(path) = std::env::var("OSRS_SCREENSHOT") else { return };
     let delay: f32 = std::env::var("OSRS_SCREENSHOT_DELAY").ok().and_then(|v| v.parse().ok()).unwrap_or(10.0);
     let t = time.elapsed_secs();
     if !*taken && t > delay {
         *taken = true;
+        // the model picker's own window too, as <path>-picker.png
+        if let Some(window) = picker.window() {
+            let picker_path = path.strip_suffix(".png").map_or_else(|| format!("{path}-picker.png"), |p| format!("{p}-picker.png"));
+            commands.spawn(Screenshot::window(window)).observe(save_to_disk(picker_path));
+        }
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
     }
     if *taken && t > delay + 3.0 {
