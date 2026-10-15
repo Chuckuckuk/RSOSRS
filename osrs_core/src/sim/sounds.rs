@@ -1,6 +1,7 @@
 //! Sound effects the game plays for the player itself, whatever it is fighting: cache sound ids
 //! (archive 4), named as Jagex names them (the OSRS Wiki's "List of sound IDs").
-//! Monsters, weapons, spells, prayers and consumables name their own sounds in the data.
+//! Monsters, weapons, spells, prayers and consumables name their own sounds in the data; doors
+//! and gates use the ones here unless their `DoorDef` names its own.
 
 /// `human_hit`: a hit with damage lands on the player. The player is the male character, so this
 /// is the human set, not 510 (`female_hit_2`, which RuneLite names `TAKE_DAMAGE_SPLAT`).
@@ -23,5 +24,28 @@ pub const EAT: u32 = 2393;
 /// potion recording is 1.42 s, which is exactly `liquid`.)
 pub const DRINK: u32 = 2401;
 
+/// `door_open`: a door (or a double door's leaf) swings open.
+pub const DOOR_OPEN: u32 = 62;
+/// `door_close`
+pub const DOOR_CLOSE: u32 = 60;
+/// `gate_open`: a gate's leaf swings open.
+pub const GATE_OPEN: u32 = 67;
+/// `gate_close`
+pub const GATE_CLOSE: u32 = 66;
+
 /// Every sound id above.
-pub const ALL: [u32; 9] = [PLAYER_HIT, PLAYER_BLOCK, PLAYER_DEATH, UNARMED_ATTACK, SPELL_SPLASH, PRAYER_OFF, PRAYER_DRAINED, EAT, DRINK];
+pub const ALL: [u32; 13] = [
+    PLAYER_HIT,
+    PLAYER_BLOCK,
+    PLAYER_DEATH,
+    UNARMED_ATTACK,
+    SPELL_SPLASH,
+    PRAYER_OFF,
+    PRAYER_DRAINED,
+    EAT,
+    DRINK,
+    DOOR_OPEN,
+    DOOR_CLOSE,
+    GATE_OPEN,
+    GATE_CLOSE,
+];

@@ -273,7 +273,7 @@ impl Registry {
     }
 
     /// Every cache sound effect id the data names (weapons, stances, spells, prayers, monsters,
-    /// their attacks, consumables) and the game's own (`sim::sounds`), sorted and without repeats.
+    /// their attacks, consumables, doors) and the game's own (`sim::sounds`), sorted and without repeats.
     pub fn named_sounds(&self) -> Vec<u32> {
         let mut sounds: std::collections::BTreeSet<u32> = crate::sim::sounds::ALL.into_iter().collect();
         for item in self.items() {
@@ -287,6 +287,7 @@ impl Registry {
         }
         sounds.extend(self.prayers().filter_map(|prayer| prayer.sound));
         sounds.extend(self.consumables().filter_map(|consumable| consumable.sound));
+        sounds.extend(self.doors().flat_map(|door| [door.open_sound, door.close_sound]).flatten());
         for npc in self.npcs() {
             sounds.extend([npc.sounds.attack, npc.sounds.hit, npc.sounds.death].into_iter().flatten());
             for attack in &npc.attacks {

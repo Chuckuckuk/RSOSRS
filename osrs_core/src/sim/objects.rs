@@ -7,8 +7,8 @@
 //!
 //! Doors (OSRS wiki, "Door"):
 //! - The player walks to where the door can be used from (`TargetSpec::wall_reach`) and it pops
-//!   open or shut, with no animation. A double door's or gate's leaves move one at a time: only
-//!   the one chosen.
+//!   open or shut, with no animation but a door's or a gate's sound (`DoorDef::sound`). A double
+//!   door's or gate's leaves move one at a time: only the one chosen.
 //! - An opened door swings into the next tile and turns (`DoorSwing::moves`). Its wall moves with
 //!   it, so the doorway can be walked through.
 //! - A door that a player opened or closed goes back by itself after [`DOOR_RESET_TICKS`].
@@ -17,6 +17,7 @@
 
 use std::rc::Rc;
 
+use super::events::Combatant;
 use super::firemaking::{LightAction, RestAction, TendAction, ASHES, BONFIRE_LOC, FIRE_LOC};
 use super::gathering::GatherAction;
 use super::scenery::{Loc, LocKey};
@@ -192,7 +193,10 @@ impl World {
         } else if let Some(forms) = door.leaf(leaf.id) {
             let moved = if action.closing { unswung(leaf, step, forms.closed) } else { swung(leaf, step, forms.open) };
             self.change_loc(leaf, moved, DOOR_RESET_TICKS);
+        } else {
+            return true;
         }
+        self.play_sound(Some(door.sound(action.closing)), Combatant::Player, 0);
         true
     }
 
@@ -298,7 +302,7 @@ mod tests {
     use crate::collision::CollisionFlag;
     use crate::data::{DoorSwing, Registry};
     use crate::sim::scenarios::dev_open_floor_world;
-    use crate::sim::PlayerConfig;
+    use crate::sim::{sounds, PlayerConfig, WorldEvent};
 
     fn tc(x: i32, z: i32) -> TileCoord {
         TileCoord::new(x, z)
@@ -459,6 +463,45 @@ mod tests {
     #[test]
     fn a_gate_opens_only_the_leaf_you_click() {
         a_pair_opens_one_leaf_at_a_time(DoorSwing::Gate, (1558, 1559), (1560, 1567));
+    }
+
+    /// The sounds the world played since it was last asked.
+    fn sounds(world: &mut World) -> Vec<u32> {
+        let events = world.take_events();
+        events.into_iter().filter_map(|event| if let WorldEvent::Sound { sound, .. } = event { Some(sound) } else { None }).collect()
+    }
+
+    #[test]
+    fn a_door_sounds_as_it_opens_and_closes() {
+        let door = single_door();
+        let mut world = walled(&[door], Registry::builtin());
+        world.player_interact_object(1535, door.tile, "Open").unwrap();
+        run(&mut world, 20);
+        assert_eq!(sounds(&mut world), vec![sounds::DOOR_OPEN]);
+
+        world.player_interact_object(1536, tc(4, 0), "Close").unwrap();
+        run(&mut world, 5);
+        assert_eq!(sounds(&mut world), vec![sounds::DOOR_CLOSE]);
+    }
+
+    #[test]
+    fn a_gate_sounds_like_a_gate() {
+        let (south, north) = (wall(1558, 5, 0, 0), wall(1560, 5, 1, 0));
+        let mut world = walled(&[south, north], Registry::builtin());
+        world.player_interact_object(1558, south.tile, "Open").unwrap();
+        run(&mut world, 20);
+        assert_eq!(sounds(&mut world), vec![sounds::GATE_OPEN]);
+
+        world.player_interact_object(1559, tc(4, 0), "Close").unwrap();
+        run(&mut world, 5);
+        assert_eq!(sounds(&mut world), vec![sounds::GATE_CLOSE]);
+    }
+
+    #[test]
+    fn a_stuck_door_makes_no_sound() {
+        let (mut world, _) = spam_closes(1);
+        let heard = sounds(&mut world);
+        assert_eq!(heard.last(), Some(&sounds::DOOR_OPEN), "the last open sounds, the stuck close does not: {heard:?}");
     }
 
     #[test]

@@ -67,12 +67,29 @@ pub struct DoorDef {
     /// False for doors that stay open (bank doors).
     #[serde(default = "yes")]
     pub can_close: bool,
+    /// The sound of a leaf opening, if not the usual one for its swing (see [`DoorDef::sound`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_sound: Option<u32>,
+    /// The sound of a leaf closing, likewise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub close_sound: Option<u32>,
 }
 
 impl DoorDef {
     /// Whether `object` is one of this door's leaves, and whether that is its open form.
     pub fn state_of(&self, object: u32) -> Option<bool> {
         self.leaf(object).map(|leaf| leaf.open == object)
+    }
+
+    /// The sound a leaf makes opening (or `closing`): the door's own, else a gate's or a door's.
+    pub fn sound(&self, closing: bool) -> u32 {
+        use crate::sim::sounds;
+        let (own, door, gate) = if closing {
+            (self.close_sound, sounds::DOOR_CLOSE, sounds::GATE_CLOSE)
+        } else {
+            (self.open_sound, sounds::DOOR_OPEN, sounds::GATE_OPEN)
+        };
+        own.unwrap_or(if self.swing == DoorSwing::Gate { gate } else { door })
     }
 
     /// The leaf that `object` is a form of.
@@ -92,10 +109,24 @@ mod tests {
             swing: DoorSwing::Double,
             leaves: vec![DoorLeafDef { closed: 1, open: 2 }, DoorLeafDef { closed: 3, open: 4 }],
             can_close: true,
+            open_sound: None,
+            close_sound: None,
         };
         assert_eq!(door.state_of(1), Some(false));
         assert_eq!(door.state_of(4), Some(true));
         assert_eq!(door.state_of(5), None);
         assert_eq!(door.leaf(4), Some(DoorLeafDef { closed: 3, open: 4 }));
+    }
+
+    #[test]
+    fn doors_and_gates_sound_their_own_way_unless_told() {
+        use crate::sim::sounds;
+        let leaves = vec![DoorLeafDef { closed: 1, open: 2 }];
+        let door = DoorDef { id: "d".into(), swing: DoorSwing::Single, leaves, can_close: true, open_sound: None, close_sound: None };
+        assert_eq!((door.sound(false), door.sound(true)), (sounds::DOOR_OPEN, sounds::DOOR_CLOSE));
+        let gate = DoorDef { swing: DoorSwing::Gate, ..door.clone() };
+        assert_eq!((gate.sound(false), gate.sound(true)), (sounds::GATE_OPEN, sounds::GATE_CLOSE));
+        let creaky = DoorDef { open_sound: Some(56), ..door };
+        assert_eq!((creaky.sound(false), creaky.sound(true)), (56, sounds::DOOR_CLOSE));
     }
 }
