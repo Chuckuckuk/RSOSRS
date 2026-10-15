@@ -69,7 +69,7 @@ The **left panel** holds the tools and the palette, which has four tabs:
 Choosing an entry switches to the Place tool. An object being placed is drawn where it would go,
 with its footprint outlined.
 
-Resting the mouse on a tile for a second shows a tooltip listing what stands there on the current
+Resting the mouse on a tile for 0.6 seconds shows a tooltip listing what stands there on the current
 plane (objects and NPC spawns). It floats over the world, so the panels never move.
 
 The **right panel** has three parts:

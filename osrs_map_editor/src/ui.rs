@@ -536,7 +536,7 @@ fn inspector(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog) {
 }
 
 /// How long the mouse rests on a tile before what is on it is shown, seconds.
-const HOVER_DELAY: f64 = 1.0;
+const HOVER_DELAY: f64 = 0.6;
 
 /// Once the mouse has rested on a world tile for [`HOVER_DELAY`], a tooltip beside it lists what
 /// stands there on the plane being edited. It floats over the world, so nothing else moves.
