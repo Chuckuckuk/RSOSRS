@@ -14,9 +14,13 @@
 //! "Attack" on an NPC asks the server to attack it; the server walks the player up to it and
 //! fights. Its other options have nothing to do yet.
 //!
+//! A click on the world plays the cross where it was clicked (`click_cross`): yellow for a walk,
+//! red when it went to an NPC, an object or a ground item.
+//!
 //! The client only names the tile it clicked; routing is the server's (`WalkTo`).
 
 use super::chat::ChatLog;
+use super::click_cross::{ClickCross, CrossColour};
 use super::interface::{Interface, ItemIcons, Orb, PrayerLevels, UiHits, UiTarget, UseSelection, PRAYER_BOOK};
 use super::npcs::{pick_npc, NpcHit, NpcView};
 use super::{ObjectInfo, OrbitCamera, ServerLink};
@@ -101,6 +105,9 @@ enum MenuAction {
     Unequip { slot: EquipSlot },
     /// Ask the server what an item is.
     ExamineItem { item: String },
+    /// Ask the server what an item lying on the ground is (a click on the world, so it plays the
+    /// red cross where an inventory item's Examine plays none).
+    ExamineGroundItem { item: String },
     /// Switch a prayer on or off (by its id in the prayer book).
     TogglePrayer { prayer: &'static str },
     /// Choose the combat style at this index of the wielded weapon's list.
@@ -384,6 +391,35 @@ fn widget_menu(target: UiTarget, snapshot: Option<&osrs_core::sim::Snapshot>, ic
     }
 }
 
+/// The cross choosing `action` plays where it was clicked: yellow for a walk, red for anything
+/// done to something in the world (an NPC, an object, a ground item, Examine of one), none for the
+/// interface's own actions.
+fn cross_colour(action: &MenuAction) -> Option<CrossColour> {
+    match action {
+        MenuAction::Walk(_) => Some(CrossColour::Yellow),
+        MenuAction::Object(_)
+        | MenuAction::Examine { .. }
+        | MenuAction::Npc { .. }
+        | MenuAction::ExamineNpc { .. }
+        | MenuAction::UseOnGround { .. }
+        | MenuAction::UseOnObject { .. }
+        | MenuAction::GroundOption { .. }
+        | MenuAction::ExamineGroundItem { .. } => Some(CrossColour::Red),
+        MenuAction::InventoryOption { .. }
+        | MenuAction::SelectUse { .. }
+        | MenuAction::CancelUse
+        | MenuAction::UseOnItem { .. }
+        | MenuAction::Unequip { .. }
+        | MenuAction::ExamineItem { .. }
+        | MenuAction::TogglePrayer { .. }
+        | MenuAction::SetStance { .. }
+        | MenuAction::SetSpecial { .. }
+        | MenuAction::SetRunning { .. }
+        | MenuAction::SelectSpell { .. }
+        | MenuAction::Say(_) => None,
+    }
+}
+
 fn perform(server: &ServerLink, chat: &mut ChatLog, selection: &mut UseSelection, now: f32, action: &MenuAction) {
     // anything but picking an item, and the clicks that finish the use, puts the picked item down
     if !matches!(action, MenuAction::SelectUse { .. }) {
@@ -416,7 +452,9 @@ fn perform(server: &ServerLink, chat: &mut ChatLog, selection: &mut UseSelection
             server.link.send(ClientCommand::InventoryOption { slot: *slot, option: option.clone() })
         }
         MenuAction::Unequip { slot } => server.link.send(ClientCommand::Unequip { slot: *slot }),
-        MenuAction::ExamineItem { item } => server.link.send(ClientCommand::ExamineItem { item: item.clone() }),
+        MenuAction::ExamineItem { item } | MenuAction::ExamineGroundItem { item } => {
+            server.link.send(ClientCommand::ExamineItem { item: item.clone() })
+        }
         MenuAction::TogglePrayer { prayer } => server.link.send(ClientCommand::TogglePrayer { prayer: (*prayer).to_owned() }),
         MenuAction::SetStance { index } => server.link.send(ClientCommand::SetStance { index: *index }),
         MenuAction::SetSpecial { enabled } => server.link.send(ClientCommand::SetSpecial { enabled: *enabled }),
@@ -442,6 +480,7 @@ struct Extras<'w> {
     chat: ResMut<'w, ChatLog>,
     time: Res<'w, Time>,
     use_selection: ResMut<'w, UseSelection>,
+    cross: ResMut<'w, ClickCross>,
 }
 
 fn ground_clicks(
@@ -480,7 +519,10 @@ fn ground_clicks(
         if let Some(open) = menu.open.take() {
             commands.entity(open.root).despawn();
             if let Some(index) = open.entry_at(cursor) {
-                perform(&server, &mut extra.chat, &mut extra.use_selection, now, &open.entries[index].action);
+                let action = &open.entries[index].action;
+                perform(&server, &mut extra.chat, &mut extra.use_selection, now, action);
+                // the cross plays where the entry was clicked
+                extra.cross.show(cursor, cross_colour(action), now);
             }
             return;
         }
@@ -540,6 +582,7 @@ fn ground_clicks(
             if shift {
                 extra.use_selection.0 = None;
                 request_walk(&server, under.tile, ctrl);
+                extra.cross.show(cursor, Some(CrossColour::Yellow), now);
                 return;
             }
             let first_option = under.npc.as_ref().and_then(|n| default_option(n.options()).map(str::to_owned));
@@ -554,21 +597,28 @@ fn ground_clicks(
                     }
                 };
                 perform(&server, &mut extra.chat, &mut extra.use_selection, now, &action);
+                extra.cross.show(cursor, cross_colour(&action), now);
                 return;
             }
             // a picked item used on an object
             if let (Some(slot), Some((id, _, tile))) = (extra.use_selection.0, use_target(server.latest.as_ref(), &under)) {
-                perform(&server, &mut extra.chat, &mut extra.use_selection, now, &MenuAction::UseOnObject { slot, id, tile });
+                let action = MenuAction::UseOnObject { slot, id, tile };
+                perform(&server, &mut extra.chat, &mut extra.use_selection, now, &action);
+                extra.cross.show(cursor, cross_colour(&action), now);
                 return;
             }
             extra.use_selection.0 = None; // a click on the world puts the picked item down
-            match (npc_comes_first(&under), first_option, under.click.object) {
-                (true, Some(option), _) => {
-                    perform(&server, &mut extra.chat, &mut extra.use_selection, now, &npc_action(under.npc.as_ref().expect("an NPC came first"), &option))
+            let action = match (npc_comes_first(&under), first_option, under.click.object) {
+                (true, Some(option), _) => npc_action(under.npc.as_ref().expect("an NPC came first"), &option),
+                (_, _, Some(object)) => MenuAction::Object(object),
+                _ => {
+                    request_walk(&server, under.tile, ctrl);
+                    extra.cross.show(cursor, Some(CrossColour::Yellow), now);
+                    return;
                 }
-                (_, _, Some(object)) => perform(&server, &mut extra.chat, &mut extra.use_selection, now, &MenuAction::Object(object)),
-                _ => request_walk(&server, under.tile, ctrl),
-            }
+            };
+            perform(&server, &mut extra.chat, &mut extra.use_selection, now, &action);
+            extra.cross.show(cursor, cross_colour(&action), now);
         }
     }
 
@@ -730,7 +780,7 @@ fn ground_clicks(
                             ground_items.push(line(option.clone(), MenuAction::GroundOption { uid: item.uid, option }));
                         }
                     }
-                    ground_items.push(line("Examine".to_owned(), MenuAction::ExamineItem { item: item.item.clone() }));
+                    ground_items.push(line("Examine".to_owned(), MenuAction::ExamineGroundItem { item: item.item.clone() }));
                 }
                 // whichever is nearer first, and "Walk here" always last as the fallback
                 let mut items: Vec<MenuItem> = Vec::new();
@@ -910,6 +960,16 @@ mod tests {
         let peaceful = ["Talk-to", "Pickpocket"];
         assert_eq!(default_option(peaceful.into_iter()), Some("Talk-to"));
         assert_eq!(ordered_options(peaceful.into_iter()), vec!["Talk-to", "Pickpocket"]);
+    }
+
+    #[test]
+    fn a_walk_plays_the_yellow_cross_a_click_on_something_the_red_and_the_interface_none() {
+        assert_eq!(cross_colour(&MenuAction::Walk(TileCoord::new(0, 0))), Some(CrossColour::Yellow));
+        assert_eq!(cross_colour(&MenuAction::ExamineNpc { id: EntityId(1) }), Some(CrossColour::Red));
+        assert_eq!(cross_colour(&MenuAction::GroundOption { uid: 1, option: "Take".into() }), Some(CrossColour::Red));
+        assert_eq!(cross_colour(&MenuAction::ExamineGroundItem { item: "logs".into() }), Some(CrossColour::Red));
+        assert_eq!(cross_colour(&MenuAction::ExamineItem { item: "logs".into() }), None, "an inventory item's Examine");
+        assert_eq!(cross_colour(&MenuAction::CancelUse), None);
     }
 
     #[test]

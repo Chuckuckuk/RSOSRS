@@ -373,7 +373,7 @@ struct FixedUiCamera;
 
 /// The picture's scale (physical pixels per picture pixel): `OSRS_UI_SCALE`, else the largest whole number that fits the 765x503
 /// interface in the window.
-fn ui_scale(window: Vec2) -> i32 {
+pub(crate) fn ui_scale(window: Vec2) -> i32 {
     if let Some(v) = std::env::var("OSRS_UI_SCALE").ok().and_then(|v| v.parse::<i32>().ok()) {
         return v.max(1);
     }
