@@ -15,7 +15,7 @@ use crate::data::CombatAnimations;
 use super::animations::PlayerAnimations;
 use super::events::{Combatant, WorldEvent};
 use super::examine::ExamineTexts;
-use super::scenery::{Loc, LocChange, SceneryIndex};
+use super::scenery::{Loc, LocChange, SceneryIndex, SpawnedLoc};
 use super::tick_driver::TickDriver;
 use super::world::World;
 use crate::actors::EntityId;
@@ -61,6 +61,15 @@ pub enum ClientCommand {
     Unequip { slot: EquipSlot },
     /// Choose `option` ("Wield", "Eat", "Drop", ...) on the item in an inventory slot.
     InventoryOption { slot: usize, option: String },
+    /// Use the item in inventory slot `used` on the one in slot `target` (a tinderbox on logs).
+    UseItemOnItem { used: usize, target: usize },
+    /// Use the item in inventory slot `slot` on the ground stack `uid`.
+    UseItemOnGroundItem { slot: usize, uid: u32 },
+    /// Use the item in inventory slot `slot` on the scenery object `id` covering `tile` (a log on
+    /// a fire).
+    UseItemOnObject { slot: usize, id: u32, tile: TileCoord },
+    /// Choose `option` ("Take", "Light") on the ground stack `uid`.
+    GroundItemOption { uid: u32, option: String },
     /// Drag an inventory item onto another slot (they swap).
     MoveInventoryItem { from: usize, to: usize },
     SetStance { index: usize },
@@ -146,10 +155,23 @@ pub struct PlayerSnapshot {
 pub struct ItemView {
     pub id: String,
     pub name: String,
+    /// The cache item name to draw its picture and menu from (usually `name`).
+    pub icon: String,
     pub quantity: u32,
     /// Whether the server would let the player wear it: a client offers "Wield"/"Wear" only
     /// then, whatever the item's cache definition lists.
     pub wearable: bool,
+}
+
+/// An item lying on the ground.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroundItemView {
+    /// Names the stack while it lies there.
+    pub uid: u32,
+    pub item: String,
+    pub name: String,
+    pub quantity: u32,
+    pub tile: TileCoord,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -198,6 +220,10 @@ pub struct Snapshot {
     /// Every scenery object currently shown as another (felled trees as stumps). The whole set
     /// each time, so a client that loads a map square again knows what to show in it.
     pub scenery: Vec<LocChange>,
+    /// Objects players have made that are standing now (fires), which the map does not have.
+    pub spawned: Vec<SpawnedLoc>,
+    /// Every item on the ground.
+    pub ground_items: Vec<GroundItemView>,
 }
 
 /// A player that has entered the world.
@@ -357,6 +383,14 @@ impl Server {
             ClientCommand::TogglePrayer { prayer } => self.world.player_toggle_prayer(&prayer).map(|_| ()),
             ClientCommand::SelectSpell { spell } => self.world.player_select_spell(spell.as_deref()),
             ClientCommand::SetSpecial { enabled } => self.world.player_set_special(enabled),
+            ClientCommand::UseItemOnItem { used, target } => self.world.player_use_item_on_item(used, target),
+            ClientCommand::UseItemOnGroundItem { slot, uid } => self.world.player_use_item_on_ground_item(slot, uid),
+            ClientCommand::UseItemOnObject { slot, id, tile } => self.world.player_use_item_on_object(slot, id, tile),
+            ClientCommand::GroundItemOption { uid, option } => match option.to_ascii_lowercase().as_str() {
+                "take" => self.world.player_take_ground_item(uid),
+                "light" => self.world.player_light_ground_item(uid),
+                _ => Err("Nothing interesting happens.".to_owned()),
+            },
             ClientCommand::UseConsumable { item } => self.world.player_use_consumable(&item),
             ClientCommand::SetOnTask(on_task) => {
                 self.world.player_set_on_task(on_task);
@@ -439,6 +473,7 @@ impl Server {
                         slot.as_ref().map(|stack| ItemView {
                             id: stack.item.clone(),
                             name: self.world.item_name(&stack.item),
+                            icon: self.world.item_icon(&stack.item),
                             quantity: stack.quantity,
                             wearable: registry.item(&stack.item).is_some_and(|item| item.slot.is_some()),
                         })
@@ -447,7 +482,7 @@ impl Server {
                 equipped: player
                     .loadout
                     .slots()
-                    .map(|(slot, id)| (slot, ItemView { id: id.to_owned(), name: self.world.item_name(id), quantity: 1, wearable: true }))
+                    .map(|(slot, id)| (slot, ItemView { id: id.to_owned(), name: self.world.item_name(id), icon: self.world.item_icon(id), quantity: 1, wearable: true }))
                     .collect(),
                 active_prayers: player.active_prayers.clone(),
                 stance: player.current_stance(registry).map(|stance| stance.name),
@@ -474,6 +509,18 @@ impl Server {
             events: self.world.take_events(),
             messages,
             scenery: self.world.scenery_changes().copied().collect(),
+            spawned: self.world.spawned_scenery().copied().collect(),
+            ground_items: self
+                .world
+                .ground_items()
+                .map(|g| GroundItemView {
+                    uid: g.uid,
+                    item: g.item.clone(),
+                    name: self.world.item_name(&g.item),
+                    quantity: g.quantity,
+                    tile: g.tile,
+                })
+                .collect(),
         }
     }
 }
@@ -1112,6 +1159,45 @@ mod tests {
     }
 
     #[test]
+    fn humble_pie_kills_and_the_player_respawns() {
+        use super::super::events::WorldEvent;
+        use crate::sim::world::RESPAWN_DELAY_TICKS;
+
+        let mut server = data_server();
+        let start = server.world.player.tile();
+        server.world.set_respawn_tile(TileCoord::new(start.x + 5, start.z));
+        server.world.give_item("humble_pie", 1).unwrap();
+        server.world.player.mover.actor.health_mut().damage(3);
+        server.world.player.prayer.drain(0);
+        server.handle_command(ClientCommand::InventoryOption { slot: 0, option: "Eat".into() });
+
+        let mut events = Vec::new();
+        let mut messages = Vec::new();
+        let mut died_on = None;
+        let mut respawned_on = None;
+        for _ in 0..12 {
+            let Some(snapshot) = server.advance(0.6) else { continue };
+            if snapshot.events.contains(&WorldEvent::Died { who: Combatant::Player }) {
+                died_on = Some(snapshot.tick);
+                assert!(snapshot.player.is_dead);
+            }
+            if snapshot.events.contains(&WorldEvent::Respawned) {
+                respawned_on = Some(snapshot.tick);
+                assert!(!snapshot.player.is_dead);
+                assert_eq!(snapshot.player.health, snapshot.player.max_health);
+                assert_eq!(snapshot.player.tile, TileCoord::new(start.x + 5, start.z));
+            }
+            messages.extend(snapshot.messages);
+            events.extend(snapshot.events);
+        }
+        let (died, back) = (died_on.expect("the pie kills"), respawned_on.expect("and the player comes back"));
+        assert_eq!(back - died, RESPAWN_DELAY_TICKS);
+        assert!(messages.iter().any(|m| m == "Oh dear, you are dead!"));
+        assert!(!server.world.player.is_dead());
+        assert!(server.world.player.has_item("humble_pie"), "the pie is not used up");
+    }
+
+    #[test]
     fn a_bow_fires_the_wiki_arrows_once_they_are_wielded() {
         use super::super::events::{Combatant, WorldEvent};
 
@@ -1294,7 +1380,7 @@ mod tests {
         let snapshot = (0..10).filter_map(|_| server.advance(0.6)).find(|s| !s.scenery.is_empty()).unwrap();
 
         assert_eq!(snapshot.scenery.len(), 1);
-        assert_eq!((snapshot.scenery[0].loc, snapshot.scenery[0].replacement), (tree, 1342));
+        assert_eq!((snapshot.scenery[0].loc, snapshot.scenery[0].replacement), (tree, tree.with_id(1342)));
         let woodcutting = snapshot.player.skills.iter().find(|s| s.skill == Skill::Woodcutting).unwrap();
         assert_eq!(woodcutting.xp_tenths, 250);
         assert_eq!(snapshot.player.action_animation, None);

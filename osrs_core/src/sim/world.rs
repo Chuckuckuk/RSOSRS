@@ -33,6 +33,17 @@ pub const ENCOUNTER_CLOCK_ID: EntityId = EntityId(u32::MAX);
 /// attacking them unprompted (reference section 4, "tolerance").
 pub const TOLERANCE_TICKS: i32 = 1000;
 
+/// A respawn point that holds while an object (the `anchor`) stands.
+#[derive(Debug, Clone, Copy)]
+struct RespawnRedirect {
+    tile: TileCoord,
+    anchor: Loc,
+}
+
+/// How many ticks after a death is confirmed the player is carried off to its respawn point: the
+/// death animation plays out first. (The wiki gives no figure; this is a stand-in.)
+pub const RESPAWN_DELAY_TICKS: i32 = 4;
+
 /// Builds an entity at the moment it is activated. The C# healers/elementals are inactive scene
 /// objects whose `Awake` (actor + mover construction, which marks occupancy) only runs when a
 /// trigger activates them - a blueprint defers the same work the same way.
@@ -67,6 +78,13 @@ pub struct World {
     dying: Vec<Combatant>,
     /// Fighters whose death has been confirmed (a `Died` event was sent).
     dead: HashSet<Combatant>,
+    /// Where a dead player comes back (Lumbridge, in the open world).
+    respawn_tile: TileCoord,
+    /// A temporary respawn point that wins over `respawn_tile` while the object it is tied to
+    /// stands (a bonfire the player rested at).
+    respawn_redirect: Option<RespawnRedirect>,
+    /// Ticks until the dead player is respawned, once its death is confirmed.
+    respawn_in: Option<i32>,
     registry: Rc<Registry>,
     /// Consecutive ticks the player has spent within reach of an aggressive monster that is
     /// subject to tolerance; reset the moment they leave.
@@ -75,6 +93,8 @@ pub struct World {
     pub(super) scenery: SceneryIndex,
     /// Scenery temporarily shown as something else (felled trees) and resources' despawn timers.
     pub(super) scenery_state: SceneryState,
+    /// Items lying on the ground.
+    pub(super) ground_items: super::ground_items::GroundItems,
 }
 
 fn slot_index(id: EntityId) -> Option<usize> {
@@ -171,10 +191,14 @@ impl World {
             events: Vec::new(),
             dying: Vec::new(),
             dead: HashSet::new(),
+            respawn_tile: player_start,
+            respawn_redirect: None,
+            respawn_in: None,
             registry: Rc::new(Registry::new()),
             aggro_region_ticks: 0,
             scenery: SceneryIndex::new(),
             scenery_state: SceneryState::new(),
+            ground_items: Default::default(),
         }
     }
 
@@ -202,6 +226,44 @@ impl World {
         self.registry = registry;
         let registry = Rc::clone(&self.registry);
         self.player.refresh_stats(&registry);
+    }
+
+    /// Sets where the player comes back after dying (it starts as the tile the player began on).
+    pub fn set_respawn_tile(&mut self, tile: TileCoord) {
+        self.respawn_tile = tile;
+    }
+
+    pub fn respawn_tile(&self) -> TileCoord {
+        self.respawn_tile
+    }
+
+    /// Sends the player to `tile` instead of `respawn_tile` when it dies, for as long as the made
+    /// object `anchor` stands. It replaces any redirect there was.
+    pub fn redirect_respawn(&mut self, tile: TileCoord, anchor: Loc) {
+        self.respawn_redirect = Some(RespawnRedirect { tile, anchor });
+    }
+
+    /// Where the player would come back right now: the redirect if one is in force, else
+    /// `respawn_tile`.
+    pub fn respawn_point(&self) -> TileCoord {
+        self.respawn_redirect.map_or(self.respawn_tile, |redirect| redirect.tile)
+    }
+
+    /// Counts a respawn at the redirect against its object; the last one burns it out.
+    fn use_up_respawn_anchor(&mut self) {
+        let Some(anchor) = self.respawn_redirect.map(|redirect| redirect.anchor) else { return };
+        if self.scenery_state.use_respawn(&anchor) == Some(0) {
+            self.scenery_state.despawn(&anchor);
+            self.drop_ground_item(super::firemaking::ASHES, 1, anchor.tile);
+            self.end_respawn_redirect_for(&anchor);
+        }
+    }
+
+    /// Drops the redirect if the object it was tied to is `gone`.
+    pub(super) fn end_respawn_redirect_for(&mut self, gone: &Loc) {
+        if self.respawn_redirect.is_some_and(|redirect| redirect.anchor == *gone) {
+            self.respawn_redirect = None;
+        }
     }
 
     /// Whether aggressive monsters currently consider the player tolerated (10+ minutes nearby).
@@ -351,6 +413,15 @@ impl World {
         item_id.to_owned()
     }
 
+    /// The cache item name whose picture a client draws for `item_id`: its own name, unless the
+    /// data names a stand-in for an item the cache lacks.
+    pub fn item_icon(&self, item_id: &str) -> String {
+        match self.registry.consumable(item_id).and_then(|c| c.icon.clone()) {
+            Some(icon) => icon,
+            None => self.item_name(item_id),
+        }
+    }
+
     /// Whether items of this kind stack in one slot (ammunition does).
     pub fn item_is_stackable(&self, item_id: &str) -> bool {
         self.registry.item(item_id).is_some_and(|item| item.ammo.is_some() || item.slot == Some(EquipSlot::Ammo))
@@ -425,9 +496,15 @@ impl World {
                     Err(message) => self.game_message(format!("You can't do that: {message}.")),
                 }
             }
-            "drop" | "destroy" => {
+            "drop" => {
+                if let Some(stack) = self.player.inventory.take(slot) {
+                    let tile = self.player.tile();
+                    self.drop_ground_item(&stack.item, stack.quantity, tile);
+                }
+            }
+            "destroy" => {
                 self.player.inventory.take(slot);
-                self.game_message(format!("You drop the {name}."));
+                self.game_message(format!("You destroy the {name}."));
             }
             "use" => self.game_message(format!("You use the {name}. Nothing interesting happens.")),
             _ => {}
@@ -542,6 +619,9 @@ impl World {
         for who in std::mem::take(&mut self.dying) {
             if self.dead.insert(who) {
                 self.events.push(WorldEvent::Died { who });
+                if who == Combatant::Player {
+                    self.respawn_in = Some(RESPAWN_DELAY_TICKS);
+                }
                 let sound = match who {
                     Combatant::Player => Some(sounds::PLAYER_DEATH),
                     Combatant::Npc(id) => self.entity(id).and_then(|e| e.def.as_ref()).and_then(|def| def.sounds.death),
@@ -591,7 +671,39 @@ impl World {
         let mut scheduler = std::mem::take(&mut self.scheduler);
         scheduler.run_tick(|phase, id, tick, registrar| self.dispatch(phase, id, tick, registrar));
         self.scheduler = scheduler;
+        self.count_down_respawn();
         self.settle_deaths();
+    }
+
+    /// Carries the dead player to its respawn point once the death has played out, alive again
+    /// and with nothing left chasing it.
+    fn count_down_respawn(&mut self) {
+        let Some(ticks) = self.respawn_in else { return };
+        if ticks > 1 {
+            self.respawn_in = Some(ticks - 1);
+            return;
+        }
+        self.respawn_in = None;
+
+        let registry = Rc::clone(&self.registry);
+        let tile = self.respawn_point();
+        self.player.respawn(&registry, &mut self.map, tile);
+        self.use_up_respawn_anchor();
+        self.dead.remove(&Combatant::Player);
+        self.dying.retain(|who| *who != Combatant::Player);
+        self.aggro_region_ticks = 0;
+
+        // whatever was fighting the player loses it, as in the game
+        for entity in self.entities.iter_mut().flatten() {
+            match &mut entity.behavior {
+                Behavior::Boss(state) => state.targets_player = false,
+                Behavior::Npc(state) => state.targets_player = false,
+                _ => {}
+            }
+        }
+
+        self.game_message("Oh dear, you are dead!".to_owned());
+        self.events.push(WorldEvent::Respawned);
     }
 
     fn dispatch(&mut self, phase: TickPhase, id: EntityId, _tick: i32, registrar: &mut TickRegistrar<EntityId>) {

@@ -467,6 +467,10 @@ impl Player {
                 ConsumableEffect::CureVenom => self.status_effects.cure_venom(),
                 ConsumableEffect::PoisonImmunity { ticks } => self.status_effects.grant_poison_immunity(*ticks),
                 ConsumableEffect::StaminaBoost { ticks } => self.stamina_ticks = self.stamina_ticks.max(*ticks),
+                ConsumableEffect::Die => {
+                    let current = self.mover.actor.health().current();
+                    self.mover.actor.health_mut().damage(current);
+                }
             }
         }
 

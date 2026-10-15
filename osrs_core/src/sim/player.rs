@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use super::config::PlayerConfig;
-use super::gathering::PlayerAction;
+use super::objects::PlayerAction;
+use super::scenery::LocKey;
 use super::loadout::Loadout;
 use super::skills::Skills;
 use crate::actors::{Actor, ActorKind, CombatTargetView, EntityId};
@@ -85,6 +86,9 @@ pub struct Player {
     pub(crate) skill_clock: i32,
     /// The skilling rolls' own generator, so gathering never shifts a fight's rolls.
     pub(crate) skilling_rng: DotNetRandom,
+    /// The door this player last closed and the ticks of its recent closes, for the stuck rule
+    /// (`sim::objects`).
+    pub(crate) door_closes: Option<(LocKey, Vec<i32>)>,
 }
 
 impl Player {
@@ -140,6 +144,7 @@ impl Player {
             action: None,
             skill_clock: 0,
             skilling_rng: DotNetRandom::new(0),
+            door_closes: None,
         }
     }
 
@@ -153,6 +158,43 @@ impl Player {
 
     pub fn is_dead(&self) -> bool {
         self.mover.actor.health().is_dead()
+    }
+
+    /// Brings the player back after death: full hitpoints, every stat back on its base, no
+    /// prayer points and no prayers up, no poison/freeze/skull-style effects, nothing in flight at
+    /// it and nothing it was doing, standing on `tile`. Items, experience and run/special energy
+    /// are untouched.
+    pub fn respawn(&mut self, registry: &crate::data::Registry, map: &mut CollisionMap, tile: TileCoord) {
+        let health = self.mover.actor.health_mut();
+        let missing = health.max() - health.current();
+        health.heal(missing);
+
+        self.skills.reset_to_base();
+        let prayer = self.prayer.current();
+        self.prayer.drain(prayer);
+        self.active_prayers.clear();
+        self.special_enabled = false;
+
+        self.status_effects = StatusEffectTracker::new();
+        self.damage_buffer = DamageBuffer::new();
+        self.pending_attacks = PendingAttackQueue::new();
+        self.consumable_delays.clear();
+        self.hp_regen_counter = 0;
+        self.prayer_drain = PrayerDrainCounter::default();
+        self.stamina_ticks = 0;
+
+        self.attack_target = None;
+        self.interact_target = None;
+        self.action = None;
+        self.pending_click = None;
+        self.current_path_is_running = false;
+        self.approaching_target = false;
+        self.attack_cooldown = 0;
+        self.attack_ready = true;
+        self.skill_clock = 0;
+
+        self.mover.teleport_to(map, tile);
+        self.refresh_stats(registry);
     }
 
     /// Where the active path ends, if any steps remain.

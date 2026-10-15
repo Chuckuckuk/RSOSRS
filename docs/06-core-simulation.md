@@ -343,13 +343,26 @@ everything in `dying` (noticed last tick) is moved into `dead` with a `Died` eve
 at 0 HP that is not yet dead is added to `dying`. The game shows the killing blow's splat for a
 tick before the death animation, and this reproduces that.
 
+### Player death and respawn
+
+When the player's death is confirmed, `settle_deaths` starts a `RESPAWN_DELAY_TICKS` (4, a
+stand-in: the wiki gives no figure) countdown. `count_down_respawn` (run just before
+`settle_deaths` each tick) then calls `Player::respawn`: full hitpoints, every stat back on its
+base, prayer points 0 and prayers off, status effects / in-flight hits / queued actions cleared,
+teleported to `World::respawn_point()`: a temporary redirect (`redirect_respawn`, which resting at a
+bonfire sets and its burning out ends) if one is in force, else `World::respawn_tile` (the player's
+starting tile unless `set_respawn_tile` says otherwise; Lumbridge in the open world). Every NPC loses its target, the player leaves `dead`, a
+`Respawned` event is sent and "Oh dear, you are dead!" is shown. Items are not lost yet (the
+wiki's Items Kept on Death rules are not modelled); run and special energy are left as they were.
+The `humble_pie` consumable (effect `die`) kills its eater outright, for testing all this.
+
 ### Outputs
 
 | Buffer | Read with | Contains | Goes to |
 |---|---|---|---|
 | `log` | `log()` | every developer log line, never cleared | the `simulate` binary, tests |
 | `messages` | `take_messages()` | lines the player should read (rejections, "You eat the shark.") | `Snapshot::messages` |
-| `events` | `take_events()` | `Attack`, `Projectile`, `Graphic`, `Heal`, `Hit`, `Died`, `Sound` in order | `Snapshot::events` |
+| `events` | `take_events()` | `Attack`, `Projectile`, `Graphic`, `Heal`, `Hit`, `Died`, `Respawned`, `Sound` in order | `Snapshot::events` |
 
 `snapshot()` (the method on `World`) returns a one-line text summary for traces.
 
@@ -523,14 +536,95 @@ The success chance is `rules::success_numerator(low, high, level)` over 256 (the
 success formula). Draws come from the player's own `skilling_rng`, never the encounter's, so
 gathering cannot change a fight's rolls.
 
+### Ground items: [`sim/ground_items.rs`](../osrs_core/src/sim/ground_items.rs)
+
+`GroundItems` holds stacks (`uid`, item, quantity, tile) that despawn after `DESPAWN_TICKS` (300:
+the game's 1 minute private + 2 public; there is one player, so no owner). "Drop" puts the stack
+on the player's tile, a burnt-out fire leaves ashes, a stackable stack merges with the one on its
+tile. `GroundItemOption { uid, option: "Take" }` is `PlayerAction::Take`: walk onto the tile,
+then pick up (a full inventory says "You don't have enough inventory space to hold that item.").
+The snapshot lists every stack as `ground_items`.
+
+### Firemaking: [`sim/firemaking.rs`](../osrs_core/src/sim/firemaking.rs)
+
+`UseItemOnItem { used, target }` with a tinderbox and a log (either way round) checks the level
+(`data/firemaking.json`: `LogDef { item, level, xp_tenths, burn_ticks, bonfire_ticks }`), **drops the log on the
+player's tile** and starts a `PlayerAction::Light` on that stack. `UseItemOnGroundItem` and the log's
+"Light" ground option (`GroundItemOption`) do the same for a log already lying somewhere, walking
+onto it first. The first attempt comes 3 ticks after the starting tick and then one every 4 on
+the skill clock; the chance is `success_numerator(64, 512, level)` (65/256 at level 1, 100% from
+43). A success removes the stack, grants the XP, spawns a fire (`SceneryState::spawn`, object
+26185, lasting the log's `burn_ticks`) on the player's tile and steps the player west, else east,
+south, north; the fire leaves ashes when it goes out. Walking away leaves the log lying there.
+Spawned objects are in the snapshot's `spawned` list; a fire stops lighting on its own tile. Not
+modelled yet: bow firemaking, coloured logs, other tiles that refuse a fire, permanent fires
+becoming bonfires.
+
+**Bonfires (Forester's campfires, object 49927).** `UseItemOnObject { slot, id, tile }` with a log
+on a spawned fire (or bonfire) starts a `PlayerAction::Tend`; a bonfire's "Tend-to" does the same
+with whichever log the inventory has first (`player_interact_object` looks at spawned objects
+before the map's). The player walks to within 1 tile (diagonals count), adds a log after 1 tick
+and then every 9, for the log's full XP. The fire it was is replaced by a bonfire lasting 99 +
+`bonfire_ticks` (= the wiki's duration column); each further log restarts the timer at 99 +
+its `bonfire_ticks` (never shortening it), so logs are added until the inventory has none. Starting one needs a tinderbox and no bonfire within
+5 tiles (Chebyshev); tending needs none. "Check" says one of five messages by `(left + 1) / 60`.
+A burnt-out bonfire leaves ashes. "Rest" (the bonfire's left-click) starts a `PlayerAction::Rest`:
+the player walks to within 1 tile, then sits (`RestAction::resting`, animation `RESTING_ANIMATION`
+10061, the looping "Sit down" emote: it sits once and then loops the seated idle from the
+sequence's loop step (frames back from the end, 8 of 17 here), which `Clip::loop_start` honours),
+facing the
+bonfire (`player_facing_loc`) and healing `REST_HEAL_PER_TICK` (1) hitpoints every tick, on top of
+natural regeneration. The action lasts until the player does anything else (a walk click, another
+action or attack), dies, or the bonfire burns out; nothing about taking damage ends it yet.
+On sitting, `World::redirect_respawn` points its respawn at the tile
+it stands on, tied to that bonfire's `Loc`; `respawn_point()` is what `count_down_respawn` uses
+(the redirect, else `respawn_tile`) and `advance_scenery` drops the redirect when the bonfire
+burns out. Resting at another bonfire replaces it. A bonfire also has `SpawnedLoc::respawns`:
+each log put on it (the first included) adds `RESPAWNS_PER_LOG` (1), each respawn at its redirect
+uses one, and the one that uses the last burns it out at once (ashes, redirect dropped) whatever
+its timer says; the timer stays the other way for it to end. The tend animation reuses the lighting one
+(733), and the "out of logs" and rest messages are invented. Client: `main.rs` makes "Rest" the
+bonfire's left-click and `ground_click` lists `BONFIRE_OPTIONS` ("Rest", "Tend-to", "Check") in
+its right-click menu. A picked inventory item clicked on a fire sends `UseItemOnObject`
+(`ground_click::use_target`).
+
 ### Scenery: [`sim/scenery.rs`](../osrs_core/src/sim/scenery.rs)
 
 * `SceneryIndex`: which object (`Loc { id, tile, kind, orientation, size }`) covers which tile.
-  The server's map loader fills it with each square's ground-level free-standing objects (shapes
-  10 and 11) as it loads the square's collision (`square_map` in `main.rs`).
-* `SceneryState`: placements shown as another object for a while (`LocChange`, a stump for a
-  felled tree), counted down at the end of every tick by the world clock, plus the despawn
-  timers. The whole set goes to the client in every `Snapshot::scenery`.
+  The server's map loader fills it with each square's ground-level objects that can change:
+  free-standing ones (shapes 10 and 11, trees) and wall pieces with an option (shapes 0-3,
+  doors), as it loads the square's collision (`square_map` in `main.rs`).
+* `SceneryState`: placements shown as another object for a while. A `LocChange`'s
+  `replacement` is a whole `Loc`: on the same spot (a stump) or moved and turned (an opened
+  door). Changes are counted down at the end of every tick by the world clock, can be put back
+  early (`restore`), and are found where they now stand (`find`, which is how a click on an
+  opened door resolves). The whole set goes to the client in every `Snapshot::scenery`.
+* `World::change_loc` / `restore_loc` are the one way scenery changes, and they move a wall's
+  collision with it (`CollisionMap::add_wall` / `remove_wall`, from `collision::wall_edges`).
+  A stump keeps its tree's collision.
+
+### Objects and doors: [`sim/objects.rs`](../osrs_core/src/sim/objects.rs)
+
+`World::player_interact_object(id, tile, option)` is the one place an object's option is
+dispatched: a door's "Open"/"Close", else a gathering node's option, else "Nothing interesting
+happens." It becomes the player's `PlayerAction` (`Gather` or `Door`).
+
+Doors come from [`data/doors.json`](../osrs_core/data/doors.json): each lists its leaves' closed
+and open object ids (paired with the `obj_actions` probe) and a swing style (`single`, `double`,
+`gate`). A door:
+
+1. walks the player to where it can be used from, `TargetSpec::wall_reach` (its own tile, the
+   tile across its edge, and the tiles beside it unless walled off);
+2. swings its leaves: a leaf opens into the tile across its edge and turns a quarter
+   (`DoorSwing::moves`, in the frame of a west-edge door, turned with the placement); a pair's
+   leaves swing out on their outer hinges; a door the map places open shuts by the inverse move.
+   A double door's or gate's leaves move one at a time, only the one chosen; which way it
+   swings comes from its partner beside it (`World::leaf_step`);
+3. moves the wall with it, so the doorway can be walked through;
+4. goes back by itself after `DOOR_RESET_TICKS` (500, 300 s);
+5. answers "The door seems to be stuck." to the fifth close of the same door within
+   `STUCK_WINDOW_TICKS` (8: the fastest five closes can go, an open between each).
+
 
 ### Animation and graphic ids
 

@@ -17,14 +17,14 @@
 //! The client only names the tile it clicked; routing is the server's (`WalkTo`).
 
 use super::chat::ChatLog;
-use super::interface::{Interface, ItemIcons, Orb, PrayerLevels, UiHits, UiTarget, PRAYER_BOOK};
+use super::interface::{Interface, ItemIcons, Orb, PrayerLevels, UiHits, UiTarget, UseSelection, PRAYER_BOOK};
 use super::npcs::{pick_npc, NpcHit, NpcView};
 use super::{ObjectInfo, OrbitCamera, ServerLink};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use osrs_core::actors::EntityId;
 use osrs_core::data::EquipSlot;
-use osrs_core::sim::{ClientCommand, ItemView};
+use osrs_core::sim::{ClientCommand, GroundItemView, ItemView};
 use osrs_core::tiles::TileCoord;
 use osrs_render::pick::{Click, PickedObject, Picker};
 use osrs_render::streaming::StreamedWorld;
@@ -85,6 +85,18 @@ enum MenuAction {
     ExamineNpc { id: EntityId },
     /// Choose an option of the item in an inventory slot ("Wield", "Eat", "Drop", ...).
     InventoryOption { slot: usize, option: String },
+    /// "Use" on an inventory item: it waits for the second item (nothing is sent).
+    SelectUse { slot: usize },
+    /// Put the picked item down without using it.
+    CancelUse,
+    /// Use the item in `used` on the one in `target`.
+    UseOnItem { used: usize, target: usize },
+    /// Use the item in `slot` on a ground stack.
+    UseOnGround { slot: usize, uid: u32 },
+    /// Use the item in `slot` on the object `id` covering `tile` (a log on a fire).
+    UseOnObject { slot: usize, id: u32, tile: TileCoord },
+    /// Choose an option ("Take", "Light") of a ground stack.
+    GroundOption { uid: u32, option: String },
     /// Take off what is worn in a slot.
     Unequip { slot: EquipSlot },
     /// Ask the server what an item is.
@@ -273,7 +285,7 @@ fn npc_action(npc: &NpcHit, option: &str) -> MenuAction {
 /// "Wield"/"Wear"/"Equip"/"Hold" when the server says it cannot be worn (it has no slot here).
 fn inventory_options(icons: Option<&ItemIcons>, stack: &ItemView) -> Vec<String> {
     let mut options = icons
-        .and_then(|i| i.item_named(&stack.name).map(|d| d.menu_options()))
+        .and_then(|i| i.item_named(&stack.icon).map(|d| d.menu_options()))
         .unwrap_or_else(|| vec!["Use".to_owned(), "Drop".to_owned()]);
     if !stack.wearable {
         options.retain(|option| !is_wear_option(option));
@@ -284,6 +296,51 @@ fn inventory_options(icons: Option<&ItemIcons>, stack: &ItemView) -> Vec<String>
 /// Whether a menu option puts the item on (the words the server's inventory handling accepts).
 fn is_wear_option(option: &str) -> bool {
     ["wield", "wear", "equip", "hold"].iter().any(|word| option.eq_ignore_ascii_case(word))
+}
+
+/// What choosing `option` on the inventory item in `slot` does: "Use" picks it up for a second
+/// item, anything else is the server's.
+fn inventory_action(slot: usize, option: String) -> MenuAction {
+    if option.eq_ignore_ascii_case("use") {
+        MenuAction::SelectUse { slot }
+    } else {
+        MenuAction::InventoryOption { slot, option }
+    }
+}
+
+/// The options of the ground item `item` the server handles, in the cache's order ("Take" and
+/// "Light"; the left click is the first).
+fn ground_options(icons: Option<&ItemIcons>, item: &GroundItemView) -> Vec<String> {
+    let listed = icons.and_then(|i| i.item_named(&item.name)).map(|d| d.ground_options.iter().flatten().cloned().collect::<Vec<_>>());
+    let mut options: Vec<String> = listed
+        .unwrap_or_else(|| vec!["Take".to_owned()])
+        .into_iter()
+        .filter(|o| o.eq_ignore_ascii_case("take") || o.eq_ignore_ascii_case("light"))
+        .collect();
+    if options.is_empty() {
+        options.push("Take".to_owned());
+    }
+    options
+}
+
+/// The stack on `tile` the player would click: the one that landed last.
+fn ground_item_at(snapshot: Option<&osrs_core::sim::Snapshot>, tile: TileCoord) -> Option<&GroundItemView> {
+    snapshot?.ground_items.iter().rev().find(|g| g.tile == tile)
+}
+
+/// The object under a click that an item picked from the inventory would be used on: the object
+/// in the way, or the named one (a fire has no option to intercept the click with). Objects a
+/// player made are not on the map, so the server's list says which tile they stand on.
+fn use_target(snapshot: Option<&osrs_core::sim::Snapshot>, under: &Under) -> Option<(u32, String, TileCoord)> {
+    if let Some(object) = &under.click.object {
+        return Some((object.id, object.name.clone(), TileCoord::new(object.tile.0, object.tile.1)));
+    }
+    let (id, name) = under.click.examinable.clone()?;
+    let made = snapshot?.spawned.iter().filter(|s| s.loc.id == id).min_by_key(|s| {
+        let (dx, dz) = (s.loc.tile.x - under.tile.x, s.loc.tile.z - under.tile.z);
+        dx.abs().max(dz.abs())
+    })?;
+    Some((id, name, made.loc.tile))
 }
 
 /// The menu of a Combat Options button or an orb, top line first (a left click takes it): the
@@ -327,8 +384,22 @@ fn widget_menu(target: UiTarget, snapshot: Option<&osrs_core::sim::Snapshot>, ic
     }
 }
 
-fn perform(server: &ServerLink, chat: &mut ChatLog, now: f32, action: &MenuAction) {
+fn perform(server: &ServerLink, chat: &mut ChatLog, selection: &mut UseSelection, now: f32, action: &MenuAction) {
+    // anything but picking an item, and the clicks that finish the use, puts the picked item down
+    if !matches!(action, MenuAction::SelectUse { .. }) {
+        selection.0 = None;
+    }
     match action {
+        MenuAction::SelectUse { slot } => selection.0 = Some(*slot),
+        MenuAction::CancelUse => {}
+        MenuAction::UseOnItem { used, target } => server.link.send(ClientCommand::UseItemOnItem { used: *used, target: *target }),
+        MenuAction::UseOnGround { slot, uid } => server.link.send(ClientCommand::UseItemOnGroundItem { slot: *slot, uid: *uid }),
+        MenuAction::UseOnObject { slot, id, tile } => {
+            server.link.send(ClientCommand::UseItemOnObject { slot: *slot, id: *id, tile: *tile })
+        }
+        MenuAction::GroundOption { uid, option } => {
+            server.link.send(ClientCommand::GroundItemOption { uid: *uid, option: option.clone() })
+        }
         MenuAction::Walk(tile) => request_walk(server, *tile, false),
         // the server finds the object from its id and a tile it covers, and decides what happens
         MenuAction::Object(PickedObject { id, name, action, tile }) => {
@@ -370,6 +441,7 @@ struct Extras<'w> {
     levels: Res<'w, PrayerLevels>,
     chat: ResMut<'w, ChatLog>,
     time: Res<'w, Time>,
+    use_selection: ResMut<'w, UseSelection>,
 }
 
 fn ground_clicks(
@@ -391,6 +463,13 @@ fn ground_clicks(
     keys: Res<ButtonInput<KeyCode>>,
 ) {
     let now = extra.time.elapsed_secs();
+    // an item that is gone (dropped, burnt) cannot stay picked
+    if let Some(slot) = extra.use_selection.0 {
+        let held = server.latest.as_ref().is_some_and(|s| s.player.inventory.get(slot).is_some_and(Option::is_some));
+        if !held {
+            extra.use_selection.0 = None;
+        }
+    }
     let prayer_levels = &extra.levels;
     let Ok(window) = windows.single() else { return };
     let Ok((camera, camera_transform)) = cameras.single() else { return };
@@ -401,7 +480,7 @@ fn ground_clicks(
         if let Some(open) = menu.open.take() {
             commands.entity(open.root).despawn();
             if let Some(index) = open.entry_at(cursor) {
-                perform(&server, &mut extra.chat, now, &open.entries[index].action);
+                perform(&server, &mut extra.chat, &mut extra.use_selection, now, &open.entries[index].action);
             }
             return;
         }
@@ -422,25 +501,30 @@ fn ground_clicks(
                     if let Some(stack) = stack {
                         // the left click is the menu's top option
                         let option = inventory_options(icons.as_deref(), stack).into_iter().next().unwrap_or_else(|| "Use".to_owned());
-                        perform(&server, &mut extra.chat, now, &MenuAction::InventoryOption { slot, option });
+                        let action = match extra.use_selection.0 {
+                            Some(used) if used == slot => MenuAction::CancelUse,
+                            Some(used) => MenuAction::UseOnItem { used, target: slot },
+                            None => inventory_action(slot, option),
+                        };
+                        perform(&server, &mut extra.chat, &mut extra.use_selection, now, &action);
                     }
                 }
                 UiTarget::EquipmentSlot(slot) => {
                     if snapshot.is_some_and(|s| s.player.equipped.iter().any(|(worn, _)| *worn == slot)) {
-                        perform(&server, &mut extra.chat, now, &MenuAction::Unequip { slot });
+                        perform(&server, &mut extra.chat, &mut extra.use_selection, now, &MenuAction::Unequip { slot });
                     }
                 }
                 // a prayer the server does not have yet does nothing; the server answers a level
                 // that is too low itself
                 UiTarget::Prayer(index) => {
                     if prayer_levels.0[index].is_some() {
-                        perform(&server, &mut extra.chat, now, &MenuAction::TogglePrayer { prayer: PRAYER_BOOK[index].id });
+                        perform(&server, &mut extra.chat, &mut extra.use_selection, now, &MenuAction::TogglePrayer { prayer: PRAYER_BOOK[index].id });
                     }
                 }
                 // the Combat Options buttons and the orbs: the top line of their menu
                 UiTarget::CombatStyle(_) | UiTarget::SpecialBar | UiTarget::Orb(_) | UiTarget::Spell(_) | UiTarget::Logout | UiTarget::WorldSwitcher => {
                     if let Some(first) = widget_menu(target, snapshot, icons.as_deref()).into_iter().next() {
-                        perform(&server, &mut extra.chat, now, &first.action);
+                        perform(&server, &mut extra.chat, &mut extra.use_selection, now, &first.action);
                     }
                 }
                 UiTarget::AutoRetaliate | UiTarget::Background => {}
@@ -454,15 +538,35 @@ fn ground_clicks(
             let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
             let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
             if shift {
+                extra.use_selection.0 = None;
                 request_walk(&server, under.tile, ctrl);
                 return;
             }
             let first_option = under.npc.as_ref().and_then(|n| default_option(n.options()).map(str::to_owned));
+            let ground = ground_item_at(server.latest.as_ref(), under.tile)
+                .filter(|_| under.click.object.is_none() && !npc_comes_first(&under));
+            if let Some(item) = ground {
+                let action = match extra.use_selection.0 {
+                    Some(slot) => MenuAction::UseOnGround { slot, uid: item.uid },
+                    None => {
+                        let option = ground_options(icons.as_deref(), item).remove(0);
+                        MenuAction::GroundOption { uid: item.uid, option }
+                    }
+                };
+                perform(&server, &mut extra.chat, &mut extra.use_selection, now, &action);
+                return;
+            }
+            // a picked item used on an object
+            if let (Some(slot), Some((id, _, tile))) = (extra.use_selection.0, use_target(server.latest.as_ref(), &under)) {
+                perform(&server, &mut extra.chat, &mut extra.use_selection, now, &MenuAction::UseOnObject { slot, id, tile });
+                return;
+            }
+            extra.use_selection.0 = None; // a click on the world puts the picked item down
             match (npc_comes_first(&under), first_option, under.click.object) {
                 (true, Some(option), _) => {
-                    perform(&server, &mut extra.chat, now, &npc_action(under.npc.as_ref().expect("an NPC came first"), &option))
+                    perform(&server, &mut extra.chat, &mut extra.use_selection, now, &npc_action(under.npc.as_ref().expect("an NPC came first"), &option))
                 }
-                (_, _, Some(object)) => perform(&server, &mut extra.chat, now, &MenuAction::Object(object)),
+                (_, _, Some(object)) => perform(&server, &mut extra.chat, &mut extra.use_selection, now, &MenuAction::Object(object)),
                 _ => request_walk(&server, under.tile, ctrl),
             }
         }
@@ -493,16 +597,28 @@ fn ground_clicks(
                     UiTarget::InventorySlot(slot) => {
                         let stack = snapshot.and_then(|s| s.player.inventory.get(slot)).and_then(Option::as_ref);
                         if let Some(stack) = stack {
-                            let options = inventory_options(icons.as_deref(), stack);
-                            for option in options {
-                                let action = MenuAction::InventoryOption { slot, option: option.clone() };
-                                items.push(item_line(option, &stack.name, action));
+                            let picked = extra.use_selection.0.filter(|used| *used != slot);
+                            let picked_name = picked
+                                .and_then(|used| snapshot.and_then(|s| s.player.inventory.get(used)).and_then(Option::as_ref))
+                                .map(|used| used.name.clone());
+                            if let (Some(used), Some(picked_name)) = (picked, picked_name) {
+                                // "Use Tinderbox -> Logs" comes first while an item is picked
+                                let action = MenuAction::UseOnItem { used, target: slot };
+                                items.push(item_line("Use".to_owned(), &format!("{picked_name} -> {}", stack.name), action));
+                            } else {
+                                for option in inventory_options(icons.as_deref(), stack) {
+                                    let action = inventory_action(slot, option.clone());
+                                    items.push(item_line(option, &stack.name, action));
+                                }
                             }
                             items.push(item_line(
                                 "Examine".to_owned(),
                                 &stack.name,
                                 MenuAction::ExamineItem { item: stack.id.clone() },
                             ));
+                            if extra.use_selection.0.is_some() {
+                                items.push(MenuItem { option: "Cancel".to_owned(), subject: None, suffix: None, action: MenuAction::CancelUse });
+                            }
                         }
                     }
                     UiTarget::Prayer(index) if prayer_levels.0[index].is_some() => {
@@ -553,13 +669,34 @@ fn ground_clicks(
                 }
                 // an object's option, then Examine
                 let mut object_items: Vec<MenuItem> = Vec::new();
+                // a picked item can be used on the object first
+                if let Some(slot) = extra.use_selection.0 {
+                    let snapshot = server.latest.as_ref();
+                    let used = snapshot.and_then(|s| s.player.inventory.get(slot)).and_then(Option::as_ref);
+                    if let (Some(used), Some((id, name, tile))) = (used, use_target(snapshot, &under)) {
+                        object_items.push(MenuItem {
+                            option: "Use".to_owned(),
+                            subject: Some((format!("{} -> {name}", used.name), Subject::Item)),
+                            suffix: None,
+                            action: MenuAction::UseOnObject { slot, id, tile },
+                        });
+                    }
+                }
                 if let Some(object) = under.click.object.clone() {
-                    object_items.push(MenuItem {
-                        option: object.action.clone(),
-                        subject: Some((object.name.clone(), Subject::Object)),
-                        suffix: None,
-                        action: MenuAction::Object(object),
-                    });
+                    // a bonfire's other options follow its left-click one
+                    let others: &[&str] = if object.id == osrs_core::sim::BONFIRE_LOC {
+                        &osrs_core::sim::BONFIRE_OPTIONS[1..]
+                    } else {
+                        &[]
+                    };
+                    for option in std::iter::once(object.action.as_str()).chain(others.iter().copied()) {
+                        object_items.push(MenuItem {
+                            option: option.to_owned(),
+                            subject: Some((object.name.clone(), Subject::Object)),
+                            suffix: None,
+                            action: MenuAction::Object(PickedObject { action: option.to_owned(), ..object.clone() }),
+                        });
+                    }
                 }
                 if let Some((id, name)) = under.click.examinable.clone() {
                     object_items.push(MenuItem {
@@ -569,8 +706,35 @@ fn ground_clicks(
                         action: MenuAction::Examine { id },
                     });
                 }
+                // the item lying on the tile
+                let mut ground_items: Vec<MenuItem> = Vec::new();
+                let ground = ground_item_at(server.latest.as_ref(), under.tile).filter(|_| under.click.object.is_none());
+                if let Some(item) = ground {
+                    let line = |option: String, action: MenuAction| MenuItem {
+                        option,
+                        subject: Some((item.name.clone(), Subject::Item)),
+                        suffix: None,
+                        action,
+                    };
+                    if let Some(slot) = extra.use_selection.0 {
+                        let used = server.latest.as_ref().and_then(|s| s.player.inventory.get(slot)).and_then(Option::as_ref);
+                        let used = used.map_or_else(String::new, |u| u.name.clone());
+                        ground_items.push(MenuItem {
+                            option: "Use".to_owned(),
+                            subject: Some((format!("{used} -> {}", item.name), Subject::Item)),
+                            suffix: None,
+                            action: MenuAction::UseOnGround { slot, uid: item.uid },
+                        });
+                    } else {
+                        for option in ground_options(icons.as_deref(), item) {
+                            ground_items.push(line(option.clone(), MenuAction::GroundOption { uid: item.uid, option }));
+                        }
+                    }
+                    ground_items.push(line("Examine".to_owned(), MenuAction::ExamineItem { item: item.item.clone() }));
+                }
                 // whichever is nearer first, and "Walk here" always last as the fallback
                 let mut items: Vec<MenuItem> = Vec::new();
+                items.extend(ground_items);
                 if npc_comes_first(&under) || under.click.object.is_none() {
                     items.extend(npc_items);
                     items.extend(object_items);
@@ -584,6 +748,9 @@ fn ground_clicks(
                     suffix: None,
                     action: MenuAction::Walk(under.tile),
                 });
+                if extra.use_selection.0.is_some() {
+                    items.push(MenuItem { option: "Cancel".to_owned(), subject: None, suffix: None, action: MenuAction::CancelUse });
+                }
                 menu.open = Some(spawn_menu(&mut commands, window, cursor, items));
             }
         }
@@ -689,7 +856,7 @@ mod tests {
     fn an_item_that_cannot_be_worn_offers_no_wear_options() {
         assert!(is_wear_option("Wield") && is_wear_option("wear") && is_wear_option("Hold"));
         assert!(!is_wear_option("Drink") && !is_wear_option("Drop"));
-        let vial = ItemView { id: "vial".into(), name: "Vial".into(), quantity: 1, wearable: false };
+        let vial = ItemView { id: "vial".into(), name: "Vial".into(), icon: "Vial".into(), quantity: 1, wearable: false };
         assert!(inventory_options(None, &vial).iter().all(|o| !is_wear_option(o)));
     }
 

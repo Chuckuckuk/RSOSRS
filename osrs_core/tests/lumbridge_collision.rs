@@ -108,3 +108,18 @@ fn clicking_a_solid_object_does_not_put_the_player_on_it() {
     }
     assert_ne!((last.x, last.z), (fx, fz), "ended on the fountain tile");
 }
+
+/// The server's wall table (used to move doors) and the cache's (used to bake the map) agree for
+/// every wall shape and orientation. Needs no cache.
+#[test]
+fn the_servers_wall_table_matches_the_caches() {
+    for kind in 0..=22u8 {
+        for orientation in 0..4u8 {
+            assert_eq!(
+                osrs_core::collision::wall_edges(kind, orientation),
+                osrs_cache::collision::wall_edges(kind, orientation),
+                "kind {kind} orientation {orientation}"
+            );
+        }
+    }
+}

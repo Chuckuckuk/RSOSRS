@@ -38,6 +38,30 @@ pub struct CollisionGrid {
     pub flags: Vec<u32>,
 }
 
+/// The wall bits a wall piece of shape `kind` (0 straight, 1 and 3 diagonal corners, 2 L-shaped
+/// corner) turned `orientation` sets, as `(dx, dz, bits)` from its own tile: its own side of the
+/// edge or corner, and the neighbour's side of it. Other shapes set none. (Orientation 0 is the
+/// west edge or north-west corner, then clockwise.)
+pub fn wall_edges(kind: u8, orientation: u8) -> &'static [(i32, i32, u32)] {
+    use flag::*;
+    let o = orientation & 3;
+    match (kind, o) {
+        (0, 0) => &[(0, 0, WEST), (-1, 0, EAST)],
+        (0, 1) => &[(0, 0, NORTH), (0, 1, SOUTH)],
+        (0, 2) => &[(0, 0, EAST), (1, 0, WEST)],
+        (0, _) => &[(0, 0, SOUTH), (0, -1, NORTH)],
+        (1 | 3, 0) => &[(0, 0, NORTH_WEST), (-1, 1, SOUTH_EAST)],
+        (1 | 3, 1) => &[(0, 0, NORTH_EAST), (1, 1, SOUTH_WEST)],
+        (1 | 3, 2) => &[(0, 0, SOUTH_EAST), (1, -1, NORTH_WEST)],
+        (1 | 3, _) => &[(0, 0, SOUTH_WEST), (-1, -1, NORTH_EAST)],
+        (2, 0) => &[(0, 0, WEST | NORTH), (-1, 0, EAST), (0, 1, SOUTH)],
+        (2, 1) => &[(0, 0, NORTH | EAST), (0, 1, SOUTH), (1, 0, WEST)],
+        (2, 2) => &[(0, 0, EAST | SOUTH), (1, 0, WEST), (0, -1, NORTH)],
+        (2, _) => &[(0, 0, SOUTH | WEST), (0, -1, NORTH), (-1, 0, EAST)],
+        _ => &[],
+    }
+}
+
 impl CollisionGrid {
     /// Flags of a world tile; outside the grid reads as fully blocked.
     pub fn at(&self, world_x: i32, world_z: i32) -> u32 {
@@ -109,68 +133,8 @@ impl CollisionGrid {
     /// Wall pieces: straight (0), diagonal corner pieces (1, 3) and L-shaped corners (2). The
     /// orientation says which edge or corner the piece sits on.
     fn add_wall(&mut self, x: i32, z: i32, kind: u8, orientation: u8) {
-        use flag::*;
-        let o = orientation & 3;
-        match kind {
-            0 => match o {
-                0 => {
-                    self.add(x, z, WEST);
-                    self.add(x - 1, z, EAST);
-                }
-                1 => {
-                    self.add(x, z, NORTH);
-                    self.add(x, z + 1, SOUTH);
-                }
-                2 => {
-                    self.add(x, z, EAST);
-                    self.add(x + 1, z, WEST);
-                }
-                _ => {
-                    self.add(x, z, SOUTH);
-                    self.add(x, z - 1, NORTH);
-                }
-            },
-            1 | 3 => match o {
-                0 => {
-                    self.add(x, z, NORTH_WEST);
-                    self.add(x - 1, z + 1, SOUTH_EAST);
-                }
-                1 => {
-                    self.add(x, z, NORTH_EAST);
-                    self.add(x + 1, z + 1, SOUTH_WEST);
-                }
-                2 => {
-                    self.add(x, z, SOUTH_EAST);
-                    self.add(x + 1, z - 1, NORTH_WEST);
-                }
-                _ => {
-                    self.add(x, z, SOUTH_WEST);
-                    self.add(x - 1, z - 1, NORTH_EAST);
-                }
-            },
-            2 => match o {
-                0 => {
-                    self.add(x, z, WEST | NORTH);
-                    self.add(x - 1, z, EAST);
-                    self.add(x, z + 1, SOUTH);
-                }
-                1 => {
-                    self.add(x, z, NORTH | EAST);
-                    self.add(x, z + 1, SOUTH);
-                    self.add(x + 1, z, WEST);
-                }
-                2 => {
-                    self.add(x, z, EAST | SOUTH);
-                    self.add(x + 1, z, WEST);
-                    self.add(x, z - 1, NORTH);
-                }
-                _ => {
-                    self.add(x, z, SOUTH | WEST);
-                    self.add(x, z - 1, NORTH);
-                    self.add(x - 1, z, EAST);
-                }
-            },
-            _ => {}
+        for &(dx, dz, bits) in wall_edges(kind, orientation) {
+            self.add(x + dx, z + dz, bits);
         }
     }
 }

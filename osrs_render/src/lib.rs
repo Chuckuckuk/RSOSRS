@@ -238,6 +238,11 @@ impl AnimatedModel {
         self.tops[self.active].get(frame).copied().unwrap_or(0.0)
     }
 
+    /// The cache sequence clip `index` was baked from.
+    pub fn sequence_of(&self, index: usize) -> Option<u32> {
+        self.clips.get(index).map(|clip| clip.sequence)
+    }
+
     /// The index of the clip baked from cache sequence `sequence`, if this model has one.
     pub fn clip_of_sequence(&self, sequence: u32) -> Option<usize> {
         self.clips.iter().position(|clip| clip.sequence == sequence)

@@ -17,8 +17,10 @@
 //!        OSRS_WIELD=0,1                  wield the items in these inventory slots once in the world
 //!        OSRS_SEED=n                     seed of the open world's random rolls (default: from the clock,
 //!                                        so each launch rolls differently); set it to replay a run
-//!        OSRS_INTERACT=id,x,z,option     choose an option on the scenery object `id` covering tile (x, z)
-//!                                        once in the world, e.g. 1276,3247,3231,Chop down
+//!        OSRS_DO="t:cmd:args;..."         timed server commands (t = seconds since start), chained:
+//!                                          interact:id,x,z,option  an option on scenery object `id` over (x, z)
+//!                                          walk:x,z                walk to a world tile
+//!                                        e.g. "2:interact:1535,3234,3207,Open;8:walk:3236,3207"
 //!        OSRS_TAB=n                      open this interface tab first (0..13)
 //!        OSRS_LAYOUT=classic|modern|fixed  interface layout (default classic: resizable)
 //!        OSRS_UI_SCALE=n                 whole-number interface scale (default: largest that fits 765x503)
@@ -43,6 +45,7 @@ mod overheads;
 mod player_look;
 mod projectiles;
 mod route;
+mod ground_scene;
 mod scenery_swaps;
 mod sound_fx;
 mod tile_marks;
@@ -269,7 +272,9 @@ fn load_scene(spawn: (i32, i32), radius: i32) -> osrs_cache::Result<(Scene, Firs
             first.push(loader.load(around.0 + dx, around.1 + dz)?);
         }
     }
-    let (left_click, names) = loader.object_info();
+    let (mut left_click, names) = loader.object_info();
+    // a bonfire is rested at on a left-click; its other options are in the right-click menu
+    left_click.insert(osrs_core::sim::BONFIRE_LOC, osrs_core::sim::BONFIRE_OPTIONS[0].to_owned());
     drop(loader);
 
     let cache = Cache::open_default()?;
@@ -386,6 +391,8 @@ fn main() {
             None => {
                 let mut world = World::new(map, open_world_seed(), spawn, PlayerConfig::new_account());
                 world.set_registry(registry);
+                // enough Firemaking for the bonfire logs (level 50 is maple and below)
+                world.player.skills.set_base(osrs_core::model::Skill::Firemaking, 50);
                 // a man (level 2) stands about in Lumbridge square, a few tiles from where you arrive
                 let man_at = nearest_open_tile(&world.map, TileCoord::new(spawn.x + 4, spawn.z - 3));
                 match man_at.map(|at| world.spawn_npc_def("man", at)) {
@@ -400,10 +407,14 @@ fn main() {
                     ("abyssal_whip", 1),
                     ("magic_shortbow", 1),
                     ("shark", 3),
+                    ("humble_pie", 1),
                     ("cooked_karambwan", 2),
                     ("prayer_potion_4", 2),
                     ("bronze_arrow", 150),
                     ("bronze_axe", 1),
+                    ("tinderbox", 1),
+                    ("logs", 4),
+                    ("oak_logs", 1),
                 ] {
                     if let Err(e) = world.give_item(item, quantity) {
                         eprintln!("[server] starter kit: {e}");
@@ -472,7 +483,7 @@ fn main() {
     .add_systems(Startup, setup)
     .add_systems(
         Update,
-        (scripted_input, poll_server, start_scenario, sync_player, npcs::sync_npcs, map_stream::stream_map, scenery_swaps::show_scenery_changes, limit_planes, orbit_camera, toggle_grid, screenshot_and_exit)
+        (scripted_input, scripted_commands, poll_server, start_scenario, sync_player, npcs::sync_npcs, map_stream::stream_map, scenery_swaps::show_scenery_changes, ground_scene::show_ground_things, limit_planes, orbit_camera, toggle_grid, screenshot_and_exit)
             .chain(),
     );
     app.world_mut().insert_non_send(ServerLink { link, latest: None, ticks_in_latest: 1, new_events: Vec::new() });
@@ -492,7 +503,11 @@ fn finish_recording() {
     let registry = Registry::builtin();
     // items that turn up later (a potion's lower doses, the vial): their pictures
     let names: Vec<String> =
-        registry.items().map(|i| i.name.clone()).chain(registry.consumables().map(|c| c.name.clone())).collect();
+        registry
+            .items()
+            .map(|i| i.name.clone())
+            .chain(registry.consumables().map(|c| c.icon.clone().unwrap_or_else(|| c.name.clone())))
+            .collect();
     interface::touch_icons(&names);
     // every sound the data can ask for
     let cache = Cache::open_default().expect("the cache opens");
@@ -570,8 +585,8 @@ fn open_world_seed() -> i32 {
 }
 
 /// What the server needs of one map square, decoded once: its collision, as the arrays a
-/// `CollisionMap` takes, and its free-standing ground-level objects (trees and the like), for the
-/// scenery index. A square that cannot be decoded is solid and empty, so nobody is ever walked onto
+/// `CollisionMap` takes, and its ground-level objects that can change (free-standing ones such
+/// as trees, and wall pieces with an option such as doors), for the scenery index. A square that cannot be decoded is solid and empty, so nobody is ever walked onto
 /// ground nobody has seen.
 fn square_map(source: &MapSource, square: (i32, i32)) -> (CollisionMapData, Vec<Loc>) {
     let cells = (SQUARE * SQUARE) as usize;
@@ -580,9 +595,14 @@ fn square_map(source: &MapSource, square: (i32, i32)) -> (CollisionMapData, Vec<
             let defs = source.object_defs();
             let locs = around
                 .middle_placements()
-                .filter(|(_, p)| p.plane == 0 && matches!(p.kind, 10 | 11))
+                .filter(|(_, p)| p.plane == 0 && matches!(p.kind, 0..=3 | 10 | 11))
                 .filter_map(|((x, z), p)| {
-                    let (w, h) = footprint(defs.get(&p.id)?, p.orientation);
+                    let def = defs.get(&p.id)?;
+                    // free-standing objects (trees), and wall pieces that do something (doors)
+                    if p.kind <= 3 && def.left_click().is_none() {
+                        return None;
+                    }
+                    let (w, h) = footprint(def, p.orientation);
                     Some(Loc {
                         id: p.id,
                         tile: TileCoord::new(x, z),
@@ -652,17 +672,6 @@ fn setup(
     // without a click)
     if let Some(target) = std::env::var("OSRS_ATTACK").ok().and_then(|v| v.parse::<u32>().ok()) {
         server.link.send(ClientCommand::Attack { target: osrs_core::actors::EntityId(target) });
-    }
-
-    // OSRS_INTERACT=id,x,z,option chooses an option on a scenery object straight away (for trying
-    // an object without finding it on screen)
-    if let Ok(v) = std::env::var("OSRS_INTERACT") {
-        let parts: Vec<&str> = v.splitn(4, ',').map(str::trim).collect();
-        if let [id, x, z, action] = parts[..] {
-            if let (Ok(id), Ok(x), Ok(z)) = (id.parse(), x.parse(), z.parse()) {
-                server.link.send(ClientCommand::InteractObject { id, tile: TileCoord::new(x, z), action: action.to_owned() });
-            }
-        }
     }
 
     let feet = spawner
@@ -959,7 +968,14 @@ fn sync_player(
             let diff = (wanted - player.facing + PI).rem_euclid(TAU) - PI;
             -diff * 2048.0 / TAU
         };
-        let clip = if !moving_on && snapshot.player.action_animation.is_some() {
+        // The task's clip is baked into CLIP_ACTION off-thread (see `player_look`), so for a few
+        // frames after the task starts the slot still holds the previous one (the default chop):
+        // it is shown only once it is the sequence the server named.
+        let action_ready = snapshot
+            .player
+            .action_animation
+            .is_some_and(|sequence| model.sequence_of(CLIP_ACTION) == Some(sequence));
+        let clip = if !moving_on && action_ready {
             // standing at a task: its animation, looped until the server says it has stopped
             CLIP_ACTION
         } else if !moving_on {
@@ -1019,6 +1035,60 @@ fn toggle_grid(
     }
 }
 
+/// One step of an `OSRS_DO` script, as the server command it sends.
+fn scripted_command(command: &str, args: &str) -> Option<ClientCommand> {
+    let parts: Vec<&str> = args.split(',').map(str::trim).collect();
+    match (command, &parts[..]) {
+        ("interact", [id, x, z, action @ ..]) if !action.is_empty() => Some(ClientCommand::InteractObject {
+            id: id.parse().ok()?,
+            tile: TileCoord::new(x.parse().ok()?, z.parse().ok()?),
+            action: action.join(","),
+        }),
+        ("walk", [x, z]) => Some(ClientCommand::WalkTo { tile: TileCoord::new(x.parse().ok()?, z.parse().ok()?), force_inverse: false }),
+        _ => None,
+    }
+}
+
+/// Debug command script, `OSRS_DO="t:interact:id,x,z,option;t:walk:x,z;..."` (seconds since
+/// start): sends server commands in order, for trying a chain of actions (open a door, walk
+/// through, close it) without finding things on screen.
+fn scripted_commands(time: Res<Time>, server: NonSend<ServerLink>, mut script: Local<Option<Vec<(f32, ClientCommand)>>>) {
+    let steps = script.get_or_insert_with(|| {
+        timed_steps("OSRS_DO")
+            .into_iter()
+            .filter_map(|(at, (command, args))| {
+                let parsed = scripted_command(&command, &args);
+                if parsed.is_none() {
+                    eprintln!("[client] OSRS_DO: cannot read \"{command}:{args}\"");
+                }
+                Some((at, parsed?))
+            })
+            .collect()
+    });
+    for command in due_steps(steps, time.elapsed_secs()) {
+        println!("[client] OSRS_DO: {command:?}");
+        server.link.send(command);
+    }
+}
+
+/// A timed debug script from the environment variable `var`: `t:command:args` steps separated by
+/// `;`, `t` in seconds since start, in the order given.
+fn timed_steps(var: &str) -> Vec<(f32, (String, String))> {
+    let text = std::env::var(var).unwrap_or_default();
+    text.split(';')
+        .filter_map(|step| {
+            let mut p = step.trim().splitn(3, ':');
+            Some((p.next()?.parse().ok()?, (p.next()?.to_owned(), p.next().unwrap_or("").to_owned())))
+        })
+        .collect()
+}
+
+/// Takes the steps of a timed script that are due by `now` off its front.
+fn due_steps<T>(steps: &mut Vec<(f32, T)>, now: f32) -> Vec<T> {
+    let due = steps.iter().take_while(|(at, _)| *at <= now).count();
+    steps.drain(..due).map(|(_, step)| step).collect()
+}
+
 /// TODO(remove): temporary debug hook, slated for removal once it is no longer needed (and not to be
 /// used without the user asking: it injects input into the live window).
 ///
@@ -1028,20 +1098,10 @@ fn scripted_input(
     time: Res<Time>,
     mut buttons: ResMut<ButtonInput<MouseButton>>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
-    mut script: Local<Option<Vec<(f32, String, String)>>>,
+    mut script: Local<Option<Vec<(f32, (String, String))>>>,
 ) {
-    let steps = script.get_or_insert_with(|| {
-        let text = std::env::var("OSRS_INPUT").unwrap_or_default();
-        text.split(';')
-            .filter_map(|step| {
-                let mut p = step.trim().splitn(3, ':');
-                Some((p.next()?.parse().ok()?, p.next()?.to_owned(), p.next()?.to_owned()))
-            })
-            .collect()
-    });
-    let now = time.elapsed_secs();
-    while steps.first().is_some_and(|(at, _, _)| *at <= now) {
-        let (_, action, arg) = steps.remove(0);
+    let steps = script.get_or_insert_with(|| timed_steps("OSRS_INPUT"));
+    for (action, arg) in due_steps(steps, time.elapsed_secs()) {
         let button = |name: &str| match name {
             "right" => MouseButton::Right,
             _ => MouseButton::Left,

@@ -255,6 +255,13 @@ impl CollisionMap {
             if !self.can_traverse(from, cardinal_b, size, respects) {
                 return false;
             }
+            // Nor cutting past the destination's own walls: each L's second leg, from the tile
+            // beside the start into the destination, must cross open edges too.
+            if !self.can_cross_cardinal_edge(from + cardinal_a, cardinal_b, size)
+                || !self.can_cross_cardinal_edge(from + cardinal_b, cardinal_a, size)
+            {
+                return false;
+            }
             if !self.can_enter_footprint(to, size, respects) {
                 return false;
             }
@@ -302,13 +309,10 @@ impl CollisionMap {
 
         // Each cardinal move checks the exit edge of the footprint's trailing side against the
         // matching entry edge one tile beyond it, once per row (east/west) or column (north/south).
-        let (exit_flag, enter_flag) = match dir {
-            Direction::East => (CollisionFlag::BLOCK_EAST, CollisionFlag::BLOCK_WEST),
-            Direction::West => (CollisionFlag::BLOCK_WEST, CollisionFlag::BLOCK_EAST),
-            Direction::North => (CollisionFlag::BLOCK_NORTH, CollisionFlag::BLOCK_SOUTH),
-            Direction::South => (CollisionFlag::BLOCK_SOUTH, CollisionFlag::BLOCK_NORTH),
-            _ => return false, // not a cardinal direction
-        };
+        if !dir.is_cardinal() {
+            return false;
+        }
+        let (exit_flag, enter_flag) = (edge_flag(dir), edge_flag(dir.opposite()));
 
         for i in 0..size {
             let (exit_tile, enter_tile) = match dir {
@@ -343,6 +347,17 @@ impl CollisionMap {
 
         let delta = (self.heights[exit_idx] as i32 - self.heights[enter_idx] as i32).abs();
         delta <= self.max_step_height
+    }
+}
+
+/// The wall bit on a tile's edge facing `dir` (a cardinal direction; 0 for any other).
+pub(crate) fn edge_flag(dir: Direction) -> u32 {
+    match dir {
+        Direction::East => CollisionFlag::BLOCK_EAST,
+        Direction::West => CollisionFlag::BLOCK_WEST,
+        Direction::North => CollisionFlag::BLOCK_NORTH,
+        Direction::South => CollisionFlag::BLOCK_SOUTH,
+        _ => 0,
     }
 }
 
@@ -533,6 +548,25 @@ mod tests {
         assert!(map.can_traverse(tc(0, 0), Direction::North, 1, ALL));
         assert!(!map.can_traverse(tc(0, 0), Direction::East, 1, ALL));
         assert!(!map.can_traverse(tc(0, 0), Direction::NorthEast, 1, ALL));
+    }
+
+    #[test]
+    fn diagonal_into_a_tile_walled_on_an_edge_facing_the_mover_is_rejected() {
+        // A wall on (1,1)'s south edge or on its west edge: neither is on (0,0)'s edges, so
+        // both cardinal steps from (0,0) are open, but each closes one L into (1,1).
+        for (beside, beside_flag, dest_flag) in [
+            (tc(1, 0), CollisionFlag::BLOCK_NORTH, CollisionFlag::BLOCK_SOUTH),
+            (tc(0, 1), CollisionFlag::BLOCK_EAST, CollisionFlag::BLOCK_WEST),
+        ] {
+            let mut map = test_grid::open(2, 2, 100);
+            map.add_flags(beside, beside_flag);
+            map.add_flags(tc(1, 1), dest_flag);
+
+            assert!(map.can_traverse(tc(0, 0), Direction::North, 1, ALL));
+            assert!(map.can_traverse(tc(0, 0), Direction::East, 1, ALL));
+            assert!(!map.can_traverse(tc(0, 0), Direction::NorthEast, 1, ALL), "wall {dest_flag:#x} on the destination");
+            assert!(!map.can_traverse(tc(1, 1), Direction::SouthWest, 1, ALL), "nor back out past it");
+        }
     }
 
     #[test]
