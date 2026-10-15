@@ -29,9 +29,16 @@ pub fn wall_edges(kind: u8, orientation: u8) -> &'static [(i32, i32, u32)] {
     }
 }
 
+/// The shape of a diagonal wall: it blocks its whole tile, as an object does, not an edge.
+pub const DIAGONAL_WALL: u8 = 9;
+
 impl CollisionMap {
-    /// Puts a wall piece's bits on the map (a door closing, or one opening into its new place).
+    /// Puts a wall piece's bits on the map (a door closing, or one opening into its new place). A
+    /// diagonal wall (a door on one) blocks its tile.
     pub fn add_wall(&mut self, tile: TileCoord, kind: u8, orientation: u8) {
+        if kind == DIAGONAL_WALL {
+            self.add_flags(tile, CollisionFlag::BLOCK_OBJECT);
+        }
         for &(dx, dz, bits) in wall_edges(kind, orientation) {
             self.add_flags(tile.offset(dx, dz), bits);
         }
@@ -40,6 +47,9 @@ impl CollisionMap {
     /// Takes a wall piece's bits off the map. Like the game's, this clears the bits whatever else
     /// set them.
     pub fn remove_wall(&mut self, tile: TileCoord, kind: u8, orientation: u8) {
+        if kind == DIAGONAL_WALL {
+            self.remove_flags(tile, CollisionFlag::BLOCK_OBJECT);
+        }
         for &(dx, dz, bits) in wall_edges(kind, orientation) {
             self.remove_flags(tile.offset(dx, dz), bits);
         }

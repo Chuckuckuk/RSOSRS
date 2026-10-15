@@ -9,8 +9,8 @@
 //! - The player walks to where the door can be used from (`TargetSpec::wall_reach`) and it pops
 //!   open or shut, with no animation but a door's or a gate's sound (`DoorDef::sound`). A double
 //!   door's or gate's leaves move one at a time: only the one chosen.
-//! - An opened door swings into the next tile and turns (`DoorSwing::moves`). Its wall moves with
-//!   it, so the doorway can be walked through.
+//! - An opened door swings into the next tile and turns (`DoorSwing::moves`; on a diagonal wall
+//!   `LeafMove::DIAGONAL`). Its wall moves with it, so the doorway can be walked through.
 //! - A door that a player opened or closed goes back by itself after [`DOOR_RESET_TICKS`].
 //! - Closing the same door [`STUCK_CLOSE_LIMIT`] times as fast as the game allows (each close
 //!   needs an open in between, a tick each) gets "The door seems to be stuck." instead.
@@ -22,7 +22,7 @@ use super::firemaking::{LightAction, RestAction, TendAction, ASHES, BONFIRE_LOC,
 use super::gathering::GatherAction;
 use super::scenery::{Loc, LocKey};
 use super::world::World;
-use crate::collision::wall_edges;
+use crate::collision::{wall_edges, DIAGONAL_WALL};
 use crate::data::{DoorDef, LeafMove};
 use crate::pathfinding::{rotate, TargetSpec};
 use crate::tiles::TileCoord;
@@ -136,6 +136,9 @@ impl World {
     /// back): the frame in line with the wall around it is the real one.
     fn leaf_step(&self, door: &DoorDef, leaf: Loc) -> Option<LeafMove> {
         let forms = door.leaf(leaf.id)?;
+        if leaf.kind == DIAGONAL_WALL {
+            return Some(LeafMove::DIAGONAL);
+        }
         if door.state_of(leaf.id) == Some(false) {
             return self.frame_step(door, leaf);
         }
@@ -196,8 +199,13 @@ impl World {
             return true;
         }
 
-        let tiles = TargetSpec::wall_reach(&self.map, current.tile, current.orientation);
-        match self.approach(TargetSpec::any_of(&tiles)) {
+        // a door on a diagonal wall is used from beside it, like an object
+        let reach = if current.kind == DIAGONAL_WALL {
+            TargetSpec::adjacent(current.tile, 1, 1)
+        } else {
+            TargetSpec::any_of(&TargetSpec::wall_reach(&self.map, current.tile, current.orientation))
+        };
+        match self.approach(reach) {
             Approach::There => {}
             Approach::OnTheWay => return true,
             Approach::NoWay => {
@@ -608,6 +616,77 @@ mod tests {
 
         assert!(messages.is_empty(), "{messages:?}");
         assert_eq!(world.scenery_changes().count(), 0, "shut");
+    }
+
+    fn diagonal(id: u32, x: i32, z: i32, orientation: u8) -> Loc {
+        Loc { id, tile: tc(x, z), kind: DIAGONAL_WALL, orientation, size: (1, 1) }
+    }
+
+    /// A flat world split by a diagonal wall along x = z (south-west to north-east), with `door`
+    /// set into it, the player standing at (3, 0) on its south-east side.
+    fn diagonally_walled(door: Loc) -> World {
+        let mut world = dev_open_floor_world(10, 4242, tc(3, 0), PlayerConfig::default());
+        world.set_registry(Rc::new(Registry::builtin()));
+        for k in -10..=10 {
+            if !door.covers(tc(k, k)) && !door.covers(tc(k, k + 1)) {
+                world.map.add_wall(tc(k, k), DIAGONAL_WALL, 0);
+            }
+        }
+        world.map.add_wall(door.tile, door.kind, door.orientation);
+        world.add_scenery(door);
+        world
+    }
+
+    /// Walks the player to (0, 3), across the diagonal wall, and says whether it got there.
+    fn walks_across(world: &mut World) -> bool {
+        world.player_request_walk_to(tc(0, 3), false);
+        run(world, 40);
+        world.player.tile() == tc(0, 3)
+    }
+
+    #[test]
+    fn a_door_on_a_diagonal_wall_swings_onto_the_tile_beside_it() {
+        let door = diagonal(1535, 0, 0, 0);
+        let mut world = diagonally_walled(door);
+        assert!(!walks_across(&mut world), "the closed door blocks its tile");
+
+        world.player_interact_object(1535, door.tile, "Open").unwrap();
+        run(&mut world, 20);
+        let changes: Vec<_> = world.scenery_changes().copied().collect();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].replacement, diagonal(1536, 0, 1, 1), "open: on the tile north of it, turned a quarter");
+        assert_eq!(world.map.flags_at(door.tile) & CollisionFlag::BLOCK_OBJECT, 0, "the doorway is clear");
+        assert_ne!(world.map.flags_at(tc(0, 1)) & CollisionFlag::BLOCK_OBJECT, 0, "the open door blocks where it stands");
+        assert!(walks_across(&mut world));
+
+        world.player_interact_object(1536, tc(0, 1), "Close").unwrap();
+        run(&mut world, 20);
+        assert!(world.scenery_changes().next().is_none(), "shut");
+        assert_ne!(world.map.flags_at(door.tile) & CollisionFlag::BLOCK_OBJECT, 0);
+        assert_eq!(world.map.flags_at(tc(0, 1)) & CollisionFlag::BLOCK_OBJECT, 0);
+    }
+
+    #[test]
+    fn a_door_on_a_diagonal_wall_the_map_places_open_can_be_shut() {
+        let open = diagonal(1536, 0, 1, 1);
+        let mut world = diagonally_walled(open);
+        assert!(walks_across(&mut world));
+
+        world.player_interact_object(1536, open.tile, "Close").unwrap();
+        run(&mut world, 20);
+        let changes: Vec<_> = world.scenery_changes().copied().collect();
+        assert_eq!(changes[0].replacement, diagonal(1535, 0, 0, 0), "shut in its gap in the wall");
+        world.player_request_walk_to(tc(3, 0), false);
+        run(&mut world, 40);
+        assert_ne!(world.player.tile(), tc(3, 0), "it cannot be walked back through");
+    }
+
+    #[test]
+    fn swinging_a_diagonal_door_open_and_back_is_the_same_door() {
+        for orientation in 0..4 {
+            let shut = diagonal(1535, 7, 7, orientation);
+            assert_eq!(unswung(swung(shut, LeafMove::DIAGONAL, 1536), LeafMove::DIAGONAL, 1535), shut, "orientation {orientation}");
+        }
     }
 
     #[test]

@@ -10,6 +10,10 @@
 //! - Two closed doors side by side on one wall, same name and turn, are the leaves of a pair: a
 //!   double door, or a gate when they are called "Gate".
 //!
+//! A door on a diagonal wall (shape 9) is the same object as a straight one and swings by
+//! `LeafMove::DIAGONAL`, so it needs no entry of its own: the report counts those whose object
+//! has a door type as covered.
+//!
 //! Doors with other options (locked, "Pick-lock", "Knock-at", quest doors), on other wall shapes,
 //! or with no clear open form are left out and counted in the report.
 
@@ -54,17 +58,23 @@ fn main() -> Result<()> {
     let defs = Configs::new(&cache)?.objects()?;
     let maps = cache.index(idx::MAPS)?;
 
-    // every wall-shaped placement with an "Open" option, anywhere
+    // every wall-shaped placement (straight, corner or diagonal) with an "Open" option, anywhere
     let mut openable: Vec<Placed> = Vec::new();
+    // map squares whose objects could not be read (or that have none), to report
+    let (mut read, mut unreadable) = (0, Vec::new());
     for &group in maps.groups.keys() {
-        let Ok(files) = cache.read_files(&maps, group) else { continue };
-        if files.len() < 2 {
-            continue;
-        }
+        let files = match cache.read_files(&maps, group) {
+            Ok(files) if files.len() >= 2 => files,
+            _ => {
+                unreadable.push(((group >> 8) as i32, (group & 0xff) as i32));
+                continue;
+            }
+        };
+        read += 1;
         let (rx, ry) = ((group >> 8) as i32, (group & 0xff) as i32);
         for p in locs::decode(&files[1].1) {
             let Some(def) = defs.get(&p.id) else { continue };
-            if p.kind <= 3 && options(def).iter().any(|o| o.eq_ignore_ascii_case("Open")) {
+            if matches!(p.kind, 0..=3 | 9) && options(def).iter().any(|o| o.eq_ignore_ascii_case("Open")) {
                 let tile = (rx * 64 + p.x as i32, ry * 64 + p.z as i32, p.plane);
                 openable.push(Placed { id: p.id, tile, kind: p.kind, orientation: p.orientation });
             }
@@ -195,7 +205,11 @@ fn main() -> Result<()> {
     let mut left_out: BTreeMap<String, usize> = BTreeMap::new();
     for p in &openable {
         let def = &defs[&p.id];
-        let reason = if p.kind != 0 {
+        let reason = if p.kind == 9 && covered.contains(&p.id) && only(def, "Open") {
+            "covered (diagonal)"
+        } else if p.kind == 9 {
+            "diagonal, no door type"
+        } else if p.kind != 0 {
             "other wall shape"
         } else if !only(def, "Open") {
             "more than Open"
@@ -209,13 +223,17 @@ fn main() -> Result<()> {
             "partner leaf has no open form"
         };
         *tally.entry(reason).or_default() += 1;
-        if reason != "covered" {
+        if !reason.starts_with("covered") {
             *left_out.entry(format!("{reason}: {} '{}' {:?}", p.id, def.name, options(def))).or_default() += 1;
         }
     }
     let count = |swing: &str| doors.iter().filter(|(_, s, _)| *s == swing).count();
+    eprintln!("map squares read: {read}; unreadable or without objects: {}", unreadable.len());
+    if !unreadable.is_empty() {
+        eprintln!("  e.g. {:?}", &unreadable[..unreadable.len().min(12)]);
+    }
     eprintln!(
-        "{} door types ({} single, {} double, {} gate) from {} openable wall placements",
+        "{} door types ({} single, {} double, {} gate) from {} openable wall placements (straight, corner, diagonal)",
         doors.len(),
         count("single"),
         count("double"),

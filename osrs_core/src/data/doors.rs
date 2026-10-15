@@ -21,6 +21,14 @@ pub struct LeafMove {
     pub turn: i32,
 }
 
+impl LeafMove {
+    /// How a door on a diagonal wall (shape 9) swings open, in the frame of one turned 0 (the
+    /// wall running south-west to north-east): onto the tile north of it, a quarter turn
+    /// clockwise. Taken from the diagonal doors the map places open (East Ardougne's, for one),
+    /// each standing so beside a gap in its diagonal wall. Diagonal doors are single leaves.
+    pub const DIAGONAL: LeafMove = LeafMove { offset: (0, 1), turn: 1 };
+}
+
 /// How a door's leaves swing open. Leaves are taken in order along the wall: in the west-edge
 /// frame, the first is the southern one. Each leaf of a pair opens and closes on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
