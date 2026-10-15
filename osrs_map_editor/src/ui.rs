@@ -572,8 +572,11 @@ fn hover_tooltip(ctx: &egui::Context, editor: &mut Editor, catalog: &Catalog, st
         .fixed_pos(pointer + egui::vec2(16.0, 16.0))
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
+                // one line per thing, however near the window's edge the tooltip is
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                 for (_, p) in here.iter().take(8) {
-                    ui.label(format!("{} ({}) {}", catalog.object_name(p.id), p.id, kind_name(p.kind)));
+                    let name = catalog.defs.get(&p.id).map(|d| d.name.as_str()).filter(|n| !n.is_empty() && *n != "null");
+                    ui.label(format!("{} <{}> {}", name.unwrap_or("unnamed"), p.id, kind_name(p.kind)));
                 }
                 if here.len() > 8 {
                     ui.label(format!("and {} more", here.len() - 8));
