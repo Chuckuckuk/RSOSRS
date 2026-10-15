@@ -69,10 +69,12 @@ The **left panel** holds the tools and the palette, which has four tabs:
 Choosing an entry switches to the Place tool. An object being placed is drawn where it would go,
 with its footprint outlined.
 
-The **right panel** has four parts:
+Resting the mouse on a tile for a second shows a tooltip listing what stands there on the current
+plane (objects and NPC spawns). It floats over the world, so the panels never move.
+
+The **right panel** has three parts:
 
 * the selection;
-* what is under the mouse on the current plane;
 * a minimap preview of the square in view, drawn by the game's own minimap code;
 * the project: NPC spawns and edited squares, with links to go there, and a "Go to tile" box.
 

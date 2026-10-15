@@ -82,6 +82,8 @@ pub struct UiState {
     /// The project's built cache and whether it has all the edits, as of an editor generation and
     /// `builds_epoch`.
     play_status: Option<((u64, u32), Option<PathBuf>, bool)>,
+    /// The world tile the mouse is resting on, and since when (egui time, seconds).
+    hovered: Option<((i32, i32), f64)>,
 }
 
 impl Default for UiState {
@@ -101,6 +103,7 @@ impl Default for UiState {
             builds_epoch: 0,
             caches: None,
             play_status: None,
+            hovered: None,
         }
     }
 }
@@ -164,7 +167,7 @@ pub fn editor_ui(
     });
     egui::Panel::right("inspector").resizable(true).default_size(280.0).show(&mut root, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            inspector(ui, &mut editor, &catalog, &view);
+            inspector(ui, &mut editor, &catalog);
             ui.separator();
             if minimap.open {
                 minimap_panel(ui, &ctx, &mut editor, &catalog, &mut minimap, &mut sprites, &view);
@@ -177,6 +180,7 @@ pub fn editor_ui(
     // what the panels leave is the world: labels are drawn there only
     let painter = root.painter_at(root.available_rect_before_wrap());
     world_labels(&ctx, &painter, &editor, &catalog, &mut sprites, &view);
+    hover_tooltip(&ctx, &mut editor, &catalog, &mut state, &view);
     if std::mem::take(&mut state.play_requested) {
         let spawn = state.play_here.then_some(view.focus.tile);
         request_play(&mut editor, &mut state, spawn);
@@ -495,7 +499,7 @@ fn palette(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, state: &mu
     }
 }
 
-fn inspector(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view: &View) {
+fn inspector(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog) {
     ui.heading("Selected");
     match editor.selected.clone() {
         None => {
@@ -529,24 +533,56 @@ fn inspector(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view: &V
             }
         }
     }
-    ui.separator();
-    ui.heading("Under the mouse");
-    let Some(tile) = view.hover.tile() else {
-        ui.label("—");
-        return;
+}
+
+/// How long the mouse rests on a tile before what is on it is shown, seconds.
+const HOVER_DELAY: f64 = 1.0;
+
+/// Once the mouse has rested on a world tile for [`HOVER_DELAY`], a tooltip beside it lists what
+/// stands there on the plane being edited. It floats over the world, so nothing else moves.
+fn hover_tooltip(ctx: &egui::Context, editor: &mut Editor, catalog: &Catalog, state: &mut UiState, view: &View) {
+    let now = ctx.input(|i| i.time);
+    let resting = view.hover.in_world && !ctx.input(|i| i.pointer.any_down());
+    let tile = view.hover.tile().filter(|_| resting);
+    let since = match (tile, state.hovered) {
+        (Some(t), Some((was, since))) if t == was => since,
+        (Some(t), _) => {
+            state.hovered = Some((t, now));
+            now
+        }
+        (None, _) => {
+            state.hovered = None;
+            return;
+        }
     };
-    let plane = editor.plane;
-    let here = editor.placements_at(tile, plane, catalog);
+    let waited = now - since;
+    if waited < HOVER_DELAY {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(HOVER_DELAY - waited));
+        return;
+    }
+    let (Some(tile), Some(pointer)) = (tile, ctx.pointer_hover_pos()) else { return };
+    let here = editor.placements_at(tile, editor.plane, catalog);
     let npcs = editor.npcs_at(tile);
     if here.is_empty() && npcs.is_empty() {
-        ui.label(format!("nothing here on plane {}", plane + 1));
+        return;
     }
-    for (_, p) in here.iter().take(8) {
-        ui.label(format!("{} ({}) {}", catalog.object_name(p.id), p.id, kind_name(p.kind)));
-    }
-    for i in npcs {
-        ui.label(format!("NPC {}", catalog.npc_name(&editor.project.npc_spawns[i].npc)));
-    }
+    egui::Area::new("under_the_mouse".into())
+        .order(egui::Order::Tooltip)
+        .interactable(false)
+        .fixed_pos(pointer + egui::vec2(16.0, 16.0))
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                for (_, p) in here.iter().take(8) {
+                    ui.label(format!("{} ({}) {}", catalog.object_name(p.id), p.id, kind_name(p.kind)));
+                }
+                if here.len() > 8 {
+                    ui.label(format!("and {} more", here.len() - 8));
+                }
+                for i in npcs {
+                    ui.label(format!("NPC {}", catalog.npc_name(&editor.project.npc_spawns[i].npc)));
+                }
+            });
+        });
 }
 
 fn minimap_panel(
