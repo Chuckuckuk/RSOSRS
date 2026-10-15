@@ -1,4 +1,4 @@
-use super::attack_definition::AttackDefinition;
+use super::targeted_attack::TargetedAttack;
 use super::player_reaction_state::PlayerReactionState;
 use super::protection_prayer::ProtectionPrayer;
 use super::reaction_requirement::ReactionKind;
@@ -8,7 +8,7 @@ use crate::tiles::TileCoord;
 /// Turns an attack's reaction requirement plus the player's live state into a damage multiplier
 /// (0 = fully avoided, 1 = full damage).
 pub fn get_damage_multiplier(
-    attack: &AttackDefinition,
+    attack: &TargetedAttack,
     reaction_state: Option<&PlayerReactionState>,
     hazard_origin_tile: TileCoord,
     target_tile: TileCoord,
@@ -61,8 +61,8 @@ mod tests {
     use super::*;
     use crate::combat::{AttackStyle, ReactionRequirement};
 
-    fn make_attack(reaction: ReactionRequirement, prayer_penetration: f32) -> AttackDefinition {
-        AttackDefinition::new("Test", 0, 1, AttackStyle::Melee)
+    fn make_attack(reaction: ReactionRequirement, prayer_penetration: f32) -> TargetedAttack {
+        TargetedAttack::new(AttackStyle::Melee)
             .with_prayer_penetration(prayer_penetration)
             .with_reaction(reaction)
     }
@@ -71,7 +71,7 @@ mod tests {
         PlayerReactionState { active_prayer: prayer, ..Default::default() }
     }
 
-    fn multiplier(attack: &AttackDefinition, state: Option<&PlayerReactionState>) -> f32 {
+    fn multiplier(attack: &TargetedAttack, state: Option<&PlayerReactionState>) -> f32 {
         get_damage_multiplier(attack, state, TileCoord::default(), TileCoord::default())
     }
 

@@ -149,8 +149,8 @@ mod tests {
     use super::*;
     use crate::actors::EntityId;
     use crate::combat::{
-        AttackDefinition, AttackPattern, AttackStyle, FixedRotationPattern, GroundTarget, HazardAnchor,
-        ProtectionPrayer, ReactionRequirement,
+        AttackDefinition, AttackPattern, AttackStyle, FixedRotationPattern, GroundDamage, GroundTarget,
+        HazardAnchor, ProtectionPrayer, ReactionRequirement,
     };
     use crate::encounters::{Phase, PhaseTrigger, TriggerAction, TriggerBinding};
     use crate::sim::config::{BossConfig, HealerConfig, NpcConfig, PassiveConfig};
@@ -302,7 +302,7 @@ mod tests {
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig::default());
 
-        let slam = AttackDefinition::new("Slam", 15, 2, AttackStyle::Ranged)
+        let slam = AttackDefinition::targeted("Slam", 15, 2, AttackStyle::Ranged)
             .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Ranged))
             .shared();
         let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![slam]));
@@ -356,7 +356,7 @@ mod tests {
     fn a_when_entity_died_trigger_fires_on_the_tick_of_the_killing_blow() {
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
-        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![AttackDefinition::new(
+        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![AttackDefinition::targeted(
             "Slam",
             15,
             2,
@@ -376,13 +376,14 @@ mod tests {
     /// A boss at (0, 8), fighting a player at (0, 0), whose only attack is a ground-targeted rock
     /// fall that lands 3 ticks after it is released. The boss has 10 hitpoints so a test can kill it.
     fn rock_fall_world(target: GroundTarget) -> (World, EntityId) {
+        rock_world_with(AttackDefinition::ground("Rock", 15, 0, target, GroundDamage::Fixed(30)))
+    }
+
+    fn rock_world_with(rock: AttackDefinition) -> (World, EntityId) {
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
-        let rock = AttackDefinition::new("Rock", 3, 0, AttackStyle::Magic)
-            .with_impact_delay_ticks(3)
-            .with_ground_target(target)
-            .shared();
-        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![rock]));
+        let pattern: Rc<dyn AttackPattern> =
+            Rc::new(FixedRotationPattern::new(vec![rock.with_impact_delay_ticks(3).shared()]));
         let phase = Phase::new("Main", pattern, None);
         world.configure_boss(boss, vec![phase.clone()], phase, vec![]);
         (world, boss)
@@ -415,6 +416,39 @@ mod tests {
 
         assert!(world.log().iter().any(|l| l.starts_with("Boss aims Rock")));
         assert_eq!(rock_hits(&world), 0, "{:?}", world.log());
+    }
+
+    #[test]
+    fn a_ground_attack_never_misses_and_deals_its_plain_damage() {
+        let (mut world, _) = rock_fall_world(GroundTarget::square(HazardAnchor::Target, 0));
+        let before = world.player.mover.actor.health().current();
+
+        run_ticks(&mut world, 4);
+
+        assert_eq!(rock_hits(&world), 1);
+        assert_eq!(before - world.player.mover.actor.health().current(), 30);
+    }
+
+    #[test]
+    fn the_one_reducing_prayer_cuts_a_ground_attack_without_negating_it() {
+        let target = || GroundTarget::square(HazardAnchor::Target, 0);
+        let reducible = || {
+            AttackDefinition::ground("Rock", 15, 0, target(), GroundDamage::Fixed(30))
+                .with_prayer_reduction(ProtectionPrayer::Melee, 0.5)
+        };
+        let lost = |prayer: Option<ProtectionPrayer>| {
+            let (mut world, _) = rock_world_with(reducible());
+            if let Some(prayer) = prayer {
+                world.player.set_active_prayer(prayer);
+            }
+            let before = world.player.mover.actor.health().current();
+            run_ticks(&mut world, 4);
+            before - world.player.mover.actor.health().current()
+        };
+
+        assert_eq!(lost(None), 30);
+        assert_eq!(lost(Some(ProtectionPrayer::Melee)), 15, "the right prayer halves it");
+        assert_eq!(lost(Some(ProtectionPrayer::Magic)), 30, "the wrong one does nothing");
     }
 
     #[test]

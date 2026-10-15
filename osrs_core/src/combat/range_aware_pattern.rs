@@ -81,11 +81,11 @@ mod tests {
     use crate::rng::DotNetRandom;
 
     fn melee() -> Rc<AttackDefinition> {
-        AttackDefinition::new("Melee", 0, 1, AttackStyle::Melee).shared()
+        AttackDefinition::targeted("Melee", 0, 1, AttackStyle::Melee).shared()
     }
 
     fn magic() -> Rc<AttackDefinition> {
-        AttackDefinition::new("Magic", 10, 1, AttackStyle::Magic).shared()
+        AttackDefinition::targeted("Magic", 10, 1, AttackStyle::Magic).shared()
     }
 
     fn context(counter: i32, target: TileCoord) -> AttackSelectionContext {

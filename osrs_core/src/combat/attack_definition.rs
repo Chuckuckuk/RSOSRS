@@ -1,10 +1,13 @@
 use std::rc::Rc;
 
 use super::attack_style::AttackStyle;
+use super::ground_attack::{GroundAttack, GroundDamage, PrayerReduction};
 use super::ground_target::GroundTarget;
 use super::max_hit_source::MaxHitSource;
+use super::protection_prayer::ProtectionPrayer;
 use super::reaction_requirement::ReactionRequirement;
 use super::status_effect::StatusEffectDefinition;
+use super::targeted_attack::TargetedAttack;
 use crate::model::{DamageType, Modifier};
 use crate::pathfinding::TargetSpec;
 use crate::tiles::TileCoord;
@@ -13,44 +16,26 @@ use crate::tiles::TileCoord;
 /// state that is currently telegraphing it and the pending-attack queue that later rolls it, so
 /// "the same attack" stays pointer-identical like the C# reference type.
 ///
-/// The C# constructor has many defaulted parameters; here `new` takes the required four plus the
-/// style and the optional ones are set with the `with_*` builders (each validates like the C#
-/// constructor and panics on bad data).
+/// This holds what every attack has: when it happens (telegraph, delay, cooldown), how far it
+/// reaches, and how it looks and sounds. What it does is its `kind`: a `TargetedAttack` is rolled
+/// against a defender (accuracy, style, prayers), a `GroundAttack` hits whoever is standing on a set
+/// of tiles with a plain amount of damage.
+///
+/// The optional fields are set with the `with_*` builders (each validates like the C# constructor
+/// and panics on bad data, including a builder for a field the attack's kind does not have).
 #[derive(Debug, Clone)]
 pub struct AttackDefinition {
     pub name: String,
     pub range: i32,
     pub telegraph_ticks: i32,
-    pub style: AttackStyle,
-    /// Fraction of damage that gets through a CORRECT protection prayer (0 = fully blocked,
-    /// 1 = "ignore"); see `reaction_resolver`.
-    pub prayer_penetration: f32,
-    pub reaction: ReactionRequirement,
-    /// Ticks between the telegraph ending and the accuracy/damage roll ("Doom-style" attacks).
+    /// Ticks between the telegraph ending and the roll or landing ("Doom-style" attacks, and every
+    /// ground attack).
     pub impact_delay_ticks: i32,
-    /// Ticks between the roll and the damage actually landing.
-    pub projectile_travel_ticks: i32,
-    pub on_hit_status_effect: Option<StatusEffectDefinition>,
-    /// Aims the attack at the ground instead of at the player: it covers these tiles and, after
-    /// `impact_delay_ticks`, rolls against whoever is standing on them.
-    pub ground_target: Option<GroundTarget>,
-    /// Which defence bonus this attack rolls against (stab/slash/crush for melee). Defaults to the
-    /// style's usual type.
-    pub damage_type: DamageType,
-    pub max_hit: MaxHitSource,
-    /// Conditional effects on this attack's rolls (gear, set, special-attack and monster effects).
-    pub modifiers: Vec<Modifier>,
-    /// Free-form flags that `Condition::Flag` reads (`on_task`, `special`, ...).
-    pub flags: Vec<String>,
-    /// Separate accuracy/damage rolls per use (dragon dagger special: 2, dragon claws: 4). The
-    /// caller rolls and enqueues each hit on its own, so each lands in the damage buffer on its own.
-    pub hit_count: i32,
     /// Ticks the attacker must wait after this attack resolves before it may begin its next
     /// telegraph. `with_attack_speed` derives it from an OSRS attack speed; 0 keeps the original
     /// back-to-back behaviour.
     pub cooldown_ticks: i32,
-    /// Skips the accuracy roll entirely (and its RNG draw): the hit always connects.
-    pub always_hits: bool,
+    pub on_hit_status_effect: Option<StatusEffectDefinition>,
     /// The cache sequence the attacker plays for this attack, if it has its own (presentation
     /// only: the rules never read it).
     pub animation: Option<u32>,
@@ -63,40 +48,82 @@ pub struct AttackDefinition {
     /// spell's impact). Presentation only.
     pub sound: Option<u32>,
     pub hit_sound: Option<u32>,
+    pub kind: AttackKind,
+}
+
+/// What an attack does, and the data only that kind of attack has.
+#[derive(Debug, Clone)]
+pub enum AttackKind {
+    /// Rolled against a defender.
+    Targeted(TargetedAttack),
+    /// Aimed at tiles; never rolls accuracy.
+    Ground(GroundAttack),
 }
 
 impl AttackDefinition {
-    pub fn new(
+    /// An attack rolled against a defender, in the given combat style.
+    pub fn targeted(name: impl Into<String>, range: i32, telegraph_ticks: i32, style: AttackStyle) -> Self {
+        Self::with_kind(name.into(), range, telegraph_ticks, AttackKind::Targeted(TargetedAttack::new(style)))
+    }
+
+    /// An attack aimed at the ground: after `impact_delay_ticks` (set with
+    /// `with_impact_delay_ticks`) it deals `damage` to whoever stands on the tiles `target` picks.
+    pub fn ground(
         name: impl Into<String>,
         range: i32,
         telegraph_ticks: i32,
-        style: AttackStyle,
+        target: GroundTarget,
+        damage: GroundDamage,
     ) -> Self {
+        Self::with_kind(name.into(), range, telegraph_ticks, AttackKind::Ground(GroundAttack::new(target, damage)))
+    }
+
+    fn with_kind(name: String, range: i32, telegraph_ticks: i32, kind: AttackKind) -> Self {
         Self {
-            name: name.into(),
+            name,
             range,
             telegraph_ticks,
-            style,
-            prayer_penetration: 0.0,
-            reaction: ReactionRequirement::default(),
             impact_delay_ticks: 0,
-            projectile_travel_ticks: 0,
-            on_hit_status_effect: None,
-            ground_target: None,
-            damage_type: DamageType::default_for(style),
-            max_hit: MaxHitSource::Derived,
-            modifiers: Vec::new(),
-            flags: Vec::new(),
-            hit_count: 1,
-            always_hits: false,
             cooldown_ticks: 0,
+            on_hit_status_effect: None,
             animation: None,
             projectile: None,
             target_graphic: None,
             impact_graphic: None,
             sound: None,
             hit_sound: None,
+            kind,
         }
+    }
+
+    pub fn targeted_part(&self) -> Option<&TargetedAttack> {
+        match &self.kind {
+            AttackKind::Targeted(targeted) => Some(targeted),
+            AttackKind::Ground(_) => None,
+        }
+    }
+
+    /// The targeted part of an attack that is known to be one: a player's swing, or one waiting in
+    /// a defender's queue. Panics for a ground attack, which can be neither.
+    pub fn expect_targeted(&self) -> &TargetedAttack {
+        self.targeted_part().unwrap_or_else(|| panic!("'{}' is a ground attack; it is never rolled against a defender", self.name))
+    }
+
+    pub fn ground_part(&self) -> Option<&GroundAttack> {
+        match &self.kind {
+            AttackKind::Ground(ground) => Some(ground),
+            AttackKind::Targeted(_) => None,
+        }
+    }
+
+    /// Applies `change` to the targeted part. Panics for a ground attack, which has none: setting
+    /// an accuracy modifier on a boulder is a data bug, not something to ignore.
+    fn change_targeted(mut self, builder: &str, change: impl FnOnce(TargetedAttack) -> TargetedAttack) -> Self {
+        match self.kind {
+            AttackKind::Targeted(targeted) => self.kind = AttackKind::Targeted(change(targeted)),
+            AttackKind::Ground(_) => panic!("`{builder}` only applies to a targeted attack, and '{}' is a ground attack", self.name),
+        }
+        self
     }
 
     /// Makes consecutive uses of this attack resolve exactly `speed_ticks` apart (OSRS attack
@@ -109,58 +136,9 @@ impl AttackDefinition {
         self
     }
 
-    pub fn with_damage_type(mut self, damage_type: DamageType) -> Self {
-        assert_eq!(damage_type.style(), self.style, "damage type must belong to the attack's style");
-        self.damage_type = damage_type;
-        self
-    }
-
-    pub fn with_max_hit(mut self, max_hit: MaxHitSource) -> Self {
-        self.max_hit = max_hit;
-        self
-    }
-
-    pub fn with_modifiers(mut self, modifiers: Vec<Modifier>) -> Self {
-        self.modifiers = modifiers;
-        self
-    }
-
-    pub fn with_flags(mut self, flags: Vec<String>) -> Self {
-        self.flags = flags;
-        self
-    }
-
-    pub fn with_hit_count(mut self, hit_count: i32) -> Self {
-        assert!(hit_count >= 1, "hit_count must be at least 1");
-        self.hit_count = hit_count;
-        self
-    }
-
-    pub fn with_always_hits(mut self, always_hits: bool) -> Self {
-        self.always_hits = always_hits;
-        self
-    }
-
-    pub fn with_prayer_penetration(mut self, prayer_penetration: f32) -> Self {
-        assert!((0.0..=1.0).contains(&prayer_penetration), "prayer_penetration must be within [0, 1]");
-        self.prayer_penetration = prayer_penetration;
-        self
-    }
-
-    pub fn with_reaction(mut self, reaction: ReactionRequirement) -> Self {
-        self.reaction = reaction;
-        self
-    }
-
     pub fn with_impact_delay_ticks(mut self, impact_delay_ticks: i32) -> Self {
         assert!(impact_delay_ticks >= 0, "impact_delay_ticks must not be negative");
         self.impact_delay_ticks = impact_delay_ticks;
-        self
-    }
-
-    pub fn with_projectile_travel_ticks(mut self, projectile_travel_ticks: i32) -> Self {
-        assert!(projectile_travel_ticks >= 0, "projectile_travel_ticks must not be negative");
-        self.projectile_travel_ticks = projectile_travel_ticks;
         self
     }
 
@@ -187,8 +165,57 @@ impl AttackDefinition {
         self
     }
 
-    pub fn with_ground_target(mut self, ground_target: GroundTarget) -> Self {
-        self.ground_target = Some(ground_target);
+    // ---- targeted-only builders ----
+
+    pub fn with_damage_type(self, damage_type: DamageType) -> Self {
+        self.change_targeted("with_damage_type", |t| t.with_damage_type(damage_type))
+    }
+
+    pub fn with_max_hit(self, max_hit: MaxHitSource) -> Self {
+        self.change_targeted("with_max_hit", |t| t.with_max_hit(max_hit))
+    }
+
+    pub fn with_modifiers(self, modifiers: Vec<Modifier>) -> Self {
+        self.change_targeted("with_modifiers", |t| t.with_modifiers(modifiers))
+    }
+
+    pub fn with_flags(self, flags: Vec<String>) -> Self {
+        self.change_targeted("with_flags", |t| t.with_flags(flags))
+    }
+
+    pub fn with_hit_count(self, hit_count: i32) -> Self {
+        self.change_targeted("with_hit_count", |t| t.with_hit_count(hit_count))
+    }
+
+    pub fn with_always_hits(self, always_hits: bool) -> Self {
+        self.change_targeted("with_always_hits", |t| t.with_always_hits(always_hits))
+    }
+
+    pub fn with_prayer_penetration(self, prayer_penetration: f32) -> Self {
+        self.change_targeted("with_prayer_penetration", |t| t.with_prayer_penetration(prayer_penetration))
+    }
+
+    pub fn with_reaction(self, reaction: ReactionRequirement) -> Self {
+        self.change_targeted("with_reaction", |t| t.with_reaction(reaction))
+    }
+
+    pub fn with_projectile_travel_ticks(self, projectile_travel_ticks: i32) -> Self {
+        self.change_targeted("with_projectile_travel_ticks", |t| t.with_projectile_travel_ticks(projectile_travel_ticks))
+    }
+
+    // ---- ground-only builders ----
+
+    /// The one protection prayer that cuts this ground attack's damage without negating it:
+    /// `penetration` of the damage still gets through when it is active.
+    pub fn with_prayer_reduction(mut self, prayer: ProtectionPrayer, penetration: f32) -> Self {
+        assert!(prayer != ProtectionPrayer::None, "a prayer reduction needs a prayer");
+        assert!((0.0..=1.0).contains(&penetration), "penetration must be within [0, 1]");
+        match &mut self.kind {
+            AttackKind::Ground(ground) => ground.prayer_reduction = Some(PrayerReduction { prayer, penetration }),
+            AttackKind::Targeted(_) => {
+                panic!("`with_prayer_reduction` only applies to a ground attack, and '{}' is a targeted attack", self.name)
+            }
+        }
         self
     }
 
@@ -198,10 +225,10 @@ impl AttackDefinition {
     }
 
     /// Whether this is a melee attack at base reach (range 1): it must be orthogonally adjacent
-    /// to the attacker's footprint. A melee attack with a longer reach (a halberd's 2) is measured
-    /// like any other: within `range` tiles.
+    /// to the attacker's footprint. A melee attack with a longer reach (a halberd's 2), and every
+    /// ground attack, is measured like any other: within `range` tiles.
     pub fn is_melee_reach(&self) -> bool {
-        self.style == AttackStyle::Melee && self.range <= 1
+        self.targeted_part().is_some_and(|targeted| targeted.style == AttackStyle::Melee) && self.range <= 1
     }
 
     /// The target spec an attacker standing at `attacker_tile` with the given footprint must
@@ -218,34 +245,69 @@ impl AttackDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::combat::HazardAnchor;
+
+    fn boulder() -> AttackDefinition {
+        AttackDefinition::ground("Boulder", 10, 2, GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(30))
+    }
 
     #[test]
-    fn new_defaults_the_optional_fields() {
-        let attack = AttackDefinition::new("Test", 0, 1, AttackStyle::Melee);
+    fn a_targeted_attack_defaults_the_optional_fields() {
+        let attack = AttackDefinition::targeted("Test", 0, 1, AttackStyle::Melee);
+        let targeted = attack.targeted_part().expect("targeted");
 
-        assert_eq!(attack.prayer_penetration, 0.0);
-        assert_eq!(attack.reaction, ReactionRequirement::none());
+        assert_eq!(targeted.prayer_penetration, 0.0);
+        assert_eq!(targeted.reaction, ReactionRequirement::none());
         assert_eq!(attack.impact_delay_ticks, 0);
-        assert_eq!(attack.projectile_travel_ticks, 0);
+        assert_eq!(targeted.projectile_travel_ticks, 0);
         assert!(attack.on_hit_status_effect.is_none());
-        assert!(attack.ground_target.is_none());
+        assert!(attack.ground_part().is_none());
+    }
+
+    #[test]
+    fn a_ground_attack_has_no_targeted_part() {
+        let attack = boulder();
+
+        assert!(attack.targeted_part().is_none());
+        assert_eq!(attack.ground_part().expect("ground").damage, GroundDamage::Fixed(30));
     }
 
     #[test]
     #[should_panic]
     fn prayer_penetration_above_one_panics() {
-        AttackDefinition::new("Test", 0, 1, AttackStyle::Melee).with_prayer_penetration(1.5);
+        AttackDefinition::targeted("Test", 0, 1, AttackStyle::Melee).with_prayer_penetration(1.5);
     }
 
     #[test]
     #[should_panic]
     fn negative_impact_delay_panics() {
-        AttackDefinition::new("Test", 0, 1, AttackStyle::Melee).with_impact_delay_ticks(-1);
+        AttackDefinition::targeted("Test", 0, 1, AttackStyle::Melee).with_impact_delay_ticks(-1);
+    }
+
+    #[test]
+    #[should_panic(expected = "ground attack")]
+    fn an_accuracy_builder_on_a_ground_attack_panics() {
+        boulder().with_always_hits(true);
+    }
+
+    #[test]
+    #[should_panic(expected = "targeted attack")]
+    fn a_prayer_reduction_on_a_targeted_attack_panics() {
+        AttackDefinition::targeted("Test", 0, 1, AttackStyle::Melee).with_prayer_reduction(ProtectionPrayer::Melee, 0.5);
+    }
+
+    #[test]
+    fn a_ground_attack_takes_a_prayer_reduction() {
+        let attack = boulder().with_prayer_reduction(ProtectionPrayer::Melee, 0.5);
+
+        let reduction = attack.ground_part().unwrap().prayer_reduction.expect("reduction");
+        assert_eq!(reduction.prayer, ProtectionPrayer::Melee);
+        assert_eq!(reduction.penetration, 0.5);
     }
 
     #[test]
     fn melee_range_check_is_adjacency_to_the_attackers_footprint() {
-        let attack = AttackDefinition::new("Test", 0, 1, AttackStyle::Melee);
+        let attack = AttackDefinition::targeted("Test", 0, 1, AttackStyle::Melee);
 
         let check = attack.build_range_check(TileCoord::new(5, 5), 2);
 
@@ -256,11 +318,20 @@ mod tests {
 
     #[test]
     fn ranged_range_check_is_chebyshev_distance_from_the_attacker_tile() {
-        let attack = AttackDefinition::new("Test", 3, 1, AttackStyle::Magic);
+        let attack = AttackDefinition::targeted("Test", 3, 1, AttackStyle::Magic);
 
         let check = attack.build_range_check(TileCoord::new(5, 5), 1);
 
         assert!(check.is_satisfied_by(TileCoord::new(8, 8)));
         assert!(!check.is_satisfied_by(TileCoord::new(9, 5)));
+    }
+
+    #[test]
+    fn a_ground_attack_is_measured_by_range_never_by_adjacency() {
+        let attack = AttackDefinition::ground("Slam", 1, 1, GroundTarget::square(HazardAnchor::SelfTile, 1), GroundDamage::Fixed(5));
+
+        let check = attack.build_range_check(TileCoord::new(5, 5), 1);
+
+        assert!(check.is_satisfied_by(TileCoord::new(6, 6)), "range 1 reaches the diagonal: it is not melee adjacency");
     }
 }

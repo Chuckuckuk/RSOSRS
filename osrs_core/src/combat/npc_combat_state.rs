@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use super::attack_definition::AttackDefinition;
+use super::attack_definition::{AttackDefinition, AttackKind};
 use super::attack_pattern::AttackPattern;
 use super::attack_selection_context::AttackSelectionContext;
 use super::attack_style::AttackStyle;
@@ -76,14 +76,22 @@ impl NpcCombatState {
         self.target_tile_at_selection
     }
 
-    /// The tile `attack`'s hazard is centred on: the one its reaction is anchored to, captured at
-    /// telegraph start - never a live tile, or moving away during the telegraph would never
-    /// actually dodge a target-anchored hazard. Anything not anchored to the target (including
-    /// attacks with no positional reaction at all) uses the attacker's tile at selection.
+    /// The tile `attack`'s hazard is centred on: the one a ground attack's target or a targeted
+    /// attack's reaction is anchored to, captured at telegraph start - never a live tile, or
+    /// moving away during the telegraph would never actually dodge a target-anchored hazard.
+    /// Anything not anchored to the target (including attacks with no positional reaction at all)
+    /// uses the attacker's tile at selection.
     pub fn hazard_origin(&self, attack: &AttackDefinition) -> TileCoord {
-        match attack.reaction.kind {
-            ReactionKind::MoveOffTile(HazardAnchor::Target) => self.target_tile_at_selection,
-            _ => self.self_tile_at_selection,
+        let anchor = match &attack.kind {
+            AttackKind::Ground(ground) => ground.target.anchor,
+            AttackKind::Targeted(targeted) => match targeted.reaction.kind {
+                ReactionKind::MoveOffTile(anchor) => anchor,
+                _ => HazardAnchor::SelfTile,
+            },
+        };
+        match anchor {
+            HazardAnchor::Target => self.target_tile_at_selection,
+            HazardAnchor::SelfTile => self.self_tile_at_selection,
         }
     }
 
@@ -247,7 +255,7 @@ mod tests {
         // impact_delay_ticks ("Doom-style") is no longer this type's concern - honoring it is
         // entirely the caller's job, read off current_attack. This state machine never differs:
         // Idle -> Telegraphing -> resolve, whether the delay is 0 or 50.
-        let attack = AttackDefinition::new("Test Doom-style", 10, 2, AttackStyle::Magic)
+        let attack = AttackDefinition::targeted("Test Doom-style", 10, 2, AttackStyle::Magic)
             .with_impact_delay_ticks(5)
             .shared();
         let mut state = state_with(vec![attack]);

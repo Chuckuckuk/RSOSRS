@@ -50,9 +50,9 @@ pub struct AttackPlan {
 
 impl AttackPlan {
     /// Fixes the projectile travel time for a shot at `distance` tiles and shares the definition.
-    pub fn finish(mut self, distance: i32) -> Rc<AttackDefinition> {
-        self.definition.projectile_travel_ticks = rules::projectile_travel_ticks(self.style, distance);
-        self.definition.shared()
+    pub fn finish(self, distance: i32) -> Rc<AttackDefinition> {
+        let travel = rules::projectile_travel_ticks(self.style, distance);
+        self.definition.with_projectile_travel_ticks(travel).shared()
     }
 }
 
@@ -398,7 +398,7 @@ impl Player {
         };
         let modifiers = modifiers.iter().map(|m| m.resolved(&scaling)).collect();
 
-        let mut definition = AttackDefinition::new(name, range, 0, style)
+        let mut definition = AttackDefinition::targeted(name, range, 0, style)
             .with_damage_type(damage_type)
             .with_max_hit(max_hit)
             .with_modifiers(modifiers)
@@ -421,14 +421,14 @@ impl Player {
     pub fn expected_dps(&self, registry: &Registry, target: &CombatStats) -> Result<Dps, String> {
         let plan = self.plan_attack(registry, target)?;
         let stats = self.mover.actor.stats();
-        let max_hit = crate::combat::analyze_attack(&plan.definition, &stats, target, true).max_hit;
+        let max_hit = crate::combat::analyze_attack(plan.definition.expect_targeted(), &stats, target, true).max_hit;
         let mut rng = crate::rng::DotNetRandom::new(DPS_SEED);
-        let swings = crate::combat::simulate_swings(&plan.definition, &stats, target, true, &mut rng, DPS_SWINGS);
-        let per_swing = swings.mean_damage * plan.definition.hit_count as f64;
+        let swings = crate::combat::simulate_swings(plan.definition.expect_targeted(), &stats, target, true, &mut rng, DPS_SWINGS);
+        let per_swing = swings.mean_damage * plan.definition.expect_targeted().hit_count as f64;
         Ok(Dps {
             hit_rate: swings.hit_rate,
             max_hit,
-            hits_per_swing: plan.definition.hit_count,
+            hits_per_swing: plan.definition.expect_targeted().hit_count,
             swing_ticks: plan.speed,
             per_swing,
             per_second: per_swing / (plan.speed as f64 * 0.6),

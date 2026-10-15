@@ -29,30 +29,51 @@ gear when it swings (chapter 6), then joins the same roll and buffer path.
 
 ## 4.2 Describing an attack: `AttackDefinition`
 
-File: [`attack_definition.rs`](../osrs_core/src/combat/attack_definition.rs).
+Files: [`attack_definition.rs`](../osrs_core/src/combat/attack_definition.rs),
+[`targeted_attack.rs`](../osrs_core/src/combat/targeted_attack.rs),
+[`ground_attack.rs`](../osrs_core/src/combat/ground_attack.rs).
+
+An attack is the fields every attack has, plus a `kind` that holds only what that kind of attack
+uses, so a boulder does not carry (and silently ignore) an accuracy modifier.
+
+**Common to every attack** (`AttackDefinition`):
 
 | Field | Meaning |
 |---|---|
 | `name` | for logs |
+| `range` | a melee-style targeted attack with `range` 1 or less must be orthogonally adjacent to the attacker's footprint; anything else is within Chebyshev `range` (a halberd is melee style with range 2) |
+| `telegraph_ticks` | visible wind-up before it resolves |
+| `impact_delay_ticks` | extra ticks between the telegraph ending and the roll or landing ("Doom-style", and every ground attack) |
+| `cooldown_ticks` | wait after resolving before the next telegraph may start |
+| `on_hit_status_effect` | poison, freeze, burn... applied when it lands |
+| `animation`, `projectile`, `target_graphic`, `impact_graphic`, `sound`, `hit_sound` | presentation only |
+| `kind` | `AttackKind::Targeted(TargetedAttack)` or `AttackKind::Ground(GroundAttack)` |
+
+**`TargetedAttack`**: rolled against a defender.
+
+| Field | Meaning |
+|---|---|
 | `style` | `Melee`, `Ranged` or `Magic` ([`AttackStyle`](../osrs_core/src/combat/attack_style.rs)) |
 | `damage_type` | which defence bonus it rolls against; defaults from the style (melee defaults to slash) |
-| `range` | a melee-style attack with `range` 1 or less must be orthogonally adjacent to the attacker's footprint; anything else is within Chebyshev `range` (a halberd is melee style with range 2) |
-| `telegraph_ticks` | visible wind-up before it resolves |
-| `impact_delay_ticks` | extra ticks between the telegraph ending and the roll ("Doom-style") |
-| `projectile_travel_ticks` | ticks between the roll and the damage landing |
 | `max_hit` | a [`MaxHitSource`](../osrs_core/src/combat/max_hit_source.rs) (below) |
 | `modifiers`, `flags` | conditional effects and the flags they test (chapter 3.4) |
 | `hit_count` | separate rolls per use (dragon claws: 4) |
 | `always_hits` | skip the accuracy roll entirely |
 | `prayer_penetration` | the fraction of damage that gets through the *correct* protection prayer: 0 = fully blocked, 1 = ignores prayer |
 | `reaction` | what the player must do to avoid it ([`ReactionRequirement`](../osrs_core/src/combat/reaction_requirement.rs)) |
-| `on_hit_status_effect` | poison, freeze, burn... applied when it lands |
-| `ground_target` | aim at tiles instead of at the player: it hits whoever stands on them when `impact_delay_ticks` is up (see 4.10) |
-| `cooldown_ticks` | wait after resolving before the next telegraph may start |
+| `projectile_travel_ticks` | ticks between the roll and the damage landing |
 
-`AttackDefinition::new` takes the required fields and fills the rest with defaults; the `with_*`
-methods set the others (primer 1.4). They validate their input and panic on nonsense, because a
-bad attack is a bug in data or code, not something a player can cause.
+**`GroundAttack`**: aimed at tiles, never rolls accuracy (see 4.10): a `GroundTarget` (which
+tiles), a `GroundDamage` (`Fixed(n)` or `Uniform { max }`), and optionally one `PrayerReduction`.
+
+The damage resolver, the reaction resolver, `PendingAttackQueue` and the player's swings take a
+`TargetedAttack`, so rolling a ground attack against a defender's accuracy cannot be written.
+
+`AttackDefinition::targeted(name, range, telegraph, style)` and `AttackDefinition::ground(name,
+range, telegraph, target, damage)` take the required fields and fill the rest with defaults; the
+`with_*` methods set the others (primer 1.4). They validate their input and panic on nonsense,
+including a builder for a field the attack's kind does not have (`with_always_hits` on a ground
+attack), because a bad attack is a bug in data or code, not something a player can cause.
 
 Definitions are shared as `Rc<AttackDefinition>` (`.shared()`), because the pattern that owns the
 list, the state machine currently telegraphing it and the queue that later rolls it all refer to
@@ -383,18 +404,43 @@ that reject non-positive numbers. Kinds:
 
 ## 4.10 Ground-targeted attacks
 
-Files: [`ground_target.rs`](../osrs_core/src/combat/ground_target.rs),
+Files: [`ground_attack.rs`](../osrs_core/src/combat/ground_attack.rs),
+[`ground_target.rs`](../osrs_core/src/combat/ground_target.rs),
 [`pending_ground_strike.rs`](../osrs_core/src/combat/pending_ground_strike.rs).
 
-An attack with `ground_target` set is aimed at the ground, not at the player: it covers a set of
-tiles and, once its own `impact_delay_ticks` is up, rolls against **whoever is standing on them
-then**. Falling rocks, grasping claws and rock falls are all this. It is a property of an attack, so
-it telegraphs, is chosen by patterns, and has damage, style, graphics and sounds like any other.
+An attack of kind `Ground` is aimed at the ground, not at the player: it covers a set of tiles and,
+once its own `impact_delay_ticks` is up, deals its damage to **whoever is standing on them then**.
+Falling rocks, grasping claws and rock falls are all this. It telegraphs, is chosen by patterns,
+and has graphics and sounds like any other attack, but it never rolls accuracy and has no style or
+damage type.
 
-A `GroundTarget` is an `anchor` (`SelfTile` or `Target`, as for a reaction) plus a `TileSelection`:
+| `GroundAttack` field | Meaning |
+|---|---|
+| `target: GroundTarget` | an `anchor` (`SelfTile` or `Target`, as for a reaction) plus a `TileSelection` |
+| `damage: GroundDamage` | `Fixed(n)`, or `Uniform { max }` (0..=max, one draw) per target |
+| `prayer_reduction` | optionally one protection prayer that cuts the damage but never negates it (Duke Sucellus' aftershock): the correct prayer lets `penetration` of it through |
 
 | `TileSelection` | Covers |
 |---|---|
+| `Offsets(Vec<(dx, dz)>)` | each offset from the anchor: squares (`GroundTarget::square(anchor, 1)` is the 3x3), crosses, lines, claw patterns; need not be contiguous |
+| `Scatter { radius, count }` | `count` distinct random tiles within `radius` of the anchor |
+
+The tiles are fixed when the attack resolves, from the attacker's and target's tiles as they were at
+selection. That tile is all that is taken from the target: the strike carries no target and no
+target stats.
+
+When the attack resolves, `fire_at_ground` announces it like any attack (animation, sound) and
+queues a `PendingGroundStrike` on the **world** (it has no defender, and must still land if its
+attacker dies). `advance_ground_strikes` counts them down from the encounter clock; when one lands,
+`targets_on_tiles` finds everything alive whose footprint overlaps its tiles, those a monster's
+attack may hurt (only the player so far) are kept, and each takes the rolled damage times the
+prayer reduction's multiplier into its damage buffer. A strike with no delay lands the tick it
+resolves. Strikes are cleared when the player respawns.
+
+Persistent hazards (Hunllef's tornadoes, Purutu's orbs, fire walls) are a different thing and are
+not this: they live in the world as entities. See issue #72.
+
+---|---|
 | `Offsets(Vec<(dx, dz)>)` | each offset from the anchor: squares (`GroundTarget::square(anchor, 1)` is the 3x3), crosses, lines, claw patterns; need not be contiguous |
 | `Scatter { radius, count }` | `count` distinct random tiles within `radius` of the anchor |
 
