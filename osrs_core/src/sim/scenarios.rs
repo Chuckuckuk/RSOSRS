@@ -149,8 +149,8 @@ mod tests {
     use super::*;
     use crate::actors::EntityId;
     use crate::combat::{
-        AttackDefinition, AttackPattern, AttackRangeKind, AttackStyle, FixedRotationPattern, ProtectionPrayer,
-        ReactionRequirement,
+        AttackDefinition, AttackPattern, AttackStyle, FixedRotationPattern, GroundTarget, HazardAnchor,
+        ProtectionPrayer, ReactionRequirement,
     };
     use crate::encounters::{Phase, PhaseTrigger, TriggerAction, TriggerBinding};
     use crate::sim::config::{BossConfig, HealerConfig, NpcConfig, PassiveConfig};
@@ -302,7 +302,7 @@ mod tests {
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig::default());
 
-        let slam = AttackDefinition::new("Slam", AttackRangeKind::Ranged, 15, 2, AttackStyle::Ranged)
+        let slam = AttackDefinition::new("Slam", 15, 2, AttackStyle::Ranged)
             .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Ranged))
             .shared();
         let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![slam]));
@@ -358,7 +358,6 @@ mod tests {
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
         let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![AttackDefinition::new(
             "Slam",
-            AttackRangeKind::Ranged,
             15,
             2,
             AttackStyle::Ranged,
@@ -372,6 +371,63 @@ mod tests {
         run_ticks(&mut world, 1);
 
         assert!(world.encounter.flag("bossDead"));
+    }
+
+    /// A boss at (0, 8), fighting a player at (0, 0), whose only attack is a ground-targeted rock
+    /// fall that lands 3 ticks after it is released. The boss has 10 hitpoints so a test can kill it.
+    fn rock_fall_world(target: GroundTarget) -> (World, EntityId) {
+        let mut world = tough_arena(tc(0, 0));
+        let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
+        let rock = AttackDefinition::new("Rock", 3, 0, AttackStyle::Magic)
+            .with_impact_delay_ticks(3)
+            .with_ground_target(target)
+            .shared();
+        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![rock]));
+        let phase = Phase::new("Main", pattern, None);
+        world.configure_boss(boss, vec![phase.clone()], phase, vec![]);
+        (world, boss)
+    }
+
+    fn rock_hits(world: &World) -> usize {
+        world.log().iter().filter(|l| l.starts_with("Boss uses Rock on the player")).count()
+    }
+
+    #[test]
+    fn a_ground_attack_hits_whoever_stands_on_its_tiles_after_its_delay() {
+        let (mut world, boss) = rock_fall_world(GroundTarget::square(HazardAnchor::Target, 0));
+
+        run_ticks(&mut world, 1);
+        assert!(world.log().iter().any(|l| l.starts_with("Boss aims Rock at 1 tile(s)")), "{:?}", world.log());
+        assert_eq!(rock_hits(&world), 0, "it lands after its delay, not at once");
+        // the attacker dying does not stop it
+        world.entity_mut(boss).unwrap().mover.actor.health_mut().damage(10);
+        run_ticks(&mut world, 3);
+
+        assert_eq!(rock_hits(&world), 1, "{:?}", world.log());
+    }
+
+    #[test]
+    fn a_ground_attack_aimed_elsewhere_misses_a_player_who_is_not_on_its_tiles() {
+        // aimed at the boss's own tile, far from the player
+        let (mut world, _) = rock_fall_world(GroundTarget::square(HazardAnchor::SelfTile, 0));
+
+        run_ticks(&mut world, 6);
+
+        assert!(world.log().iter().any(|l| l.starts_with("Boss aims Rock")));
+        assert_eq!(rock_hits(&world), 0, "{:?}", world.log());
+    }
+
+    #[test]
+    fn a_ground_attack_covers_every_tile_of_its_area() {
+        // a single tile one east of the player misses, the 3x3 around the player's tile hits
+        let (mut beside, _) = rock_fall_world(GroundTarget::offsets(HazardAnchor::Target, vec![(1, 0)]));
+        let (mut around, _) = rock_fall_world(GroundTarget::square(HazardAnchor::Target, 1));
+
+        run_ticks(&mut beside, 4);
+        run_ticks(&mut around, 4);
+
+        assert_eq!(rock_hits(&beside), 0);
+        assert_eq!(rock_hits(&around), 1);
     }
 
     // ---- data-defined monsters ----

@@ -43,7 +43,7 @@ The library is layered. Each layer only uses the layers above it in this table.
 |---|---|---|
 | Geometry | [`tiles/`](../osrs_core/src/tiles/) | Tile coordinates and the eight directions. |
 | Randomness | [`rng.rs`](../osrs_core/src/rng.rs) | A bit-exact port of .NET's seeded random generator, and a scripted fake for tests. |
-| Rules | [`rules/`](../osrs_core/src/rules/) | Pure OSRS formulas: effective levels, rolls, hit chance, max hit, regeneration, drain, poison. No entities, no randomness. |
+| Rules | [`rules/`](../osrs_core/src/rules/) | Pure OSRS formulas: effective levels, rolls, max hit, regeneration, drain, poison. No entities, no randomness. |
 | Vocabulary | [`model/`](../osrs_core/src/model/) | Damage types, bonus tables, monster attributes, prayer effects and the `Modifier` primitive. |
 | Collision | [`collision/`](../osrs_core/src/collision/) | Which tile edges are walls, what is solid, who is standing where. |
 | Pathfinding | [`pathfinding/`](../osrs_core/src/pathfinding/) | BFS shortest paths and greedy single steps. |

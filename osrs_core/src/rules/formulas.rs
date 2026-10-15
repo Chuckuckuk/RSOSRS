@@ -33,18 +33,6 @@ pub fn player_magic_defence_level(effective_magic: i32, effective_defence: i32) 
     ((7 * effective_magic as i64 + 3 * effective_defence as i64).div_euclid(10)) as i32
 }
 
-/// Probability that an attack roll beats a defence roll (reference §5, both branches).
-pub fn hit_chance(attack_roll: i64, defence_roll: i64) -> f64 {
-    let attack = attack_roll.max(0) as f64;
-    let defence = defence_roll.max(0) as f64;
-
-    if attack > defence {
-        1.0 - (defence + 2.0) / (2.0 * (attack + 1.0))
-    } else {
-        attack / (2.0 * (defence + 1.0))
-    }
-}
-
 /// Melee and ranged base max hit: `floor((effective * (strength_bonus + 64) + 320) / 640)`.
 /// For ranged, `strength_bonus` is the Ranged Strength bonus (ammo, or the thrown weapon itself).
 pub fn base_max_hit(effective_strength: i32, strength_bonus: i32) -> i32 {
@@ -136,14 +124,6 @@ mod tests {
     #[test]
     fn negative_bonuses_never_produce_a_negative_roll() {
         assert_eq!(roll(100, -200), 0);
-    }
-
-    #[test]
-    fn hit_chance_has_both_branches_and_stays_a_probability() {
-        assert!((hit_chance(100, 50) - (1.0 - 52.0 / 202.0)).abs() < 1e-12);
-        assert!((hit_chance(50, 100) - 50.0 / 202.0).abs() < 1e-12);
-        assert!((hit_chance(50, 50) - 50.0 / 102.0).abs() < 1e-12);
-        assert_eq!(hit_chance(0, 0), 0.0);
     }
 
     #[test]

@@ -25,7 +25,7 @@ fn tile() -> TileCoord {
 }
 
 fn make_melee_attack(telegraph_ticks: i32, impact_delay_ticks: i32) -> Rc<AttackDefinition> {
-    AttackDefinition::new("Test Melee", AttackRangeKind::Melee, 0, telegraph_ticks, AttackStyle::Melee)
+    AttackDefinition::new("Test Melee", 0, telegraph_ticks, AttackStyle::Melee)
         .with_prayer_penetration(0.0)
         .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Melee))
         .with_impact_delay_ticks(impact_delay_ticks)
@@ -156,7 +156,7 @@ fn doom_style_attack_correct_prayer_dropped_before_impact_still_takes_full_damag
     queue.advance(&target.view, &mut target.damage_buffer, Some(&reaction), &mut DotNetRandom::new(1), &alive); // travelling
     queue.advance(&target.view, &mut target.damage_buffer, Some(&reaction), &mut DotNetRandom::new(1), &alive); // still travelling
     reaction.active_prayer = ProtectionPrayer::None; // dropped one tick before impact
-    let mut guaranteed_hit = ScriptedRng::new(vec![0.0], vec![10]);
+    let mut guaranteed_hit = ScriptedRng::from_ints(vec![1, 0, 10]);
     queue.advance(&target.view, &mut target.damage_buffer, Some(&reaction), &mut guaranteed_hit, &alive); // impact
     target.damage_buffer.advance(&mut target.health, None);
 

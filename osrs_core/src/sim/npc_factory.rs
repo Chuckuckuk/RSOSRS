@@ -7,7 +7,7 @@ use crate::actors::{
     StyleReactiveMovementPolicy,
 };
 use crate::combat::{
-    AttackDefinition, AttackRangeKind, AttackStyle, CombatStats, MaxHitSource, ProtectionPrayer, RangeAwarePattern,
+    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProtectionPrayer, RangeAwarePattern,
     ReactionRequirement, RotationMode,
 };
 use crate::data::{NpcAttackDef, NpcDef, NpcMovementDef, RotationDef};
@@ -29,8 +29,7 @@ pub fn attack_from_def(def: &NpcAttackDef) -> Rc<AttackDefinition> {
 
 /// [`attack_from_def`], heard as `fallback_sound` when the attack names no sound of its own.
 fn attack_sounding(def: &NpcAttackDef, fallback_sound: Option<u32>) -> Rc<AttackDefinition> {
-    let range_kind = if def.style == AttackStyle::Melee && def.range <= 1 { AttackRangeKind::Melee } else { AttackRangeKind::Ranged };
-    let mut attack = AttackDefinition::new(def.name.clone(), range_kind, def.range, def.telegraph_ticks, def.style)
+    let mut attack = AttackDefinition::new(def.name.clone(), def.range, def.telegraph_ticks, def.style)
         .with_damage_type(def.damage_type.unwrap_or_else(|| DamageType::default_for(def.style)))
         .with_max_hit(MaxHitSource::Fixed(def.max_hit))
         .with_prayer_penetration(def.prayer_penetration)

@@ -4,6 +4,7 @@ use super::attack_definition::AttackDefinition;
 use super::attack_pattern::AttackPattern;
 use super::attack_selection_context::AttackSelectionContext;
 use super::attack_style::AttackStyle;
+use super::reaction_requirement::{HazardAnchor, ReactionKind};
 use crate::rng::Rng;
 use crate::tiles::TileCoord;
 
@@ -73,6 +74,17 @@ impl NpcCombatState {
     /// Same snapshot rule as `self_tile_at_selection`, for the target's tile.
     pub fn target_tile_at_selection(&self) -> TileCoord {
         self.target_tile_at_selection
+    }
+
+    /// The tile `attack`'s hazard is centred on: the one its reaction is anchored to, captured at
+    /// telegraph start - never a live tile, or moving away during the telegraph would never
+    /// actually dodge a target-anchored hazard. Anything not anchored to the target (including
+    /// attacks with no positional reaction at all) uses the attacker's tile at selection.
+    pub fn hazard_origin(&self, attack: &AttackDefinition) -> TileCoord {
+        match attack.reaction.kind {
+            ReactionKind::MoveOffTile(HazardAnchor::Target) => self.target_tile_at_selection,
+            _ => self.self_tile_at_selection,
+        }
     }
 
     /// Wholesale-replaces which pattern future selections draw from, without resetting
@@ -148,7 +160,7 @@ impl NpcCombatState {
 mod tests {
     use super::*;
     use crate::combat::test_support::melee_attack;
-    use crate::combat::{AttackRangeKind, FixedRotationPattern};
+    use crate::combat::{FixedRotationPattern, ReactionRequirement};
     use crate::rng::DotNetRandom;
 
     fn state_with(attacks: Vec<Rc<AttackDefinition>>) -> NpcCombatState {
@@ -235,7 +247,7 @@ mod tests {
         // impact_delay_ticks ("Doom-style") is no longer this type's concern - honoring it is
         // entirely the caller's job, read off current_attack. This state machine never differs:
         // Idle -> Telegraphing -> resolve, whether the delay is 0 or 50.
-        let attack = AttackDefinition::new("Test Doom-style", AttackRangeKind::Ranged, 10, 2, AttackStyle::Magic)
+        let attack = AttackDefinition::new("Test Doom-style", 10, 2, AttackStyle::Magic)
             .with_impact_delay_ticks(5)
             .shared();
         let mut state = state_with(vec![attack]);
@@ -274,6 +286,22 @@ mod tests {
         assert!(resolved);
         assert_eq!(state.self_tile_at_selection(), self_at_start, "Still the tile from telegraph-start, even on the resolve tick itself.");
         assert_eq!(state.target_tile_at_selection(), target_at_start);
+    }
+
+    #[test]
+    fn hazard_origin_follows_the_reactions_anchor_from_the_telegraph_start_snapshot() {
+        let anchored = |anchor| {
+            melee_attack("A", 1).as_ref().clone().with_reaction(ReactionRequirement::move_off_tile(anchor)).shared()
+        };
+        let (self_tile, target_tile) = (TileCoord::new(1, 1), TileCoord::new(9, 9));
+        let mut state = state_with(vec![melee_attack("A", 1)]);
+        state.advance(true, 1.0, 0, self_tile, target_tile, AttackStyle::Melee, &mut DotNetRandom::new(1));
+        // moving on afterwards must not change what the snapshot says
+        state.advance(true, 1.0, 0, TileCoord::new(5, 5), TileCoord::new(6, 6), AttackStyle::Melee, &mut DotNetRandom::new(1));
+
+        assert_eq!(state.hazard_origin(&anchored(HazardAnchor::Target)), target_tile);
+        assert_eq!(state.hazard_origin(&anchored(HazardAnchor::SelfTile)), self_tile);
+        assert_eq!(state.hazard_origin(&melee_attack("A", 1)), self_tile, "no positional reaction: the attacker's tile");
     }
 
     #[test]

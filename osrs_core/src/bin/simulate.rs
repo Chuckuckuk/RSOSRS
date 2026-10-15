@@ -66,10 +66,10 @@ fn run() -> Result<(), String> {
         let stats = entity.view().stats;
         match world.player.expected_dps(&registry, &stats) {
             Ok(dps) => println!(
-                "vs {:<18} hit chance {:>5.1}%  max hit {:>3}  swing every {} ticks  expected {:.2} dmg/s",
+                "vs {:<18} hit rate {:>5.1}%  max hit {:>3}  swing every {} ticks  expected {:.2} dmg/s",
                 entity.name,
-                dps.analysis.hit_chance * 100.0,
-                dps.analysis.max_hit,
+                dps.hit_rate * 100.0,
+                dps.max_hit,
                 dps.swing_ticks,
                 dps.per_second
             ),

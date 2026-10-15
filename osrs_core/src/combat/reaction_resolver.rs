@@ -59,10 +59,10 @@ pub fn get_damage_multiplier(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::{AttackRangeKind, AttackStyle, ReactionRequirement};
+    use crate::combat::{AttackStyle, ReactionRequirement};
 
     fn make_attack(reaction: ReactionRequirement, prayer_penetration: f32) -> AttackDefinition {
-        AttackDefinition::new("Test", AttackRangeKind::Melee, 0, 1, AttackStyle::Melee)
+        AttackDefinition::new("Test", 0, 1, AttackStyle::Melee)
             .with_prayer_penetration(prayer_penetration)
             .with_reaction(reaction)
     }

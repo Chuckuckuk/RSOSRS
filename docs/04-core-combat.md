@@ -36,7 +36,7 @@ File: [`attack_definition.rs`](../osrs_core/src/combat/attack_definition.rs).
 | `name` | for logs |
 | `style` | `Melee`, `Ranged` or `Magic` ([`AttackStyle`](../osrs_core/src/combat/attack_style.rs)) |
 | `damage_type` | which defence bonus it rolls against; defaults from the style (melee defaults to slash) |
-| `range_kind`, `range` | `Melee` means "orthogonally adjacent to the attacker's footprint"; `Ranged` means within Chebyshev `range` |
+| `range` | a melee-style attack with `range` 1 or less must be orthogonally adjacent to the attacker's footprint; anything else is within Chebyshev `range` (a halberd is melee style with range 2) |
 | `telegraph_ticks` | visible wind-up before it resolves |
 | `impact_delay_ticks` | extra ticks between the telegraph ending and the roll ("Doom-style") |
 | `projectile_travel_ticks` | ticks between the roll and the damage landing |
@@ -47,7 +47,7 @@ File: [`attack_definition.rs`](../osrs_core/src/combat/attack_definition.rs).
 | `prayer_penetration` | the fraction of damage that gets through the *correct* protection prayer: 0 = fully blocked, 1 = ignores prayer |
 | `reaction` | what the player must do to avoid it ([`ReactionRequirement`](../osrs_core/src/combat/reaction_requirement.rs)) |
 | `on_hit_status_effect` | poison, freeze, burn... applied when it lands |
-| `spawns_orb` | instead of hitting, conjure a homing orb (see 4.9) |
+| `ground_target` | aim at tiles instead of at the player: it hits whoever stands on them when `impact_delay_ticks` is up (see 4.10) |
 | `cooldown_ticks` | wait after resolving before the next telegraph may start |
 
 `AttackDefinition::new` takes the required fields and fills the rest with defaults; the `with_*`
@@ -210,9 +210,12 @@ File: [`damage_resolver.rs`](../osrs_core/src/combat/damage_resolver.rs). Re-exp
 The resolver is split in two:
 
 * **`analyze(attack, attacker, defender, defender_is_monster) -> RollAnalysis`** is the
-  deterministic half. It returns the attack roll, the defence roll, the hit chance and the max
-  hit. A DPS calculator needs only this. `RollAnalysis::average_damage()` gives the expected
-  damage of one hit, `chance * (max/2 + 1 - 1/(max + 1))`, the wiki's expression.
+  deterministic half. It returns the attack roll, the defence roll and the max hit. There is no
+  hit chance anywhere: a swing is decided by throwing the two dice.
+* **`simulate_swings(...)`** is the Monte Carlo: it runs `roll_with_floor` (floor 1, so a hit is
+  any nonzero result) `n` times from a seeded RNG and returns the hit rate and the mean damage.
+  Every modifier and special case the dice cover is therefore covered, with no formula to keep in
+  step. `Player::expected_dps` is built on it (20,000 swings from a fixed seed).
 * **`roll_with_floor(...)`** is `analyze` plus dice.
 
 ### The pipeline inside `analyze`
@@ -230,8 +233,6 @@ defence side:
   def_roll  = defender.defence_roll_against(damage_type, defender_is_monster)
   def_roll  = apply TargetDefenceRoll modifiers
 
-hit_chance  = 1.0 if always_hits else rules::hit_chance(att_roll, def_roll)
-
 max hit:
   base = Fixed(n)               -> n
        | Derived                -> base_max_hit(DamageLevel-modified eff strength, strength bonus)
@@ -248,7 +249,10 @@ filters by condition and resolves non-stacking groups (chapter 3.4).
 
 ```rust
 let analysis = analyze(...);
-if !attack.always_hits && rng.next_double() >= analysis.hit_chance { return 0; }   // miss
+if !attack.always_hits {
+    // each roll is the top face of a die: throw both, the attack must beat the defence
+    if rng.next_range(0, att_roll + 1) <= rng.next_range(0, def_roll + 1) { return 0; }   // miss
+}
 let mut rolled = rng.next_range(0, analysis.max_hit + 1).max(successful_floor);    // 0..=max
 for m in DamageRoll modifiers {
     if m.chance_one_in > 1 && rng.next_range(0, m.chance_one_in) != 0 { continue; } // no proc
@@ -258,9 +262,9 @@ rolled = min(rolled, 200);
 return round_half_away_from_zero(rolled as f32 * damage_multiplier);
 ```
 
-* **Draw order is part of the contract.** One `next_double` for accuracy (none if
-  `always_hits`); only on a hit, one `next_range` for damage; then one more per chance-based
-  `DamageRoll` modifier. Changing this order changes every seeded fight.
+* **Draw order is part of the contract.** Two `next_range` for accuracy, the attack die then the
+  defence die (none if `always_hits`); only on a hit, one `next_range` for damage; then one more per
+  chance-based `DamageRoll` modifier. Changing this order changes every seeded fight.
 * **A successful hit can roll 0.** That is real OSRS behaviour for monsters. For the player's own
   attacks the world passes `successful_floor = 1`, so the player's hits that pass accuracy deal at
   least 1 and only misses show 0. The extra parameter changes no RNG draws.
@@ -377,18 +381,59 @@ that reject non-positive numbers. Kinds:
 
 ---
 
-## 4.10 Homing orbs
+## 4.10 Ground-targeted attacks
 
-Files: [`homing_pulse_orb.rs`](../osrs_core/src/combat/homing_pulse_orb.rs),
-[`homing_pulse_orb_definition.rs`](../osrs_core/src/combat/homing_pulse_orb_definition.rs).
+Files: [`ground_target.rs`](../osrs_core/src/combat/ground_target.rs),
+[`pending_ground_strike.rs`](../osrs_core/src/combat/pending_ground_strike.rs).
 
-A boss attack can have `spawns_orb` set. Instead of hitting, it conjures a `HomingPulseOrb` that
-lives in the boss's state and acts on its own: every tick it loses a tick of life, takes one
-greedy step toward the player (ignoring collision, since it floats), and every
-`pulse_interval_ticks` it "pulses". If the player is within `pulse_radius`, the world rolls the
-orb's `pulse_attack` using the boss stats captured at conjuring time, and a damaging pulse extends
-the orb's life by `duration_bonus_on_hit`. This models the "Slicer" mechanic from the original
-Unity encounter. No bundled content uses it yet.
+An attack with `ground_target` set is aimed at the ground, not at the player: it covers a set of
+tiles and, once its own `impact_delay_ticks` is up, rolls against **whoever is standing on them
+then**. Falling rocks, grasping claws and rock falls are all this. It is a property of an attack, so
+it telegraphs, is chosen by patterns, and has damage, style, graphics and sounds like any other.
+
+A `GroundTarget` is an `anchor` (`SelfTile` or `Target`, as for a reaction) plus a `TileSelection`:
+
+| `TileSelection` | Covers |
+|---|---|
+| `Offsets(Vec<(dx, dz)>)` | each offset from the anchor: squares (`GroundTarget::square(anchor, 1)` is the 3x3), crosses, lines, claw patterns; need not be contiguous |
+| `Scatter { radius, count }` | `count` distinct random tiles within `radius` of the anchor |
+
+The tiles are fixed when the attack resolves, from the attacker's and target's tiles as they were at
+selection. That tile is all that is taken from the target: the strike carries no target and no
+target stats.
+
+When the attack resolves, `fire_at_ground` announces it like any attack (animation, sound) and
+queues a `PendingGroundStrike` on the **world** (it has no defender, and must still land if its
+attacker dies). `advance_ground_strikes` counts them down from the encounter clock; when one lands,
+`targets_on_tiles` finds everything alive whose footprint overlaps its tiles, those a monster's
+attack may hurt (only the player so far) are kept, and `roll_on_player` rolls the attack against
+each. A strike with no delay lands the tick it resolves. Strikes are cleared when the player
+respawns.
+
+Persistent hazards (Hunllef's tornadoes, Purutu's orbs, fire walls) are a different thing and are
+not this: they live in the world as entities. See issue #72.
+
+---|---|
+| `delay_ticks` | ticks between being conjured and landing |
+| `area` | tile offsets it covers around where it stands (`square_area(1)` is the 3x3) |
+| `effect` | an ordinary `AttackDefinition` resolved against each valid target found |
+| `movement` | `Stationary`, or `HomeOnTile` (one greedy step per tick, ignoring collision) |
+
+It is conjured on `NpcCombatState::hazard_origin` for its attack: the target's tile at selection
+when the attack's reaction is anchored to the target, otherwise the conjurer's own tile. That tile
+is all that is taken from the target; the hazard carries no target and no target stats. When it
+lands, the world asks `targets_on_tiles` who is on its covered tiles, keeps those a monster's
+hazard may hurt (only the player so far), and resolves the effect against each with `deliver_attack`.
+
+Repeating, or reacting to a hit (Purutu's pulsing, life-extending orb), is deliberately not part of
+a hazard: it would be a behavior of that one hazard. Hazards are cleared when the player respawns.
+No bundled content conjures one yet.
+
+---|---|---|
+| `HomeOnTarget` | one greedy step toward the player each tick, ignoring collision (it floats) | Purutu's Slicer orb |
+| `Stationary` | stays where it was conjured | fire walls, acid pools, gas vents |
+
+Hazards are cleared when the player respawns. No bundled content conjures one yet.
 
 ---
 
