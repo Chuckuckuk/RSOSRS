@@ -24,6 +24,7 @@ mod catalog;
 mod editor;
 mod play;
 mod preview;
+mod thumbs;
 mod tools;
 mod ui;
 mod world;
@@ -163,6 +164,12 @@ fn main() {
     let mut editor = editor::Editor::new(project, path, base, base_dir.clone());
     editor.status = format!("{} objects, {} NPCs, {} icons", catalog.objects.len(), catalog.npcs.len(), catalog.areas.len());
     let shared = preview::leak_cache(&base_dir).unwrap_or_else(|e| fail("could not open the cache", e));
+    // OSRS_NPC_PICKER=<name>: start with that NPC's model picker open (for screenshots)
+    let mut ui_state = ui::UiState::default();
+    if let Ok(name) = std::env::var("OSRS_NPC_PICKER") {
+        ui_state.npc_picker = catalog.npc_groups.iter().position(|g| g.name.eq_ignore_ascii_case(&name) && g.members.len() > 1);
+        ui_state.tab = ui::PaletteTab::Npcs;
+    }
 
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -177,6 +184,8 @@ fn main() {
     .insert_resource(editor)
     .insert_resource(preview::MinimapPreview::new(shared))
     .insert_resource(preview::Sprites::new(shared))
+    .insert_resource(thumbs::NpcThumbs::new(shared))
+    .insert_resource(ui_state)
     // OSRS_ROOFS=0 starts with the planes above the edited one hidden (T toggles)
     .insert_resource(camera::ViewState { roofs: std::env::var("OSRS_ROOFS").map_or(true, |v| v != "0") })
     .insert_resource(StartAt(args.at))
@@ -185,7 +194,6 @@ fn main() {
     .init_resource::<world::Hover>()
     .init_resource::<world::Ghost>()
     .init_resource::<tools::IconsInView>()
-    .init_resource::<ui::UiState>()
     .add_systems(Startup, setup)
     .add_systems(
         Update,

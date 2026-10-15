@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use osrs_cache::config::{Configs, ObjectDef};
+use osrs_cache::npc::NpcDef;
 use osrs_cache::Cache;
 use osrs_core::data::{cache_npc_id, cache_npc_key, Registry};
 use std::collections::{BTreeMap, HashMap};
@@ -42,10 +43,26 @@ pub struct Catalog {
     pub objects: Vec<ObjectEntry>,
     /// Gathering resources: object id -> the node it belongs to (`"tree"`, `"oak_tree"`...).
     pub resources: BTreeMap<u32, String>,
+    /// Every placeable NPC, one per model, by name, level and cache id.
     pub npcs: Vec<NpcEntry>,
     /// Index into `npcs` by spawn key.
     npc_index: HashMap<String, usize>,
+    /// The palette's rows: `npcs` with the same name and level together.
+    pub npc_groups: Vec<NpcGroup>,
+    /// The cache's definitions of the placeable NPCs, for drawing their thumbnails.
+    pub npc_defs: HashMap<u32, NpcDef>,
     pub areas: Vec<AreaEntry>,
+}
+
+/// NPCs sharing a name and combat level: often the same NPC drawn several ways (other outfits,
+/// recolours, the versions in other places).
+pub struct NpcGroup {
+    pub name: String,
+    pub combat_level: i32,
+    /// Indices into [`Catalog::npcs`].
+    pub members: Vec<usize>,
+    /// Whether any of them has combat stats.
+    pub has_stats: bool,
 }
 
 /// The shape an object is placed as: the first model type its definition lists (walls list 0,
@@ -108,14 +125,19 @@ impl Catalog {
         let mut npcs = Vec::new();
         // every NPC the cache can draw: it has models of its own (not one that turns into others
         // by game state) and a standing animation
-        for def in Configs::new(base)?.npcs()?.into_values() {
-            if def.models.is_empty() || def.stand.is_none() || def.name.is_empty() || def.name == "null" {
-                continue;
-            }
-            let curated = registry.npc_with_appearance(def.id);
+        let npc_defs: HashMap<u32, NpcDef> = Configs::new(base)?
+            .npcs()?
+            .into_iter()
+            .filter(|(_, d)| !d.models.is_empty() && d.stand.is_some() && !d.name.is_empty() && d.name != "null")
+            .collect();
+        for def in npc_defs.values() {
+            // the curated monster's own model is placed under its id; its other models (and NPCs
+            // nobody has curated) as `cache:<id>`
+            let curated = registry.npc_for_cache_id(def.id);
+            let own_model = curated.is_some_and(|c| c.appearance == Some(def.id));
             npcs.push(NpcEntry {
-                key: curated.map_or_else(|| cache_npc_key(def.id), |c| c.id.clone()),
-                name: def.name.clone(),
+                key: if own_model { curated.map(|c| c.id.clone()).unwrap_or_default() } else { cache_npc_key(def.id) },
+                name: strip_tags(&def.name),
                 combat_level: curated.map_or(def.combat_level.map_or(0, i32::from), |c| c.combat_level),
                 cache_id: Some(def.id),
                 has_stats: curated.is_some(),
@@ -126,10 +148,20 @@ impl Catalog {
             npcs.push(NpcEntry { key: n.id.clone(), name: n.name.clone(), combat_level: n.combat_level, cache_id: None, has_stats: true });
         }
         npcs.sort_by(|a, b| a.name.cmp(&b.name).then(a.combat_level.cmp(&b.combat_level)).then(a.cache_id.cmp(&b.cache_id)));
-        // a curated NPC drawn as one cache id appears once; its other cache ids stay as cache NPCs
         let mut npc_index = HashMap::new();
         for (i, n) in npcs.iter().enumerate() {
             npc_index.entry(n.key.clone()).or_insert(i);
+        }
+        // one palette row per name and level; the models under it are picked from a list
+        let mut npc_groups: Vec<NpcGroup> = Vec::new();
+        for (i, n) in npcs.iter().enumerate() {
+            match npc_groups.last_mut() {
+                Some(g) if g.name == n.name && g.combat_level == n.combat_level => {
+                    g.members.push(i);
+                    g.has_stats |= n.has_stats;
+                }
+                _ => npc_groups.push(NpcGroup { name: n.name.clone(), combat_level: n.combat_level, members: vec![i], has_stats: n.has_stats }),
+            }
         }
 
         let mut areas: Vec<AreaEntry> = osrs_cache::minimap::map_functions(base)?
@@ -137,16 +169,22 @@ impl Catalog {
             .filter_map(|(id, (sprite, name))| Some(AreaEntry { id: u16::try_from(id).ok()?, name, sprite }))
             .collect();
         areas.sort_by_key(|a| a.id);
-        Ok(Catalog { defs, objects, resources, npcs, npc_index, areas })
+        Ok(Catalog { defs, objects, resources, npcs, npc_index, npc_groups, npc_defs, areas })
     }
 
     /// The palette entry a spawn's `npc` key names.
     pub fn npc(&self, key: &str) -> Option<&NpcEntry> {
         self.npc_index.get(key).map(|&i| &self.npcs[i]).or_else(|| {
-            // a cache NPC that has since been given stats is listed under its curated id
+            // a cache NPC whose model has since become a curated monster's own is listed under
+            // the curated id
             let id = cache_npc_id(key)?;
             self.npcs.iter().find(|n| n.cache_id == Some(id))
         })
+    }
+
+    /// The NPCs of palette row `group`.
+    pub fn group_members(&self, group: usize) -> impl Iterator<Item = &NpcEntry> {
+        self.npc_groups.get(group).into_iter().flat_map(|g| g.members.iter().map(|&i| &self.npcs[i]))
     }
 
     /// A spawn's NPC's name, or its key when the palette does not know it.
@@ -163,6 +201,21 @@ impl Catalog {
     }
 }
 
+/// `name` without the game's text markup (`<col=00efef>Portal</col>` is "Portal").
+pub fn strip_tags(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut in_tag = false;
+    for c in name.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.trim().to_owned()
+}
+
 /// An object's name, or its id when it has none (the cache calls many "null").
 pub fn display_name(d: &ObjectDef) -> String {
     if d.name.is_empty() || d.name == "null" {
@@ -177,5 +230,17 @@ pub fn area_label(a: &AreaEntry) -> String {
         format!("icon {}", a.id)
     } else {
         a.name.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markup_is_taken_out_of_names() {
+        assert_eq!(strip_tags("<col=00efef>Portal</col>"), "Portal");
+        assert_eq!(strip_tags("Hans"), "Hans");
+        assert_eq!(strip_tags("a < b"), "a");
     }
 }

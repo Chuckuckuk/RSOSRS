@@ -606,20 +606,25 @@ fn start_scenario(
     }
 }
 
-/// Makes every spawn of a cache NPC (`cache:<id>`) name a definition the registry has: the curated
-/// one drawn as that NPC when `npcs.json` has it (so stats added there reach spawns already
-/// placed), else one made from the cache's own definition, which cannot be fought.
+/// Makes every spawn of a cache NPC (`cache:<id>`) name a definition the registry has. When
+/// `npcs.json` has the monster (drawn as that NPC, or listing it in `cache_ids`), it fights with
+/// those stats, drawn as its own model, so stats added there reach spawns already placed.
+/// Otherwise it is made from the cache's own definition, and cannot be fought.
 fn resolve_cache_npcs(registry: &mut Registry, source: &MapSource, spawns: &mut [osrs_cache::project::NpcSpawn]) {
-    use osrs_core::data::{cache_npc_def, cache_npc_id, DataFile};
+    use osrs_core::data::{cache_npc_def, cache_npc_id, cache_npc_variant, DataFile};
     let mut cache_defs = None;
     let mut made = Vec::new();
     for s in spawns.iter_mut() {
         let Some(id) = cache_npc_id(&s.npc) else { continue };
-        if let Some(curated) = registry.npc_with_appearance(id) {
-            s.npc = curated.id.clone();
+        if registry.npc(&s.npc).is_some() || made.iter().any(|d: &osrs_core::data::NpcDef| d.id == s.npc) {
             continue;
         }
-        if registry.npc(&s.npc).is_some() || made.iter().any(|d: &osrs_core::data::NpcDef| d.id == s.npc) {
+        if let Some(curated) = registry.npc_for_cache_id(id) {
+            if curated.appearance == Some(id) {
+                s.npc = curated.id.clone();
+            } else {
+                made.push(cache_npc_variant(curated, id));
+            }
             continue;
         }
         let defs = cache_defs.get_or_insert_with(|| {
@@ -634,7 +639,8 @@ fn resolve_cache_npcs(registry: &mut Registry, source: &MapSource, spawns: &mut 
         }
     }
     if !made.is_empty() {
-        println!("[server] {} NPC kinds come from the cache alone (no combat stats)", made.len());
+        let plain = made.iter().filter(|d| d.attacks.is_empty()).count();
+        println!("[server] {} cache NPC kinds: {} sharing a monster's stats, {plain} without combat stats", made.len(), made.len() - plain);
         if let Err(e) = registry.merge(DataFile { npcs: made, ..Default::default() }) {
             eprintln!("[server] cache NPCs: {e}");
         }

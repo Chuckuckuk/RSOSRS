@@ -25,7 +25,7 @@ pub use doors::{DoorDef, DoorLeafDef, DoorSwing, LeafMove};
 pub use gathering::{DepletionDef, GatheringNodeDef, NodeLocDef, PetDropDef, Requirement, ToolDef};
 pub use items::{AmmoDef, AmmoWeight, EquipSlot, ItemDef, SetDef, SpecialAttackDef, StanceDef, StanceKind, WeaponDef};
 pub use npcs::{
-    cache_npc_def, cache_npc_id, cache_npc_key, AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels,
+    cache_npc_def, cache_npc_id, cache_npc_key, cache_npc_variant, covers_cache_npc, AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels,
     NpcMovementDef, NpcSounds, RotationDef, SummonDef, CACHE_NPC_PREFIX,
 };
 pub use prayers::PrayerDef;
@@ -245,10 +245,10 @@ impl Registry {
         self.npcs.get(id)
     }
 
-    /// The curated monster drawn as cache NPC `appearance`, if `npcs.json` has one: a spawn of
-    /// `cache:<id>` uses its stats.
-    pub fn npc_with_appearance(&self, appearance: u32) -> Option<&NpcDef> {
-        self.npcs.values().find(|d| d.appearance == Some(appearance))
+    /// The curated monster that cache NPC `id` is (drawn as it, or listing it in `cache_ids`), if
+    /// `npcs.json` has one: a spawn of `cache:<id>` fights with its stats.
+    pub fn npc_for_cache_id(&self, id: u32) -> Option<&NpcDef> {
+        self.npcs.values().find(|d| npcs::covers_cache_npc(d, id))
     }
 
     /// Replaces (or adds) a monster definition: tests tweak a bundled one this way.
@@ -367,6 +367,18 @@ impl Registry {
     /// a data author fixes a file in one pass.
     pub fn validate(&self) -> Result<(), DataError> {
         let mut problems = Vec::new();
+
+        // a cache NPC is one monster at most, or its spawns' stats would depend on lookup order
+        let mut claimed: BTreeMap<u32, &str> = BTreeMap::new();
+        for npc in self.npcs.values() {
+            for id in npc.appearance.iter().chain(&npc.cache_ids) {
+                if let Some(other) = claimed.insert(*id, &npc.id) {
+                    if other != npc.id {
+                        problems.push(format!("npc '{}': cache NPC {id} is also '{other}'", npc.id));
+                    }
+                }
+            }
+        }
 
         for item in self.items.values() {
             let who = format!("item '{}'", item.id);

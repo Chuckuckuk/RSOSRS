@@ -59,7 +59,10 @@ The **left panel** holds the tools and the palette, which has four tabs:
 
 * **Objects:** every object definition with a model.
 * **Resources:** the objects `gathering.json` makes gatherable.
-* **NPCs:** every NPC the cache can draw (it has models of its own and a standing animation). A ★ marks one with combat stats in `npcs.json`; a tick-box lists only those.
+* **NPCs:** every NPC the cache can draw (it has models of its own and a standing animation),
+  one row per name and level. A row with several models ("Bouncer (level 137) ×4") opens a
+  **model picker** of thumbnails drawn from each model (`thumbs.rs`); hovering one shows its size
+  and menu options. A ★ marks NPCs with combat stats in `npcs.json`; a tick-box lists only those.
 * **Map icons:** every map function, with its sprite.
 
 Choosing an entry switches to the Place tool. An object being placed is drawn where it would go,
@@ -123,10 +126,13 @@ MapProject {
   * an id in `data/npcs.json` (`"man"`), a curated monster with combat stats;
   * `cache:<id>` (`"cache:3105"`, Hans), any NPC straight from the cache.
 
-  When the server starts, a `cache:<id>` spawn uses the curated monster whose `appearance` is
-  that id, if `npcs.json` has one. Otherwise the server builds a definition from the cache alone
-  (`osrs_core::data::cache_npc_def`): its name, combat level, size and model. Such an NPC stands
-  where it is put, and "Attack" answers "cannot hurt" until it has stats.
+  When the server starts, a `cache:<id>` spawn fights with the stats of the curated monster that
+  covers that id: its `appearance` (the model it is drawn as by default) or one of its
+  `cache_ids` (the same monster's other models, such as the abyssal demon's 416, 7241 and 11239).
+  The spawn is still drawn as model `<id>` (`cache_npc_variant`). A spawn with no curated monster
+  is built from the cache alone (`osrs_core::data::cache_npc_def`): its name, combat level, size
+  and model. Such an NPC stands where it is put, and "Attack" answers "cannot hurt" until it has
+  stats. Registry validation rejects a cache id that two curated monsters both claim.
   * A new project starts with the man who stands in Lumbridge by default, so a compiled cache
     keeps him until he is removed.
 
@@ -142,10 +148,12 @@ Stats come from the OSRS wiki, one NPC at a time; nothing is fetched in bulk.
    [`gameval/AnimationID.java`](https://github.com/runelite/runelite/blob/master/runelite-api/src/main/java/net/runelite/api/gameval/AnimationID.java)
    (the game's own names, such as `ABYSSAL_ATTACK`). Check them with
    `npc_anim_probe <npc id> <sequences...>`.
-4. Add an entry to `osrs_core/data/npcs.json` with `"appearance": <cache id>`. Say in its `notes`
-   where each value came from (the abyssal demon is an example).
+4. Add an entry to `osrs_core/data/npcs.json` with `"appearance": <cache id>`, and its other NPC
+   ids from the wiki's `|id` lines as `"cache_ids": [...]`. Say in its `notes` where each value
+   came from (the abyssal demon is an example).
 
-Every spawn of `cache:<that id>` then fights with those stats, including spawns placed before.
+Every spawn of any of those ids then fights with those stats, drawn as its own model, including
+spawns placed before.
 * **Minimap icons** are objects in the real game: an object definition's opcode 82 names a map
   function (an area definition, config group 35), and the minimap draws its sprite where the
   object stands. To place an icon the editor puts down an invisible floor decoration (kind 22)
