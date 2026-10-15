@@ -596,11 +596,12 @@ fn square_map(source: &MapSource, square: (i32, i32)) -> (CollisionMapData, Vec<
             let defs = source.object_defs();
             let locs = around
                 .middle_placements()
-                .filter(|(_, p)| p.plane == 0 && matches!(p.kind, 0..=3 | 10 | 11))
+                .filter(|(_, p)| p.plane == 0 && matches!(p.kind, 0..=3 | 9 | 10 | 11))
                 .filter_map(|((x, z), p)| {
                     let def = defs.get(&p.id)?;
-                    // free-standing objects (trees), and wall pieces that do something (doors)
-                    if p.kind <= 3 && def.left_click().is_none() {
+                    // free-standing objects (trees), and wall pieces, straight or diagonal, that
+                    // do something (doors)
+                    if matches!(p.kind, 0..=3 | 9) && def.left_click().is_none() {
                         return None;
                     }
                     let (w, h) = footprint(def, p.orientation);

@@ -502,7 +502,10 @@ the emote and music panes; it is drawn at the top and cannot be dragged.
 
 **The minimap and compass** (`panes/minimap.rs`). The picture of a map square
 (`osrs_cache::minimap`, 4 pixels a tile) is drawn on a worker thread the first time the player is
-within 22 tiles of it (a frame never waits), and kept. When the interface is drawn, the minimap
+within 22 tiles of it (a frame never waits), and kept. It is drawn with the scenery as it stands:
+the snapshot's scenery changes (an opened door, a stump) are passed in as swaps
+(`MinimapSource::render_changed`), and a square whose changes differ from those its picture was
+drawn with is drawn again, the old picture showing meanwhile. When the interface is drawn, the minimap
 component (a 152x152 widget) is filled pixel by pixel: for each pixel inside the mask sprite (1178: it
 is *transparent* inside the round window and opaque outside) the world position it stands for, after
 turning by the camera yaw around the player's exact (sub-tile) position, is looked up in the square

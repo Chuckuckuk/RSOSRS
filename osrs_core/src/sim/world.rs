@@ -555,7 +555,7 @@ impl World {
     }
 
     /// Records sound effect `sound`, if there is one, heard from `from` in `delay_ticks`.
-    fn play_sound(&mut self, sound: Option<u32>, from: Combatant, delay_ticks: i32) {
+    pub(super) fn play_sound(&mut self, sound: Option<u32>, from: Combatant, delay_ticks: i32) {
         if let Some(sound) = sound {
             self.events.push(WorldEvent::Sound { sound, from, delay_ticks });
         }

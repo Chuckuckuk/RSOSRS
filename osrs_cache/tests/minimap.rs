@@ -50,3 +50,48 @@ fn lumbridge_minimap_has_water_walls_doors_and_icons() {
     assert!(!m.icons.is_empty());
     assert!(m.icons.iter().all(|i| (3200..3264).contains(&i.x) && (3200..3264).contains(&i.z)));
 }
+
+/// The 4 pixels of the edge a straight wall at world tile (`x`, `z`) of square (50, 50), turned
+/// `orientation`, is drawn on.
+fn edge_pixels(x: i32, z: i32, orientation: u8) -> Vec<usize> {
+    let (px, py) = ((x - 3200) * 4, (63 - (z - 3200)) * 4);
+    (0..4)
+        .map(|i| {
+            let (ex, ey) = match orientation & 3 {
+                0 => (px, py + i),
+                1 => (px + i, py),
+                2 => (px + 3, py + i),
+                _ => (px + i, py + 3),
+            };
+            (ey as usize * SIZE + ex as usize) * 4
+        })
+        .collect()
+}
+
+#[test]
+fn an_opened_door_is_drawn_where_it_swung_to() {
+    let Some(c) = cache() else { return };
+    let configs = config::Configs::new(&c).unwrap();
+    let defs = configs.objects().unwrap();
+    let grid = terrain_mesh::TerrainGrid::load(&c, 49, 49, 3, 3, configs.underlays().unwrap(), configs.overlays().unwrap()).unwrap();
+    let placed = terrain_mesh::PlacedObjects::load(&c, &grid).unwrap();
+    let source = minimap::MinimapSource::new(&c).unwrap();
+    let before = source.render(50, 50).unwrap().image;
+    let red = |img: &textures::Texture, pixels: &[usize]| pixels.iter().all(|&o| img.rgba[o..o + 3] == [0xEE, 0, 0]);
+
+    // a door in the square, swung open the way a single door swings: out a tile, a quarter turn
+    let door = placed
+        .placements
+        .iter()
+        .filter(|(_, _, p)| p.plane == 0 && p.kind == 0)
+        .filter(|(_, _, p)| defs.get(&p.id).is_some_and(|d| d.actions.iter().any(|a| a == "Open")))
+        .map(|(gx, gz, p)| minimap::MapObject { id: p.id, x: 3136 + gx, z: 3136 + gz, kind: 0, orientation: p.orientation })
+        .find(|d| (3201..3263).contains(&d.x) && (3201..3263).contains(&d.z) && red(&before, &edge_pixels(d.x, d.z, d.orientation)))
+        .expect("a door in Lumbridge");
+    let (dx, dz) = [(-1, 0), (0, 1), (1, 0), (0, -1)][door.orientation as usize & 3];
+    let open = minimap::MapObject { x: door.x + dx, z: door.z + dz, orientation: (door.orientation + 1) & 3, ..door };
+
+    let after = source.render_changed(50, 50, &[(door, open)]).unwrap().image;
+    assert!(!red(&after, &edge_pixels(door.x, door.z, door.orientation)), "{door:?}: the doorway is no longer drawn shut");
+    assert!(red(&after, &edge_pixels(open.x, open.z, open.orientation)), "{open:?}: the door is drawn where it swung to");
+}

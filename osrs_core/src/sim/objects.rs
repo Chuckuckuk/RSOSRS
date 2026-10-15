@@ -7,20 +7,22 @@
 //!
 //! Doors (OSRS wiki, "Door"):
 //! - The player walks to where the door can be used from (`TargetSpec::wall_reach`) and it pops
-//!   open or shut, with no animation. A double door's or gate's leaves move one at a time: only
-//!   the one chosen.
-//! - An opened door swings into the next tile and turns (`DoorSwing::moves`). Its wall moves with
-//!   it, so the doorway can be walked through.
+//!   open or shut, with no animation but a door's or a gate's sound (`DoorDef::sound`). A double
+//!   door's or gate's leaves move one at a time: only the one chosen.
+//! - An opened door swings into the next tile and turns (`DoorSwing::moves`; on a diagonal wall
+//!   `LeafMove::DIAGONAL`). Its wall moves with it, so the doorway can be walked through.
 //! - A door that a player opened or closed goes back by itself after [`DOOR_RESET_TICKS`].
 //! - Closing the same door [`STUCK_CLOSE_LIMIT`] times as fast as the game allows (each close
 //!   needs an open in between, a tick each) gets "The door seems to be stuck." instead.
 
 use std::rc::Rc;
 
+use super::events::Combatant;
 use super::firemaking::{LightAction, RestAction, TendAction, ASHES, BONFIRE_LOC, FIRE_LOC};
 use super::gathering::GatherAction;
 use super::scenery::{Loc, LocKey};
 use super::world::World;
+use crate::collision::{wall_edges, DIAGONAL_WALL};
 use crate::data::{DoorDef, LeafMove};
 use crate::pathfinding::{rotate, TargetSpec};
 use crate::tiles::TileCoord;
@@ -124,31 +126,59 @@ impl World {
         let Some(step) = self.leaf_step(door, original) else {
             return nothing(); // the other leaf is not where it should be
         };
-        // a pair the map places open has no closed form to swing back to
-        let placed_open = door.state_of(original.id) == Some(true) && !self.scenery_state.is_replaced(&original);
-        if door.swing.leaf_count() > 1 && placed_open {
-            return nothing();
-        }
         self.player.set_action(PlayerAction::Door(DoorAction { door: door.id.clone(), leaf: original, step, closing }));
         Ok(())
     }
 
-    /// How `leaf` of `door` (as the map places it) swings open: a single door's one way; a pair's
-    /// leaf by where it stands along the wall, found from its partner beside it (None if there is
-    /// none).
+    /// How `leaf` of `door` (as the map places it) swings open. A shut leaf: by [`Self::frame_step`].
+    /// A leaf the map places open: the swing whose frame (where it stands shut) swings that way.
+    /// An open pair also fits its mirror image (frames on the far side of the leaves, swinging
+    /// back): the frame in line with the wall around it is the real one.
     fn leaf_step(&self, door: &DoorDef, leaf: Loc) -> Option<LeafMove> {
+        let forms = door.leaf(leaf.id)?;
+        if leaf.kind == DIAGONAL_WALL {
+            return Some(LeafMove::DIAGONAL);
+        }
+        if door.state_of(leaf.id) == Some(false) {
+            return self.frame_step(door, leaf);
+        }
+        // reversed, as `max_by_key` keeps the last of equals: a tie goes to the first swing
+        let fits = door.swing.moves().iter().rev().copied().filter_map(|step| {
+            let frame = unswung(leaf, step, forms.closed);
+            (self.frame_step(door, frame) == Some(step)).then(|| (step, self.wall_beside(frame)))
+        });
+        fits.max_by_key(|&(_, wall)| wall).map(|(step, _)| step)
+    }
+
+    /// How many of the two tiles each way along `frame`'s wall have a wall on that same edge.
+    fn wall_beside(&self, frame: Loc) -> usize {
+        let Some(&(_, _, edge)) = wall_edges(frame.kind, frame.orientation).first() else { return 0 };
+        let along = rotate((0, 1), frame.orientation);
+        [-2, -1, 1, 2].into_iter().filter(|k| self.map.flags_at(frame.tile.offset(along.0 * k, along.1 * k)) & edge != 0).count()
+    }
+
+    /// How a leaf of `door` standing shut as `frame` swings open: a single door's one way; a
+    /// pair's leaf by where it stands along the wall, found from its partner's frame beside it
+    /// (None if there is none). The partner may stand shut or, as the map places it, open.
+    fn frame_step(&self, door: &DoorDef, frame: Loc) -> Option<LeafMove> {
         let moves = door.swing.moves();
         if moves.len() == 1 {
             return Some(moves[0]);
         }
-        let along = rotate((0, 1), leaf.orientation);
+        // an open partner stands where its frame swung to: one step out from the wall
+        let out = rotate(moves[0].offset, frame.orientation);
+        let along = rotate((0, 1), frame.orientation);
         [1, -1].into_iter().find_map(|sign| {
-            let beside = leaf.tile.offset(along.0 * sign, along.1 * sign);
-            let partnered = self.scenery.at(beside).iter().any(|other| {
-                other.kind == leaf.kind
-                    && other.orientation == leaf.orientation
-                    && door.state_of(other.id) == door.state_of(leaf.id)
-                    && other.key() != leaf.key()
+            let beside = frame.tile.offset(along.0 * sign, along.1 * sign);
+            let near = self.scenery.at(beside).iter().chain(self.scenery.at(beside.offset(out.0, out.1)));
+            let partnered = near.filter(|other| other.kind == frame.kind).any(|other| {
+                let Some(forms) = door.leaf(other.id) else { return false };
+                let frames: Vec<Loc> = if other.id == forms.closed {
+                    vec![*other]
+                } else {
+                    moves.iter().map(|&step| unswung(*other, step, forms.closed)).collect()
+                };
+                frames.iter().any(|f| f.tile == beside && f.orientation == frame.orientation)
             });
             // a partner further along the wall makes this the first leaf
             partnered.then(|| if sign == 1 { moves[0] } else { moves[1] })
@@ -169,8 +199,13 @@ impl World {
             return true;
         }
 
-        let tiles = TargetSpec::wall_reach(&self.map, current.tile, current.orientation);
-        match self.approach(TargetSpec::any_of(&tiles)) {
+        // a door on a diagonal wall is used from beside it, like an object
+        let reach = if current.kind == DIAGONAL_WALL {
+            TargetSpec::adjacent(current.tile, 1, 1)
+        } else {
+            TargetSpec::any_of(&TargetSpec::wall_reach(&self.map, current.tile, current.orientation))
+        };
+        match self.approach(reach) {
             Approach::There => {}
             Approach::OnTheWay => return true,
             Approach::NoWay => {
@@ -192,7 +227,10 @@ impl World {
         } else if let Some(forms) = door.leaf(leaf.id) {
             let moved = if action.closing { unswung(leaf, step, forms.closed) } else { swung(leaf, step, forms.open) };
             self.change_loc(leaf, moved, DOOR_RESET_TICKS);
+        } else {
+            return true;
         }
+        self.play_sound(Some(door.sound(action.closing)), Combatant::Player, 0);
         true
     }
 
@@ -298,7 +336,7 @@ mod tests {
     use crate::collision::CollisionFlag;
     use crate::data::{DoorSwing, Registry};
     use crate::sim::scenarios::dev_open_floor_world;
-    use crate::sim::PlayerConfig;
+    use crate::sim::{sounds, PlayerConfig, WorldEvent};
 
     fn tc(x: i32, z: i32) -> TileCoord {
         TileCoord::new(x, z)
@@ -461,6 +499,81 @@ mod tests {
         a_pair_opens_one_leaf_at_a_time(DoorSwing::Gate, (1558, 1559), (1560, 1567));
     }
 
+    /// A pair the map places open (both leaves where `a_pair_opens_one_leaf_at_a_time` swings
+    /// them): each leaf closes into its own frame, alone, and opens again when its time is up.
+    fn a_pair_placed_open_closes_one_leaf_at_a_time((south, south_open): (u32, u32), (north, north_open): (u32, u32)) {
+        let (south_leaf, north_leaf) = (wall(south_open, 4, 0, 3), wall(north_open, 4, 1, 1));
+        let mut world = walled(&[south_leaf, north_leaf], Registry::builtin());
+        assert!(walks_through(&mut world), "the doorway is open");
+        world.player_request_walk_to(tc(0, 0), false);
+        run(&mut world, 40);
+        let moved = |world: &World| world.scenery_changes().map(|c| c.replacement).collect::<Vec<_>>();
+
+        world.player_interact_object(south_open, south_leaf.tile, "Close").unwrap();
+        run(&mut world, 20);
+        assert_eq!(moved(&world), vec![wall(south, 5, 0, 0)], "the south leaf shuts in its frame; the north stays open");
+        assert_ne!(world.map.flags_at(tc(5, 0)) & CollisionFlag::BLOCK_WEST, 0, "the south leaf blocks");
+
+        world.player_interact_object(north_open, north_leaf.tile, "Close").unwrap();
+        run(&mut world, 20);
+        let mut shut = moved(&world);
+        shut.sort_by_key(|leaf| leaf.tile.z);
+        assert_eq!(shut, vec![wall(south, 5, 0, 0), wall(north, 5, 1, 0)], "then the north one");
+        assert!(!walks_through(&mut world), "shut");
+
+        run(&mut world, DOOR_RESET_TICKS);
+        assert!(world.scenery_changes().next().is_none(), "open again as the map places it");
+    }
+
+    #[test]
+    fn a_double_door_the_map_places_open_can_be_closed() {
+        a_pair_placed_open_closes_one_leaf_at_a_time((1521, 1522), (1524, 1525));
+    }
+
+    #[test]
+    fn a_gate_the_map_places_open_can_be_closed() {
+        a_pair_placed_open_closes_one_leaf_at_a_time((1558, 1559), (1560, 1567));
+    }
+
+    /// The sounds the world played since it was last asked.
+    fn sounds(world: &mut World) -> Vec<u32> {
+        let events = world.take_events();
+        events.into_iter().filter_map(|event| if let WorldEvent::Sound { sound, .. } = event { Some(sound) } else { None }).collect()
+    }
+
+    #[test]
+    fn a_door_sounds_as_it_opens_and_closes() {
+        let door = single_door();
+        let mut world = walled(&[door], Registry::builtin());
+        world.player_interact_object(1535, door.tile, "Open").unwrap();
+        run(&mut world, 20);
+        assert_eq!(sounds(&mut world), vec![sounds::DOOR_OPEN]);
+
+        world.player_interact_object(1536, tc(4, 0), "Close").unwrap();
+        run(&mut world, 5);
+        assert_eq!(sounds(&mut world), vec![sounds::DOOR_CLOSE]);
+    }
+
+    #[test]
+    fn a_gate_sounds_like_a_gate() {
+        let (south, north) = (wall(1558, 5, 0, 0), wall(1560, 5, 1, 0));
+        let mut world = walled(&[south, north], Registry::builtin());
+        world.player_interact_object(1558, south.tile, "Open").unwrap();
+        run(&mut world, 20);
+        assert_eq!(sounds(&mut world), vec![sounds::GATE_OPEN]);
+
+        world.player_interact_object(1559, tc(4, 0), "Close").unwrap();
+        run(&mut world, 5);
+        assert_eq!(sounds(&mut world), vec![sounds::GATE_CLOSE]);
+    }
+
+    #[test]
+    fn a_stuck_door_makes_no_sound() {
+        let (mut world, _) = spam_closes(1);
+        let heard = sounds(&mut world);
+        assert_eq!(heard.last(), Some(&sounds::DOOR_OPEN), "the last open sounds, the stuck close does not: {heard:?}");
+    }
+
     #[test]
     fn options_that_do_not_fit_the_door_do_nothing() {
         let door = single_door();
@@ -503,6 +616,77 @@ mod tests {
 
         assert!(messages.is_empty(), "{messages:?}");
         assert_eq!(world.scenery_changes().count(), 0, "shut");
+    }
+
+    fn diagonal(id: u32, x: i32, z: i32, orientation: u8) -> Loc {
+        Loc { id, tile: tc(x, z), kind: DIAGONAL_WALL, orientation, size: (1, 1) }
+    }
+
+    /// A flat world split by a diagonal wall along x = z (south-west to north-east), with `door`
+    /// set into it, the player standing at (3, 0) on its south-east side.
+    fn diagonally_walled(door: Loc) -> World {
+        let mut world = dev_open_floor_world(10, 4242, tc(3, 0), PlayerConfig::default());
+        world.set_registry(Rc::new(Registry::builtin()));
+        for k in -10..=10 {
+            if !door.covers(tc(k, k)) && !door.covers(tc(k, k + 1)) {
+                world.map.add_wall(tc(k, k), DIAGONAL_WALL, 0);
+            }
+        }
+        world.map.add_wall(door.tile, door.kind, door.orientation);
+        world.add_scenery(door);
+        world
+    }
+
+    /// Walks the player to (0, 3), across the diagonal wall, and says whether it got there.
+    fn walks_across(world: &mut World) -> bool {
+        world.player_request_walk_to(tc(0, 3), false);
+        run(world, 40);
+        world.player.tile() == tc(0, 3)
+    }
+
+    #[test]
+    fn a_door_on_a_diagonal_wall_swings_onto_the_tile_beside_it() {
+        let door = diagonal(1535, 0, 0, 0);
+        let mut world = diagonally_walled(door);
+        assert!(!walks_across(&mut world), "the closed door blocks its tile");
+
+        world.player_interact_object(1535, door.tile, "Open").unwrap();
+        run(&mut world, 20);
+        let changes: Vec<_> = world.scenery_changes().copied().collect();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].replacement, diagonal(1536, 0, 1, 1), "open: on the tile north of it, turned a quarter");
+        assert_eq!(world.map.flags_at(door.tile) & CollisionFlag::BLOCK_OBJECT, 0, "the doorway is clear");
+        assert_ne!(world.map.flags_at(tc(0, 1)) & CollisionFlag::BLOCK_OBJECT, 0, "the open door blocks where it stands");
+        assert!(walks_across(&mut world));
+
+        world.player_interact_object(1536, tc(0, 1), "Close").unwrap();
+        run(&mut world, 20);
+        assert!(world.scenery_changes().next().is_none(), "shut");
+        assert_ne!(world.map.flags_at(door.tile) & CollisionFlag::BLOCK_OBJECT, 0);
+        assert_eq!(world.map.flags_at(tc(0, 1)) & CollisionFlag::BLOCK_OBJECT, 0);
+    }
+
+    #[test]
+    fn a_door_on_a_diagonal_wall_the_map_places_open_can_be_shut() {
+        let open = diagonal(1536, 0, 1, 1);
+        let mut world = diagonally_walled(open);
+        assert!(walks_across(&mut world));
+
+        world.player_interact_object(1536, open.tile, "Close").unwrap();
+        run(&mut world, 20);
+        let changes: Vec<_> = world.scenery_changes().copied().collect();
+        assert_eq!(changes[0].replacement, diagonal(1535, 0, 0, 0), "shut in its gap in the wall");
+        world.player_request_walk_to(tc(3, 0), false);
+        run(&mut world, 40);
+        assert_ne!(world.player.tile(), tc(3, 0), "it cannot be walked back through");
+    }
+
+    #[test]
+    fn swinging_a_diagonal_door_open_and_back_is_the_same_door() {
+        for orientation in 0..4 {
+            let shut = diagonal(1535, 7, 7, orientation);
+            assert_eq!(unswung(swung(shut, LeafMove::DIAGONAL, 1536), LeafMove::DIAGONAL, 1535), shut, "orientation {orientation}");
+        }
     }
 
     #[test]

@@ -21,9 +21,11 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use osrs_cache::config::Configs;
 use osrs_cache::item::{ids_by_name, ItemDef};
+use osrs_cache::minimap::{MapObject, Swap};
 use osrs_cache::ui::{draw, standard_state, CacheAssets, Hit, Layout, Rect, TopLevel, UiState};
 use osrs_cache::Cache;
 use osrs_core::data::EquipSlot;
+use osrs_core::sim::{Loc, LocChange};
 use osrs_core::tiles::TileCoord;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -535,6 +537,12 @@ fn build_interface(world: &mut World) {
     }
 }
 
+/// The server's scenery changes on the ground level, as the minimap swaps them.
+fn minimap_swaps(changes: &[LocChange]) -> Vec<Swap> {
+    let object = |loc: &Loc| MapObject { id: loc.id, x: loc.tile.x, z: loc.tile.z, kind: loc.kind, orientation: loc.orientation };
+    changes.iter().filter(|change| change.loc.tile.plane == 0).map(|change| (object(&change.loc), object(&change.replacement))).collect()
+}
+
 /// Where the player is in world tiles (x east, z north), for the minimap.
 fn player_position(players: &Query<&Transform, With<Player>>, server: &ServerLink) -> (f32, f32) {
     if let Ok(t) = players.single() {
@@ -589,6 +597,9 @@ fn refresh(
             .collect()
     });
     let arrived = ui.assets.minimap.update(map, &npc_dots);
+    if let Some(snapshot) = &server.latest {
+        ui.assets.minimap.set_swaps(&minimap_swaps(&snapshot.scenery));
+    }
 
     let player = server.latest.as_ref().map(|s| &s.player);
     let messages = chat.messages();
