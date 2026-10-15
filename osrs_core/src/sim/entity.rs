@@ -121,7 +121,7 @@ impl Entity {
                 targets_player: false,
                 phases_by_name,
                 triggers: Vec::new(),
-                combat_state: Some(NpcCombatState::new(Rc::clone(&phase.attack_pattern))),
+                combat_state: Some(NpcCombatState::new(Rc::clone(&phase.attack_pattern)).with_attack_speed(def.attack_speed)),
                 current_phase: Some(phase),
             })
         };

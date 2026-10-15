@@ -437,9 +437,24 @@ impl Registry {
             if [levels.attack, levels.strength, levels.defence, levels.ranged, levels.magic].iter().any(|l| *l < 1) {
                 problems.push(format!("{who}: every level must be at least 1"));
             }
+            if npc.attack_speed < 1 {
+                problems.push(format!("{who}: attack_speed must be at least 1"));
+            }
             for attack in &npc.attacks {
-                if attack.speed < 1 {
+                if attack.speed.is_some_and(|speed| speed < 1) {
                     problems.push(format!("{who}: attack '{}' speed must be at least 1", attack.name));
+                }
+                if attack.telegraph_ticks < 0 || attack.impact_delay_ticks < 0 {
+                    problems.push(format!("{who}: attack '{}' telegraph_ticks and impact_delay_ticks must not be negative", attack.name));
+                }
+                if attack.telegraph_ticks > 0 && attack.impact_delay_ticks > 0 {
+                    problems.push(format!(
+                        "{who}: attack '{}' is either telegraphed or on-contact (impact_delay_ticks), not both",
+                        attack.name
+                    ));
+                }
+                if attack.projectile_speed.is_some_and(|speed| !(speed > 0.0 && speed.is_finite())) {
+                    problems.push(format!("{who}: attack '{}' projectile_speed must be a positive number of tiles per tick", attack.name));
                 }
                 if attack.hit_count < 1 {
                     problems.push(format!("{who}: attack '{}' hit_count must be at least 1", attack.name));

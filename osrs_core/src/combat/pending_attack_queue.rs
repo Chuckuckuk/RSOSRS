@@ -110,7 +110,8 @@ impl PendingAttackQueue {
                     multiplier,
                     roll.successful_floor,
                 );
-                damage_buffer.enqueue(damage, attack.projectile_travel_ticks, roll.attack.on_hit_status_effect);
+                // it rolled on contact, so the damage lands the moment it rolls: no flight to wait out
+                damage_buffer.enqueue(damage, 0, roll.attack.on_hit_status_effect);
             } else {
                 self.pending[i].ticks_remaining -= 1;
                 i += 1;
@@ -132,11 +133,8 @@ mod tests {
     const ATTACKER: EntityId = EntityId(1);
     const ATTACKER_TILE: TileCoord = TileCoord { x: 5, z: 5, plane: 0 };
 
-    fn make_attack(projectile_travel_ticks: i32, reaction: ReactionRequirement) -> Rc<AttackDefinition> {
-        AttackDefinition::targeted("Test Doom-style", 10, 0, AttackStyle::Magic)
-            .with_reaction(reaction)
-            .with_projectile_travel_ticks(projectile_travel_ticks)
-            .shared()
+    fn make_attack(reaction: ReactionRequirement) -> Rc<AttackDefinition> {
+        AttackDefinition::on_contact("Test Doom-style", 10, 1, AttackStyle::Magic).with_reaction(reaction).shared()
     }
 
     fn attacker_stats() -> CombatStats {
@@ -160,7 +158,7 @@ mod tests {
     fn enqueue_then_advance_does_not_touch_health_until_the_delay_elapses() {
         let mut target = FakeCombatTarget::new(100);
         let mut queue = PendingAttackQueue::new();
-        queue.enqueue(make_attack(0, ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 2);
+        queue.enqueue(make_attack(ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 2);
 
         advance(&mut queue, &mut target, None, &mut DotNetRandom::new(1)); // still travelling
         assert_eq!(target.health.current(), 100);
@@ -180,7 +178,7 @@ mod tests {
         let mut queue = PendingAttackQueue::new();
         let mut reaction = PlayerReactionState { active_prayer: ProtectionPrayer::None, ..Default::default() };
         queue.enqueue(
-            make_attack(0, ReactionRequirement::prayer_match(ProtectionPrayer::Magic)),
+            make_attack(ReactionRequirement::prayer_match(ProtectionPrayer::Magic)),
             ATTACKER_TILE,
             Some(ATTACKER),
             attacker_stats(),
@@ -203,7 +201,7 @@ mod tests {
         let mut target = FakeCombatTarget::new(100);
         let mut queue = PendingAttackQueue::new();
         queue.enqueue(
-            make_attack(0, ReactionRequirement::prayer_match(ProtectionPrayer::Magic)),
+            make_attack(ReactionRequirement::prayer_match(ProtectionPrayer::Magic)),
             ATTACKER_TILE,
             Some(ATTACKER),
             attacker_stats(),
@@ -217,21 +215,16 @@ mod tests {
     }
 
     #[test]
-    fn advance_forwards_into_damage_buffer_with_the_attacks_own_projectile_travel_ticks() {
-        // Proves composition: a Doom-style roll-delay followed by its own post-roll travel
-        // delay still ends up resolved by DamageBuffer, unaffected by PendingAttackQueue.
+    fn an_on_contact_hit_lands_the_moment_it_rolls_with_no_flight_after_the_roll() {
+        // The roll was deferred until the attack made contact, so the damage that comes out of it
+        // is applied by the damage buffer in the same tick.
         let mut target = FakeCombatTarget::new(100);
         let mut queue = PendingAttackQueue::new();
-        queue.enqueue(make_attack(2, ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 1);
+        queue.enqueue(make_attack(ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 1);
 
-        advance(&mut queue, &mut target, None, &mut DotNetRandom::new(1)); // still travelling
-        advance(&mut queue, &mut target, None, &mut guaranteed_hit_of(10)); // rolls, hands off to DamageBuffer with 2 travel ticks
+        advance(&mut queue, &mut target, None, &mut DotNetRandom::new(1)); // still on its way
+        advance(&mut queue, &mut target, None, &mut guaranteed_hit_of(10)); // rolls on contact
 
-        assert_eq!(target.damage_buffer.pending_count(), 1);
-        target.damage_buffer.advance(&mut target.health, None);
-        assert_eq!(target.health.current(), 100);
-        target.damage_buffer.advance(&mut target.health, None);
-        assert_eq!(target.health.current(), 100);
         target.damage_buffer.advance(&mut target.health, None);
         assert_eq!(target.health.current(), 90);
     }
@@ -240,7 +233,7 @@ mod tests {
     fn pending_count_reflects_only_unrolled_attacks() {
         let mut target = FakeCombatTarget::new(100);
         let mut queue = PendingAttackQueue::new();
-        queue.enqueue(make_attack(0, ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 1);
+        queue.enqueue(make_attack(ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 1);
         assert_eq!(queue.pending_count(), 1);
 
         advance(&mut queue, &mut target, None, &mut DotNetRandom::new(1)); // still travelling
@@ -258,7 +251,7 @@ mod tests {
         let mut queue = PendingAttackQueue::new();
         let attacker_dead = Cell::new(false);
         let is_dead = |_: EntityId| attacker_dead.get();
-        queue.enqueue(make_attack(0, ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 2);
+        queue.enqueue(make_attack(ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 2);
 
         queue.advance(&target.view, &mut target.damage_buffer, None, &mut DotNetRandom::new(1), &is_dead); // attacker alive
         assert_eq!(queue.pending_count(), 1);
@@ -280,7 +273,7 @@ mod tests {
         let mut attacker_health = Health::new(10);
         attacker_health.damage(attacker_health.max());
         let is_dead = |_: EntityId| attacker_health.is_dead();
-        queue.enqueue(make_attack(0, ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 0);
+        queue.enqueue(make_attack(ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 0);
 
         queue.advance(&target.view, &mut target.damage_buffer, None, &mut DotNetRandom::new(1), &is_dead);
 
@@ -291,7 +284,7 @@ mod tests {
     fn an_attack_with_no_attacker_handle_always_rolls() {
         let mut target = FakeCombatTarget::new(100);
         let mut queue = PendingAttackQueue::new();
-        queue.enqueue(make_attack(0, ReactionRequirement::none()), ATTACKER_TILE, None, attacker_stats(), 0);
+        queue.enqueue(make_attack(ReactionRequirement::none()), ATTACKER_TILE, None, attacker_stats(), 0);
 
         queue.advance(&target.view, &mut target.damage_buffer, None, &mut guaranteed_hit_of(4), &|_| true);
 

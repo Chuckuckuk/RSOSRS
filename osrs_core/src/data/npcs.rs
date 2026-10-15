@@ -34,16 +34,21 @@ pub struct NpcAttackDef {
     pub style: AttackStyle,
     pub damage_type: Option<DamageType>,
     pub max_hit: i32,
-    /// Ticks between this attack's resolves (OSRS attack speed).
-    pub speed: i32,
+    /// Ticks between this attack resolving and the monster's next attack, for an attack that
+    /// differs from the monster's own `attack_speed`; absent uses that.
+    pub speed: Option<i32>,
     /// Tiles; ignored for melee, which needs adjacency.
     pub range: i32,
-    /// Ticks of visible wind-up before the roll (the Jad-style archetype); 0 for traditional.
+    /// Ticks of visible wind-up before the roll (the Jad-style archetype); 0 for traditional. An
+    /// attack is either telegraphed or has an `impact_delay_ticks`, not both.
     pub telegraph_ticks: i32,
-    /// Ticks between the telegraph ending and the roll (the Doom-style archetype).
+    /// Ticks between the attack being released and the roll (the Doom-style archetype, which has
+    /// no wind-up); 0 for any other.
     pub impact_delay_ticks: i32,
-    /// Ticks between the roll and the damage landing.
-    pub projectile_travel_ticks: i32,
+    /// How fast the projectile of an attack that rolls before it lands flies, in tiles per tick,
+    /// when it differs from the engine default. Ignored for melee and for an attack with an
+    /// `impact_delay_ticks`, which rolls on landing.
+    pub projectile_speed: Option<f32>,
     /// 0 = a correct protection prayer blocks it; 1 = ignores prayer ("typeless" in the old
     /// wording); in between = pierces.
     pub prayer_penetration: f32,
@@ -80,11 +85,11 @@ impl Default for NpcAttackDef {
             style: AttackStyle::Melee,
             damage_type: None,
             max_hit: 1,
-            speed: 4,
+            speed: None,
             range: 1,
             telegraph_ticks: 0,
             impact_delay_ticks: 0,
-            projectile_travel_ticks: 0,
+            projectile_speed: None,
             prayer_penetration: 0.0,
             protectable: true,
             weight: 1.0,
@@ -205,6 +210,9 @@ pub struct NpcDef {
     pub bonuses: EquipmentBonuses,
     pub attributes: AttributeSet,
     pub attacks: Vec<NpcAttackDef>,
+    /// Ticks between one of its attacks resolving and the next (OSRS attack speed): the rate of
+    /// the monster itself. An attack may carry its own `speed` instead.
+    pub attack_speed: i32,
     pub rotation: RotationDef,
     pub movement: NpcMovementDef,
     pub aggression: AggressionDef,
@@ -246,6 +254,7 @@ impl Default for NpcDef {
             bonuses: EquipmentBonuses::default(),
             attributes: AttributeSet::default(),
             attacks: Vec::new(),
+            attack_speed: 4,
             rotation: RotationDef::Fixed,
             movement: NpcMovementDef::Chase,
             aggression: AggressionDef::default(),

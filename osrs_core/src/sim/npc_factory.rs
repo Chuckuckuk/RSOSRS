@@ -7,7 +7,7 @@ use crate::actors::{
     StyleReactiveMovementPolicy,
 };
 use crate::combat::{
-    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProtectionPrayer, RangeAwarePattern,
+    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProjectileSpeed, ProtectionPrayer, RangeAwarePattern,
     ReactionRequirement, RotationMode,
 };
 use crate::data::{NpcAttackDef, NpcDef, NpcMovementDef, RotationDef};
@@ -29,18 +29,27 @@ pub fn attack_from_def(def: &NpcAttackDef) -> Rc<AttackDefinition> {
 
 /// [`attack_from_def`], heard as `fallback_sound` when the attack names no sound of its own.
 fn attack_sounding(def: &NpcAttackDef, fallback_sound: Option<u32>) -> Rc<AttackDefinition> {
-    let mut attack = AttackDefinition::targeted(def.name.clone(), def.range, def.telegraph_ticks, def.style)
-        .with_damage_type(def.damage_type.unwrap_or_else(|| DamageType::default_for(def.style)))
-        .with_max_hit(MaxHitSource::Fixed(def.max_hit))
-        .with_prayer_penetration(def.prayer_penetration)
-        .with_impact_delay_ticks(def.impact_delay_ticks)
-        .with_projectile_travel_ticks(def.projectile_travel_ticks)
-        .with_modifiers(def.modifiers.clone())
-        .with_hit_count(def.hit_count)
-        .with_attack_speed(def.speed)
-        .with_animation(def.animation)
-        .with_graphics(def.projectile, def.target_graphic, def.impact_graphic)
-        .with_sounds(def.sound.or(fallback_sound), def.resolve_sound);
+    // the attack's timing archetype comes from its numbers: a delay until it lands is Doom-style,
+    // a wind-up is Jad-style, neither is traditional
+    let mut attack = if def.impact_delay_ticks > 0 {
+        AttackDefinition::on_contact(def.name.clone(), def.range, def.impact_delay_ticks, def.style)
+    } else {
+        AttackDefinition::targeted(def.name.clone(), def.range, def.telegraph_ticks, def.style)
+    }
+    .with_damage_type(def.damage_type.unwrap_or_else(|| DamageType::default_for(def.style)))
+    .with_max_hit(MaxHitSource::Fixed(def.max_hit))
+    .with_prayer_penetration(def.prayer_penetration)
+    .with_modifiers(def.modifiers.clone())
+    .with_hit_count(def.hit_count)
+    .with_animation(def.animation)
+    .with_graphics(def.projectile, def.target_graphic, def.impact_graphic)
+    .with_sounds(def.sound.or(fallback_sound), def.resolve_sound);
+    if let Some(speed) = def.speed {
+        attack = attack.with_attack_speed(speed);
+    }
+    if let (Some(speed), 0) = (def.projectile_speed, def.impact_delay_ticks) {
+        attack = attack.with_projectile_speed(ProjectileSpeed::tiles_per_tick(speed));
+    }
     if def.protectable {
         attack = attack.with_reaction(ReactionRequirement::prayer_match(protection_for(def.style)));
     }
@@ -96,11 +105,14 @@ mod tests {
         let targeted = magic.expect_targeted();
         assert_eq!(targeted.style, AttackStyle::Magic);
         assert_eq!(targeted.max_hit, MaxHitSource::Fixed(95));
-        assert_eq!(targeted.projectile_travel_ticks, 1);
         assert_eq!(targeted.reaction, ReactionRequirement::prayer_match(ProtectionPrayer::Magic));
         assert_eq!(magic.animation, Some(2656));
-        // speed 8, telegraph 3 -> three busy ticks to resolve plus cooldown to fill the 8 ticks
-        assert_eq!(magic.cooldown_ticks, 4);
+        // a three-tick wind-up, then it rolls and flies at the engine's default speed
+        assert_eq!(magic.telegraph_ticks(), 3);
+        assert_eq!(magic.flight_ticks(10), crate::combat::ProjectileSpeed::DEFAULT.flight_ticks(10));
+        // the rate is Jad's own, not repeated on each attack
+        assert_eq!(jad.attack_speed, 8);
+        assert_eq!(magic.attack_speed, None);
     }
 
     #[test]

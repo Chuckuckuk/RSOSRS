@@ -27,8 +27,6 @@ pub struct TargetedAttack {
     /// 1 = "ignore"); see `reaction_resolver`.
     pub prayer_penetration: f32,
     pub reaction: ReactionRequirement,
-    /// Ticks between the roll and the damage actually landing.
-    pub projectile_travel_ticks: i32,
 }
 
 impl TargetedAttack {
@@ -43,7 +41,6 @@ impl TargetedAttack {
             always_hits: false,
             prayer_penetration: 0.0,
             reaction: ReactionRequirement::default(),
-            projectile_travel_ticks: 0,
         }
     }
 
@@ -87,12 +84,6 @@ impl TargetedAttack {
 
     pub fn with_reaction(mut self, reaction: ReactionRequirement) -> Self {
         self.reaction = reaction;
-        self
-    }
-
-    pub fn with_projectile_travel_ticks(mut self, projectile_travel_ticks: i32) -> Self {
-        assert!(projectile_travel_ticks >= 0, "projectile_travel_ticks must not be negative");
-        self.projectile_travel_ticks = projectile_travel_ticks;
         self
     }
 }

@@ -302,21 +302,20 @@ scheduler runs (primer 1.7).
   5. Ask the current phase's pattern whether any attack can reach the player (`engages`).
   6. Advance the `NpcCombatState`. If a telegraph has just begun, `report_telegraph_start` pushes
      the `Attack` event now, carrying the attack's own `animation`: the wind-up is the warning the
-     player reacts to (Jad). If an attack resolved: either release a ground strike
-     (`fire_at_ground`), or call `fire_at_player`. A positional reaction's origin comes from
+     player reacts to (Jad). If an attack resolved: either land a ground attack
+     (`fire_at_ground`), or call `fire_at_player` with the distance to the player (for the
+     projectile's flight). A positional reaction's origin comes from
      `NpcCombatState::hazard_origin`.
-* **`advance_ground_strikes`** runs from the encounter clock at the start of the AI phase (so
-  strikes land before any monster picks an attack) and counts down every world-owned
-  `PendingGroundStrike` (chapter 4.10); one that is due is resolved by `land_ground_strike`.
 * **`fire_at_player`** pushes an `Attack` event (only for attacks without a telegraph, which were
   not announced yet), the attack's sounds and its `Projectile` (marked `released` for a telegraphed
   attack), then calls **`deliver_attack`**: it pushes the `Graphic` events for the attack's target
   and impact graphics, then for each hit either queues a delayed roll in the player's
   `PendingAttackQueue` (impact delay > 0), or goes to **`roll_on_player`**, which computes the
   reaction multiplier from the player's current prayer, rolls (floor 0), and enqueues into the
-  player's `DamageBuffer`. A ground-targeted attack goes through `fire_at_ground` instead, which
-  announces it and queues a strike; its landing rolls no accuracy, it deals the ground attack's
-  damage (less any prayer reduction) to whoever is on its tiles.
+  player's `DamageBuffer`, to land after the attack's flight (`flight_ticks(distance)`). A
+  ground-targeted attack goes through `fire_at_ground` instead, which announces it and lands it at
+  once; it rolls no accuracy, it deals the ground attack's damage (less any prayer reduction) to
+  whoever is on its tiles.
 * **`run_*_movement`** for every NPC kind starts with `advance_incoming`: advance the NPC's own
   pending queue and damage buffer (landing hits and emitting `Hit` events). Then, if alive and not
   hostile: a summoned healer walks to stand beside the monster it heals (`walk_to_leader`), and

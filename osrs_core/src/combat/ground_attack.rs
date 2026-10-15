@@ -32,11 +32,14 @@ pub struct PrayerReduction {
     pub penetration: f32,
 }
 
-/// An attack aimed at the ground: it covers the tiles of its `target` and, once the attack's own
-/// `impact_delay_ticks` are up, hits whoever is standing on them then. It has no style, no damage
-/// type and never rolls accuracy.
+/// An attack aimed at the ground: it covers the tiles of its `target` and, when its telegraph
+/// ends, hits whoever is standing on them then, and is gone. It has no style, no damage type and
+/// never rolls accuracy.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroundAttack {
+    /// Ticks the tiles stay marked before the attack resolves; it lands, and is gone, when they
+    /// end. 0 lands the tick it is chosen.
+    pub telegraph_ticks: i32,
     pub target: GroundTarget,
     pub damage: GroundDamage,
     /// The one prayer that reduces (but never negates) the damage, if any.
@@ -44,12 +47,13 @@ pub struct GroundAttack {
 }
 
 impl GroundAttack {
-    pub fn new(target: GroundTarget, damage: GroundDamage) -> Self {
+    pub fn new(telegraph_ticks: i32, target: GroundTarget, damage: GroundDamage) -> Self {
+        assert!(telegraph_ticks >= 0, "telegraph_ticks must not be negative");
         match damage {
             GroundDamage::Fixed(amount) => assert!(amount >= 0, "ground damage must not be negative"),
             GroundDamage::Uniform { max } => assert!(max >= 0, "ground damage must not be negative"),
         }
-        Self { target, damage, prayer_reduction: None }
+        Self { telegraph_ticks, target, damage, prayer_reduction: None }
     }
 
     /// The fraction of the damage that reaches a defender in this state: 1 unless the one prayer
@@ -73,7 +77,7 @@ mod tests {
     use crate::rng::ScriptedRng;
 
     fn attack(prayer: Option<PrayerReduction>) -> GroundAttack {
-        let mut attack = GroundAttack::new(GroundTarget::square(HazardAnchor::Target, 0), GroundDamage::Fixed(20));
+        let mut attack = GroundAttack::new(0, GroundTarget::square(HazardAnchor::Target, 0), GroundDamage::Fixed(20));
         attack.prayer_reduction = prayer;
         attack
     }

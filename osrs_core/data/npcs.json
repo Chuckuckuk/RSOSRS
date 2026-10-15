@@ -8,7 +8,7 @@
     {
       "id": "man", "name": "Man", "combat_level": 2, "hitpoints": 7,
       "levels": { "attack": 1, "strength": 1, "defence": 1, "ranged": 1, "magic": 1 },
-      "attacks": [ { "name": "Punch", "max_hit": 1, "speed": 4, "damage_type": "crush" } ],
+      "attacks": [ { "name": "Punch", "max_hit": 1, "damage_type": "crush" } ],
       "wander_radius": 5,
       "appearance": 3106,
       "animations": { "attack": 422, "defend": 424, "death": 836 },
@@ -19,7 +19,7 @@
     {
       "id": "goblin", "name": "Goblin", "combat_level": 2, "hitpoints": 5,
       "levels": { "attack": 1, "strength": 1, "defence": 1 },
-      "attacks": [ { "name": "Stab", "max_hit": 1, "speed": 4, "damage_type": "stab" } ],
+      "attacks": [ { "name": "Stab", "max_hit": 1, "damage_type": "stab" } ],
       "aggression": { "aggressive": true, "range": 4 },
       "sounds": { "attack": 469, "hit": 472, "death": 471 }
     },
@@ -27,7 +27,7 @@
       "id": "zombie", "name": "Zombie", "combat_level": 24, "hitpoints": 22,
       "levels": { "attack": 24, "strength": 24, "defence": 24, "ranged": 1, "magic": 1 },
       "attributes": ["undead"],
-      "attacks": [ { "name": "Slash", "max_hit": 4, "speed": 4 } ],
+      "attacks": [ { "name": "Slash", "max_hit": 4 } ],
       "aggression": { "aggressive": true },
       "sounds": { "attack": 918, "hit": 923, "death": 922 },
       "notes": "Stats approximate; the point is the Undead tag (Salve amulet, Crumble Undead)."
@@ -36,7 +36,7 @@
       "id": "kalphite_soldier", "name": "Kalphite soldier", "combat_level": 85, "hitpoints": 90,
       "levels": { "attack": 90, "strength": 90, "defence": 80, "ranged": 1, "magic": 1 },
       "attributes": ["kalphite"],
-      "attacks": [ { "name": "Sting", "max_hit": 16, "speed": 4, "damage_type": "stab" } ],
+      "attacks": [ { "name": "Sting", "max_hit": 16, "damage_type": "stab" } ],
       "aggression": { "aggressive": true },
       "notes": "Stats approximate; the point is the Kalphite tag (Keris)."
     },
@@ -45,7 +45,7 @@
       "levels": { "attack": 97, "strength": 67, "defence": 135, "ranged": 1, "magic": 1 },
       "bonuses": { "defence": { "stab": 20, "slash": 20, "crush": 20, "ranged": 20 } },
       "attributes": ["demon"],
-      "attacks": [ { "name": "Claw", "max_hit": 8, "speed": 4, "damage_type": "slash" } ],
+      "attacks": [ { "name": "Claw", "max_hit": 8, "damage_type": "slash" } ],
       "aggression": { "aggressive": true },
       "sounds": { "attack": 276, "hit": 278, "death": 277 },
       "notes": "Stats approximate; the point is the Demon tag (Arclight)."
@@ -54,7 +54,7 @@
       "id": "gargoyle", "name": "Gargoyle", "combat_level": 111, "hitpoints": 105,
       "levels": { "attack": 75, "strength": 105, "defence": 107, "ranged": 1, "magic": 1 },
       "attributes": ["golem"],
-      "attacks": [ { "name": "Smash", "max_hit": 38, "speed": 4, "damage_type": "crush" } ],
+      "attacks": [ { "name": "Smash", "max_hit": 38, "damage_type": "crush" } ],
       "sounds": { "attack": 428, "hit": 430, "death": 429 },
       "notes": "Stats approximate; the point is the Golem tag."
     },
@@ -62,7 +62,7 @@
       "id": "kurask", "name": "Kurask", "combat_level": 106, "hitpoints": 97,
       "levels": { "attack": 90, "strength": 90, "defence": 90, "ranged": 1, "magic": 1 },
       "attributes": ["leafy"],
-      "attacks": [ { "name": "Swipe", "max_hit": 12, "speed": 4 } ],
+      "attacks": [ { "name": "Swipe", "max_hit": 12 } ],
       "attackable_if": { "any": [
         { "flag": "weapon_tag:leaf_bladed" },
         { "flag": "spell:magic_dart" },
@@ -75,7 +75,7 @@
       "id": "aviansie", "name": "Aviansie", "combat_level": 69, "hitpoints": 80,
       "levels": { "attack": 1, "strength": 1, "defence": 1, "ranged": 70, "magic": 1 },
       "attributes": ["flying"],
-      "attacks": [ { "name": "Arrow", "style": "ranged", "max_hit": 9, "speed": 4, "range": 7, "projectile_travel_ticks": 2 } ],
+      "attacks": [ { "name": "Arrow", "style": "ranged", "max_hit": 9, "range": 7 } ],
       "movement": { "maintain_distance": { "distance": 5 } },
       "attackable_if": { "any": [ { "not": { "style": "melee" } }, { "flag": "weapon_category:halberd" } ] },
       "notes": "Stats approximate. Flying monsters cannot be meleed except with a halberd."
@@ -84,10 +84,11 @@
       "id": "tztok_jad", "name": "TzTok-Jad", "combat_level": 702, "hitpoints": 250, "size": 5,
       "levels": { "attack": 640, "strength": 960, "defence": 480, "ranged": 960, "magic": 480 },
       "bonuses": { "attack": { "magic": 60 } },
+      "attack_speed": 8,
       "attacks": [
-        { "name": "Melee", "style": "melee", "damage_type": "crush", "max_hit": 97, "speed": 8, "animation": 2655, "sound": 408 },
-        { "name": "Ranged", "style": "ranged", "max_hit": 97, "speed": 8, "range": 15, "telegraph_ticks": 3, "projectile_travel_ticks": 1, "animation": 2652, "target_graphic": 451, "resolve_sound": 163 },
-        { "name": "Magic", "style": "magic", "max_hit": 95, "speed": 8, "range": 15, "telegraph_ticks": 3, "projectile_travel_ticks": 1, "animation": 2656, "projectile": 448, "impact_graphic": 157, "sound": 159 }
+        { "name": "Melee", "style": "melee", "damage_type": "crush", "max_hit": 97, "animation": 2655, "sound": 408 },
+        { "name": "Ranged", "style": "ranged", "max_hit": 97, "range": 15, "telegraph_ticks": 3, "animation": 2652, "target_graphic": 451, "resolve_sound": 163 },
+        { "name": "Magic", "style": "magic", "max_hit": 95, "range": 15, "telegraph_ticks": 3, "animation": 2656, "projectile": 448, "impact_graphic": 157, "sound": 159 }
       ],
       "rotation": "weighted",
       "aggression": { "aggressive": true, "range": 15, "ignores_tolerance": true, "ignores_combat_level": true },
@@ -102,7 +103,7 @@
       "id": "yt_hurkot", "name": "Yt-HurKot", "combat_level": 108, "hitpoints": 60,
       "levels": { "attack": 140, "strength": 100, "defence": 60, "ranged": 120, "magic": 120 },
       "bonuses": { "defence": { "ranged": 100, "magic": 100 } },
-      "attacks": [ { "name": "Claw", "style": "melee", "damage_type": "crush", "max_hit": 14, "speed": 4 } ],
+      "attacks": [ { "name": "Claw", "style": "melee", "damage_type": "crush", "max_hit": 14 } ],
       "heals_summoner": { "amount": 5, "every_ticks": 4, "range": 5, "forget_player_beyond": 8, "animation": 2639 },
       "appearance": 3128,
       "animations": { "attack": 2637, "defend": 2635, "death": 2638 },

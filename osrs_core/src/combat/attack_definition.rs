@@ -4,6 +4,7 @@ use super::attack_style::AttackStyle;
 use super::ground_attack::{GroundAttack, GroundDamage, PrayerReduction};
 use super::ground_target::GroundTarget;
 use super::max_hit_source::MaxHitSource;
+use super::projectile_speed::ProjectileSpeed;
 use super::protection_prayer::ProtectionPrayer;
 use super::reaction_requirement::ReactionRequirement;
 use super::status_effect::StatusEffectDefinition;
@@ -16,10 +17,11 @@ use crate::tiles::TileCoord;
 /// state that is currently telegraphing it and the pending-attack queue that later rolls it, so
 /// "the same attack" stays pointer-identical like the C# reference type.
 ///
-/// This holds what every attack has: when it happens (telegraph, delay, cooldown), how far it
-/// reaches, and how it looks and sounds. What it does is its `kind`: a `TargetedAttack` is rolled
-/// against a defender (accuracy, style, prayers), a `GroundAttack` hits whoever is standing on a set
-/// of tiles with a plain amount of damage.
+/// This holds what every attack has: how far it reaches, how it looks and sounds, and an optional
+/// override of the attacker's own attack rate. When it happens, and what it does, is its `kind`:
+/// an attack that is rolled against a defender is `Instant`, `Telegraphed` or `OnContact` (the
+/// three timing archetypes of the OSRS bosses), and one aimed at tiles is `Ground`. Each carries
+/// only the timing fields that kind has.
 ///
 /// The optional fields are set with the `with_*` builders (each validates like the C# constructor
 /// and panics on bad data, including a builder for a field the attack's kind does not have).
@@ -27,14 +29,9 @@ use crate::tiles::TileCoord;
 pub struct AttackDefinition {
     pub name: String,
     pub range: i32,
-    pub telegraph_ticks: i32,
-    /// Ticks between the telegraph ending and the roll or landing ("Doom-style" attacks, and every
-    /// ground attack).
-    pub impact_delay_ticks: i32,
-    /// Ticks the attacker must wait after this attack resolves before it may begin its next
-    /// telegraph. `with_attack_speed` derives it from an OSRS attack speed; 0 keeps the original
-    /// back-to-back behaviour.
-    pub cooldown_ticks: i32,
+    /// Overrides the attacker's own attack speed for this attack: the ticks between this attack
+    /// resolving and the next one (OSRS attack speed). `None` uses the attacker's.
+    pub attack_speed: Option<i32>,
     pub on_hit_status_effect: Option<StatusEffectDefinition>,
     /// The cache sequence the attacker plays for this attack, if it has its own (presentation
     /// only: the rules never read it).
@@ -51,23 +48,97 @@ pub struct AttackDefinition {
     pub kind: AttackKind,
 }
 
-/// What an attack does, and the data only that kind of attack has.
+/// When an attack resolves, and the data only that kind of attack has.
 #[derive(Debug, Clone)]
 pub enum AttackKind {
-    /// Rolled against a defender.
-    Targeted(TargetedAttack),
+    /// Rolls the tick it is chosen, with no wind-up to read (the "traditional" archetype: most
+    /// melee, and any attack the player must already be praying against when it starts).
+    Instant(InstantAttack),
+    /// A visible wind-up, then it rolls the tick the wind-up ends (Jad).
+    Telegraphed(TelegraphedAttack),
+    /// Rolls only once it makes contact, `impact_delay_ticks` after it is released, so the
+    /// defender's state at that moment is what counts (Doom of Mokhaiotl's "Doom-style").
+    OnContact(OnContactAttack),
     /// Aimed at tiles; never rolls accuracy.
     Ground(GroundAttack),
+    // Catch-all for attacks that do not neatly match either of the above. The OSRS combat system has a few of these, but they are not used in this project.
+    Special,
+}
+
+/// A targeted attack that rolls as soon as it is chosen. If it flies, the damage lands after the
+/// flight.
+#[derive(Debug, Clone)]
+pub struct InstantAttack {
+    pub payload: TargetedAttack,
+    /// Overrides the engine default flight speed of an attack that flies after it rolls.
+    pub projectile_speed: Option<ProjectileSpeed>,
+}
+
+/// A targeted attack with a wind-up before it rolls.
+#[derive(Debug, Clone)]
+pub struct TelegraphedAttack {
+    /// Ticks of visible wind-up before the roll.
+    pub telegraph_ticks: i32,
+    pub payload: TargetedAttack,
+    /// Overrides the engine default flight speed of an attack that flies after it rolls.
+    pub projectile_speed: Option<ProjectileSpeed>,
+}
+
+/// A targeted attack whose roll waits until it lands.
+#[derive(Debug, Clone)]
+pub struct OnContactAttack {
+    /// Ticks between the attack being released and the roll.
+    pub impact_delay_ticks: i32,
+    pub payload: TargetedAttack,
 }
 
 impl AttackDefinition {
-    /// An attack rolled against a defender, in the given combat style.
-    pub fn targeted(name: impl Into<String>, range: i32, telegraph_ticks: i32, style: AttackStyle) -> Self {
-        Self::with_kind(name.into(), range, telegraph_ticks, AttackKind::Targeted(TargetedAttack::new(style)))
+    /// An attack rolled against a defender the tick it is chosen.
+    pub fn instant(name: impl Into<String>, range: i32, style: AttackStyle) -> Self {
+        Self::with_kind(
+            name.into(),
+            range,
+            AttackKind::Instant(InstantAttack { payload: TargetedAttack::new(style), projectile_speed: None }),
+        )
     }
 
-    /// An attack aimed at the ground: after `impact_delay_ticks` (set with
-    /// `with_impact_delay_ticks`) it deals `damage` to whoever stands on the tiles `target` picks.
+    /// An attack rolled against a defender once `telegraph_ticks` of wind-up have passed.
+    pub fn telegraphed(name: impl Into<String>, range: i32, telegraph_ticks: i32, style: AttackStyle) -> Self {
+        assert!(telegraph_ticks >= 1, "a telegraphed attack needs at least one tick of wind-up");
+        Self::with_kind(
+            name.into(),
+            range,
+            AttackKind::Telegraphed(TelegraphedAttack {
+                telegraph_ticks,
+                payload: TargetedAttack::new(style),
+                projectile_speed: None,
+            }),
+        )
+    }
+
+    /// An attack rolled against a defender only when it lands, `impact_delay_ticks` after release.
+    pub fn on_contact(name: impl Into<String>, range: i32, impact_delay_ticks: i32, style: AttackStyle) -> Self {
+        assert!(impact_delay_ticks >= 1, "an on-contact attack needs at least one tick before it lands");
+        Self::with_kind(
+            name.into(),
+            range,
+            AttackKind::OnContact(OnContactAttack { impact_delay_ticks, payload: TargetedAttack::new(style) }),
+        )
+    }
+
+    /// A targeted attack from a wind-up length: no wind-up is an `Instant` attack, any is
+    /// `Telegraphed`. For data, where the length is a number.
+    pub fn targeted(name: impl Into<String>, range: i32, telegraph_ticks: i32, style: AttackStyle) -> Self {
+        assert!(telegraph_ticks >= 0, "telegraph_ticks must not be negative");
+        if telegraph_ticks == 0 {
+            Self::instant(name, range, style)
+        } else {
+            Self::telegraphed(name, range, telegraph_ticks, style)
+        }
+    }
+
+    /// An attack aimed at the ground: when its `telegraph_ticks` end it deals `damage` to whoever
+    /// stands on the tiles `target` picks, and is gone.
     pub fn ground(
         name: impl Into<String>,
         range: i32,
@@ -75,16 +146,14 @@ impl AttackDefinition {
         target: GroundTarget,
         damage: GroundDamage,
     ) -> Self {
-        Self::with_kind(name.into(), range, telegraph_ticks, AttackKind::Ground(GroundAttack::new(target, damage)))
+        Self::with_kind(name.into(), range, AttackKind::Ground(GroundAttack::new(telegraph_ticks, target, damage)))
     }
 
-    fn with_kind(name: String, range: i32, telegraph_ticks: i32, kind: AttackKind) -> Self {
+    fn with_kind(name: String, range: i32, kind: AttackKind) -> Self {
         Self {
             name,
             range,
-            telegraph_ticks,
-            impact_delay_ticks: 0,
-            cooldown_ticks: 0,
+            attack_speed: None,
             on_hit_status_effect: None,
             animation: None,
             projectile: None,
@@ -96,49 +165,107 @@ impl AttackDefinition {
         }
     }
 
+    // ---- what kind of attack this is ----
+
+    /// The part of an attack that is rolled against a defender, whichever of the three timings it
+    /// has; `None` for a ground attack.
     pub fn targeted_part(&self) -> Option<&TargetedAttack> {
         match &self.kind {
-            AttackKind::Targeted(targeted) => Some(targeted),
-            AttackKind::Ground(_) => None,
+            AttackKind::Instant(attack) => Some(&attack.payload),
+            AttackKind::Telegraphed(attack) => Some(&attack.payload),
+            AttackKind::OnContact(attack) => Some(&attack.payload),
+            AttackKind::Ground(_) | AttackKind::Special => None,
         }
     }
 
-    /// The targeted part of an attack that is known to be one: a player's swing, or one waiting in
-    /// a defender's queue. Panics for a ground attack, which can be neither.
-    pub fn expect_targeted(&self) -> &TargetedAttack {
-        self.targeted_part().unwrap_or_else(|| panic!("'{}' is a ground attack; it is never rolled against a defender", self.name))
+    fn targeted_part_mut(&mut self) -> Option<&mut TargetedAttack> {
+        match &mut self.kind {
+            AttackKind::Instant(attack) => Some(&mut attack.payload),
+            AttackKind::Telegraphed(attack) => Some(&mut attack.payload),
+            AttackKind::OnContact(attack) => Some(&mut attack.payload),
+            AttackKind::Ground(_) | AttackKind::Special => None,
+        }
     }
 
     pub fn ground_part(&self) -> Option<&GroundAttack> {
         match &self.kind {
             AttackKind::Ground(ground) => Some(ground),
-            AttackKind::Targeted(_) => None,
+            _ => None,
         }
     }
 
-    /// Applies `change` to the targeted part. Panics for a ground attack, which has none: setting
-    /// an accuracy modifier on a boulder is a data bug, not something to ignore.
-    fn change_targeted(mut self, builder: &str, change: impl FnOnce(TargetedAttack) -> TargetedAttack) -> Self {
+    /// The targeted part of an attack that is known to be one: a player's swing, or one waiting in
+    /// a defender's queue. Panics for any other kind, which can be neither.
+    pub fn expect_targeted(&self) -> &TargetedAttack {
+        self.targeted_part().unwrap_or_else(|| panic!("'{}' is not rolled against a defender", self.name))
+    }
+
+    /// What to call an attack that is not a targeted one, for the panic of a builder that does
+    /// not apply to it.
+    fn untargeted_label(&self) -> &'static str {
         match self.kind {
-            AttackKind::Targeted(targeted) => self.kind = AttackKind::Targeted(change(targeted)),
-            AttackKind::Ground(_) => panic!("`{builder}` only applies to a targeted attack, and '{}' is a ground attack", self.name),
+            AttackKind::Ground(_) => "a ground attack",
+            AttackKind::Special => "a special attack",
+            _ => "a targeted attack",
         }
+    }
+
+    // ---- timing ----
+
+    /// Ticks of visible wind-up before this attack resolves; 0 for one that resolves the tick it
+    /// is chosen.
+    pub fn telegraph_ticks(&self) -> i32 {
+        match &self.kind {
+            AttackKind::Telegraphed(attack) => attack.telegraph_ticks,
+            AttackKind::Ground(ground) => ground.telegraph_ticks,
+            AttackKind::Instant(_) | AttackKind::OnContact(_) | AttackKind::Special => 0,
+        }
+    }
+
+    /// Ticks between a targeted attack being released and its roll; 0 for every kind but
+    /// `OnContact`, which rolls when it lands.
+    pub fn impact_delay_ticks(&self) -> i32 {
+        match &self.kind {
+            AttackKind::OnContact(attack) => attack.impact_delay_ticks,
+            _ => 0,
+        }
+    }
+
+    /// Ticks the damage spends in the air after the roll, for an attack released `distance` tiles
+    /// from its target: none for melee, an `OnContact` attack (its delay is the flight) or a
+    /// ground attack, otherwise the attack's own `ProjectileSpeed` or the engine default.
+    pub fn flight_ticks(&self, distance: i32) -> i32 {
+        let (payload, speed) = match &self.kind {
+            AttackKind::Instant(attack) => (&attack.payload, attack.projectile_speed),
+            AttackKind::Telegraphed(attack) => (&attack.payload, attack.projectile_speed),
+            AttackKind::OnContact(_) | AttackKind::Ground(_) | AttackKind::Special => return 0,
+        };
+        if payload.style == AttackStyle::Melee {
+            return 0;
+        }
+        speed.unwrap_or(ProjectileSpeed::DEFAULT).flight_ticks(distance)
+    }
+
+    /// Applies `change` to the targeted part. Panics for an attack that has none: setting an
+    /// accuracy modifier on a boulder is a data bug, not something to ignore.
+    fn change_targeted(mut self, builder: &str, change: impl FnOnce(TargetedAttack) -> TargetedAttack) -> Self {
+        let (name, label) = (self.name.clone(), self.untargeted_label());
+        let targeted = self
+            .targeted_part_mut()
+            .unwrap_or_else(|| panic!("`{builder}` only applies to a targeted attack, and '{name}' is {label}"));
+        *targeted = change(targeted.clone());
         self
     }
 
-    /// Makes consecutive uses of this attack resolve exactly `speed_ticks` apart (OSRS attack
-    /// speed). An attack without a telegraph resolves on the tick it is chosen; one with a
-    /// telegraph spends `telegraph_ticks` winding up first, so the fastest speed this can express
-    /// is `telegraph_ticks + 1`.
+    // ---- common builders ----
+
+    /// Makes this attack's own attack speed `speed_ticks` instead of the attacker's: consecutive
+    /// uses of it resolve exactly that many ticks apart. An attack without a telegraph resolves on
+    /// the tick it is chosen; one with a telegraph spends its wind-up first, so the fastest speed
+    /// this can express is `telegraph_ticks + 1`.
     pub fn with_attack_speed(mut self, speed_ticks: i32) -> Self {
-        let busy = self.telegraph_ticks.max(0);
-        self.cooldown_ticks = (speed_ticks - 1 - busy).max(0);
-        self
-    }
-
-    pub fn with_impact_delay_ticks(mut self, impact_delay_ticks: i32) -> Self {
-        assert!(impact_delay_ticks >= 0, "impact_delay_ticks must not be negative");
-        self.impact_delay_ticks = impact_delay_ticks;
+        assert!(speed_ticks >= 1, "attack speed must be at least 1 tick");
+        self.attack_speed = Some(speed_ticks);
         self
     }
 
@@ -199,8 +326,19 @@ impl AttackDefinition {
         self.change_targeted("with_reaction", |t| t.with_reaction(reaction))
     }
 
-    pub fn with_projectile_travel_ticks(self, projectile_travel_ticks: i32) -> Self {
-        self.change_targeted("with_projectile_travel_ticks", |t| t.with_projectile_travel_ticks(projectile_travel_ticks))
+    // ---- flight builder ----
+
+    /// How fast this attack's projectile flies, for an attack that rolls and then lands after the
+    /// flight (`Instant` and `Telegraphed`): an override of the engine default.
+    pub fn with_projectile_speed(mut self, speed: ProjectileSpeed) -> Self {
+        match &mut self.kind {
+            AttackKind::Instant(attack) => attack.projectile_speed = Some(speed),
+            AttackKind::Telegraphed(attack) => attack.projectile_speed = Some(speed),
+            AttackKind::OnContact(_) | AttackKind::Ground(_) | AttackKind::Special => {
+                panic!("`with_projectile_speed` only applies to an attack that rolls before it lands, and '{}' does not", self.name)
+            }
+        }
+        self
     }
 
     // ---- ground-only builders ----
@@ -212,9 +350,7 @@ impl AttackDefinition {
         assert!((0.0..=1.0).contains(&penetration), "penetration must be within [0, 1]");
         match &mut self.kind {
             AttackKind::Ground(ground) => ground.prayer_reduction = Some(PrayerReduction { prayer, penetration }),
-            AttackKind::Targeted(_) => {
-                panic!("`with_prayer_reduction` only applies to a ground attack, and '{}' is a targeted attack", self.name)
-            }
+            _ => panic!("`with_prayer_reduction` only applies to a ground attack, and '{}' is not one", self.name),
         }
         self
     }
@@ -252,36 +388,51 @@ mod tests {
     }
 
     #[test]
-    fn a_targeted_attack_defaults_the_optional_fields() {
-        let attack = AttackDefinition::targeted("Test", 0, 1, AttackStyle::Melee);
-        let targeted = attack.targeted_part().expect("targeted");
+    fn an_instant_attack_has_no_telegraph_and_no_delay() {
+        let attack = AttackDefinition::instant("Test", 0, AttackStyle::Melee);
 
-        assert_eq!(targeted.prayer_penetration, 0.0);
-        assert_eq!(targeted.reaction, ReactionRequirement::none());
-        assert_eq!(attack.impact_delay_ticks, 0);
-        assert_eq!(targeted.projectile_travel_ticks, 0);
+        assert!(matches!(attack.kind, AttackKind::Instant(_)));
+        assert_eq!(attack.telegraph_ticks(), 0);
+        assert_eq!(attack.impact_delay_ticks(), 0);
         assert!(attack.on_hit_status_effect.is_none());
-        assert!(attack.ground_part().is_none());
+        assert!(attack.attack_speed.is_none());
     }
 
     #[test]
-    fn a_ground_attack_has_no_targeted_part() {
+    fn each_timing_kind_carries_only_its_own_number() {
+        let telegraphed = AttackDefinition::telegraphed("Jad", 15, 3, AttackStyle::Magic);
+        let on_contact = AttackDefinition::on_contact("Slam", 15, 4, AttackStyle::Magic);
+
+        assert_eq!((telegraphed.telegraph_ticks(), telegraphed.impact_delay_ticks()), (3, 0));
+        assert_eq!((on_contact.telegraph_ticks(), on_contact.impact_delay_ticks()), (0, 4));
+    }
+
+    #[test]
+    fn the_data_constructor_picks_instant_or_telegraphed_from_the_wind_up() {
+        assert!(matches!(AttackDefinition::targeted("A", 0, 0, AttackStyle::Melee).kind, AttackKind::Instant(_)));
+        assert!(matches!(AttackDefinition::targeted("A", 0, 2, AttackStyle::Melee).kind, AttackKind::Telegraphed(_)));
+    }
+
+    #[test]
+    fn a_ground_attack_has_no_targeted_part_and_its_telegraph_is_its_timing() {
         let attack = boulder();
 
         assert!(attack.targeted_part().is_none());
         assert_eq!(attack.ground_part().expect("ground").damage, GroundDamage::Fixed(30));
+        assert_eq!(attack.telegraph_ticks(), 2);
+        assert_eq!(attack.impact_delay_ticks(), 0);
     }
 
     #[test]
     #[should_panic]
     fn prayer_penetration_above_one_panics() {
-        AttackDefinition::targeted("Test", 0, 1, AttackStyle::Melee).with_prayer_penetration(1.5);
+        AttackDefinition::instant("Test", 0, AttackStyle::Melee).with_prayer_penetration(1.5);
     }
 
     #[test]
     #[should_panic]
-    fn negative_impact_delay_panics() {
-        AttackDefinition::targeted("Test", 0, 1, AttackStyle::Melee).with_impact_delay_ticks(-1);
+    fn a_telegraph_of_zero_ticks_is_not_a_telegraphed_attack() {
+        AttackDefinition::telegraphed("Test", 0, 0, AttackStyle::Melee);
     }
 
     #[test]
@@ -291,9 +442,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "targeted attack")]
+    #[should_panic(expected = "is not one")]
     fn a_prayer_reduction_on_a_targeted_attack_panics() {
-        AttackDefinition::targeted("Test", 0, 1, AttackStyle::Melee).with_prayer_reduction(ProtectionPrayer::Melee, 0.5);
+        AttackDefinition::instant("Test", 0, AttackStyle::Melee).with_prayer_reduction(ProtectionPrayer::Melee, 0.5);
     }
 
     #[test]
@@ -306,8 +457,37 @@ mod tests {
     }
 
     #[test]
+    fn a_projectile_speed_only_applies_to_an_attack_that_rolls_before_it_lands() {
+        let flies = AttackDefinition::instant("Arrow", 7, AttackStyle::Ranged)
+            .with_projectile_speed(ProjectileSpeed::tiles_per_tick(1.0));
+
+        assert_eq!(flies.flight_ticks(5), 5);
+    }
+
+    #[test]
+    #[should_panic(expected = "rolls before it lands")]
+    fn an_on_contact_attack_has_no_projectile_speed() {
+        AttackDefinition::on_contact("Slam", 10, 3, AttackStyle::Magic).with_projectile_speed(ProjectileSpeed::DEFAULT);
+    }
+
+    #[test]
+    fn flight_uses_the_engine_default_speed_unless_the_attack_overrides_it() {
+        let arrow = AttackDefinition::instant("Arrow", 7, AttackStyle::Ranged);
+
+        assert_eq!(arrow.flight_ticks(3), 1);
+        assert_eq!(arrow.flight_ticks(7), 3);
+    }
+
+    #[test]
+    fn melee_ground_and_on_contact_attacks_have_no_flight() {
+        assert_eq!(AttackDefinition::instant("Punch", 1, AttackStyle::Melee).flight_ticks(1), 0);
+        assert_eq!(AttackDefinition::on_contact("Slam", 10, 3, AttackStyle::Magic).flight_ticks(8), 0);
+        assert_eq!(boulder().flight_ticks(8), 0);
+    }
+
+    #[test]
     fn melee_range_check_is_adjacency_to_the_attackers_footprint() {
-        let attack = AttackDefinition::targeted("Test", 0, 1, AttackStyle::Melee);
+        let attack = AttackDefinition::instant("Test", 0, AttackStyle::Melee);
 
         let check = attack.build_range_check(TileCoord::new(5, 5), 2);
 
@@ -318,7 +498,7 @@ mod tests {
 
     #[test]
     fn ranged_range_check_is_chebyshev_distance_from_the_attacker_tile() {
-        let attack = AttackDefinition::targeted("Test", 3, 1, AttackStyle::Magic);
+        let attack = AttackDefinition::instant("Test", 3, AttackStyle::Magic);
 
         let check = attack.build_range_check(TileCoord::new(5, 5), 1);
 
