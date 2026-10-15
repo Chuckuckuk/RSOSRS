@@ -582,6 +582,20 @@ mod tests {
     }
 
     #[test]
+    fn any_kind_of_attack_can_require_a_range_check() {
+        let from = TileCoord::new(0, 0);
+        let ground = AttackDefinition::ground("Rockfall", Some(6), 2, GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(10))
+            .with_min_range(2);
+        let special = AttackDefinition::with_kind("Special".into(), Some(6), AttackKind::Special).with_min_range(2);
+
+        for attack in [ground, special] {
+            assert!(!attack.is_in_reach(from, 1, 1, TileCoord::new(1, 0)), "{} too close", attack.name);
+            assert!(attack.is_in_reach(from, 1, 1, TileCoord::new(4, 0)), "{} in band", attack.name);
+            assert!(!attack.is_in_reach(from, 1, 1, TileCoord::new(7, 0)), "{} too far", attack.name);
+        }
+    }
+
+    #[test]
     fn an_attack_without_a_min_range_has_no_lower_bound() {
         let attack = AttackDefinition::instant("Arrow", Some(8), AttackStyle::Ranged);
 
