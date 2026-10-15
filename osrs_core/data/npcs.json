@@ -1,6 +1,12 @@
 {
   "npcs": [
     {
+      "id": "beaver", "name": "Beaver", "combat_level": 0,
+      "appearance": 12169,
+      "examine": "Looks like it's gotten through a lot of wood.",
+      "notes": "The Woodcutting pet as it follows the player (item 'beaver'). Cache NPC 12169 (options Talk-to, Pick-up, Metamorphosis) and examine from the OSRS wiki Beaver page."
+    },
+    {
       "id": "combat_dummy", "name": "Combat dummy", "combat_level": 1, "hitpoints": 10000,
       "movement": "stationary",
       "notes": "A target that never fights back, for measuring a setup's damage."

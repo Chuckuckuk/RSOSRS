@@ -158,10 +158,15 @@ is the more reliable check.
 
 Usually no Rust changes. Add its tool rows to [`data/tools.json`](../osrs_core/data/tools.json)
 (if new) and a node to [`data/gathering.json`](../osrs_core/data/gathering.json): its scenery ids
-and their depleted forms (check them with `find_locs` / `obj_info`), requirements, the per-tool
-`[low, high]` chances from the wiki's chart, XP in tenths, product, depletion rule and respawn
-range. `the_bundled_dataset_loads_and_validates` checks the references. Only a resource that runs
-out in a new way (a fishing spot that moves) needs a new `DepletionDef` variant.
+and their depleted forms (check them with `obj_actions` / `find_locs` / `obj_info`; the cache has
+no resource-to-depleted mapping, so match by name and size), requirements, the per-tool
+`[low, high]` chances from the wiki's chart, XP in tenths, product, depletion rule
+(`every_success`, `{"timer": {"ticks": N}}` or `{"chance": {"one_in": N}}`), respawn range,
+`attempt_sound` / `depleted_sound`, and `notes` naming the sources. Add the product to
+[`data/items.json`](../osrs_core/data/items.json) if it is new, named as in the cache.
+`the_bundled_dataset_loads_and_validates` checks the references, and `tests/trees.rs` checks
+every object, depleted form and product against the cache. Only a resource that runs out in a
+new way (a fishing spot that moves) needs a new `DepletionDef` variant.
 
 ### Add a conditional gear effect
 

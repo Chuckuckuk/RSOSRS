@@ -50,8 +50,9 @@ pub enum ClientCommand {
     Attack { target: EntityId },
     /// Ask what an item is (by its id).
     ExamineItem { item: String },
-    /// Walk up to an NPC and face it, for any of its options but Attack and Examine.
-    InteractNpc { target: EntityId },
+    /// Any of an NPC's options but Attack and Examine: "Pick-up" on the player's follower takes it
+    /// back; anything else walks up to the NPC and faces it.
+    InteractNpc { target: EntityId, option: String },
     /// Sets a protection prayer directly, with no prayer-book lookup and no drain.
     SetPrayer(ProtectionPrayer),
     SetRunning(bool),
@@ -352,8 +353,10 @@ impl Server {
                 Ok(())
             }
             ClientCommand::InteractObject { id, tile, action } => self.world.player_interact_object(id, tile, &action),
-            ClientCommand::InteractNpc { target } => {
-                if self.world.entity(target).is_some_and(|entity| !entity.is_dead()) {
+            ClientCommand::InteractNpc { target, option } => {
+                if option.eq_ignore_ascii_case("pick-up") && self.world.follower() == Some(target) {
+                    self.world.player_pick_up_follower(target);
+                } else if self.world.entity(target).is_some_and(|entity| !entity.is_dead()) {
                     self.world.player_set_interact_target(target);
                 }
                 Ok(())
@@ -549,8 +552,8 @@ fn entity_snapshot(entity: &Entity) -> EntitySnapshot {
     }
 }
 
-/// Who an NPC faces: the player while it fights them, else the monster it heals; nobody once it
-/// is dead.
+/// Who an NPC faces: the player while it fights them or follows them, else the monster it heals;
+/// nobody once it is dead.
 fn facing_of(entity: &Entity) -> Option<Combatant> {
     if entity.is_dead() {
         return None;
@@ -559,6 +562,7 @@ fn facing_of(entity: &Entity) -> Option<Combatant> {
         Behavior::Boss(state) if state.targets_player => Some(Combatant::Player),
         Behavior::Npc(state) if state.targets_player => Some(Combatant::Player),
         Behavior::Healer(state) => state.heal_target.map(Combatant::Npc),
+        Behavior::Follower => Some(Combatant::Player),
         _ => {
             let heals = entity.def.as_ref().is_some_and(|def| def.heals_summoner.is_some());
             entity.leader.filter(|_| heals).map(Combatant::Npc)
@@ -1019,7 +1023,7 @@ mod tests {
         let man = server.world.spawn_npc_def("man", TileCoord::new(6, 0)).unwrap();
         server.advance(0.0);
 
-        server.handle_command(ClientCommand::InteractNpc { target: man });
+        server.handle_command(ClientCommand::InteractNpc { target: man, option: "Talk-to".into() });
         assert_eq!(server.snapshot().player.face_target, Some(man));
         for _ in 0..12 {
             server.advance(0.6);
@@ -1054,7 +1058,7 @@ mod tests {
         let (mut server, chaser, man) = red_x_server();
         let start = tile_of(&mut server, chaser);
 
-        server.handle_command(ClientCommand::InteractNpc { target: man });
+        server.handle_command(ClientCommand::InteractNpc { target: man, option: "Talk-to".into() });
         for _ in 0..3 {
             server.advance(0.6);
         }
@@ -1101,7 +1105,7 @@ mod tests {
         let (mut server, chaser, man) = red_x_server();
         let start = tile_of(&mut server, chaser);
 
-        server.handle_command(ClientCommand::InteractNpc { target: man });
+        server.handle_command(ClientCommand::InteractNpc { target: man, option: "Talk-to".into() });
         server.advance(0.6);
         server.advance(0.6);
         assert_eq!(tile_of(&mut server, chaser), start);

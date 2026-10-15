@@ -20,7 +20,7 @@
     { "id": "ironwood_logs", "name": "Ironwood logs", "weight_kg": 2.0, "notes": "Cache item 32907; weight from the OSRS wiki. Cut from ironwood trees (data/gathering.json). No slot: carried, never worn." },
     { "id": "rosewood_logs", "name": "Rosewood logs", "weight_kg": 2.0, "notes": "Cache item 32910; weight from the OSRS wiki. Cut from rosewood trees (data/gathering.json). No slot: carried, never worn." },
     { "id": "ashes", "name": "Ashes", "weight_kg": 0.0, "notes": "Cache item 592. What a burnt-out fire leaves on its tile. No slot: carried, never worn." },
-    { "id": "beaver", "name": "Beaver", "notes": "Cache item 13322. The Woodcutting pet (data/gathering.json). Followers are not modelled yet, so it is only ever an item." },
+    { "id": "beaver", "name": "Beaver", "follower": "beaver", "notes": "Cache item 13322. The Woodcutting pet (data/gathering.json); follows the player as the monster 'beaver' (data/npcs.json)." },
     {
       "id": "abyssal_whip", "name": "Abyssal whip", "slot": "weapon", "weight_kg": 0.453,
       "bonuses": { "attack": { "slash": 82 }, "melee_strength": 82 },

@@ -465,10 +465,10 @@ fn perform(server: &ServerLink, chat: &mut ChatLog, selection: &mut UseSelection
             println!("[client] attack entity {}", id.0);
             server.link.send(ClientCommand::Attack { target: *id });
         }
-        // anything else: walk up to it and face it (there is nothing to do there yet)
+        // anything else: the server decides (picking up a pet; otherwise walking up to it)
         MenuAction::Npc { id, name, option } => {
-            println!("[client] {option} {name} (entity {}): walking up to it", id.0);
-            server.link.send(ClientCommand::InteractNpc { target: *id });
+            println!("[client] {option} {name} (entity {})", id.0);
+            server.link.send(ClientCommand::InteractNpc { target: *id, option: option.clone() });
         }
     }
 }

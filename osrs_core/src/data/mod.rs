@@ -387,6 +387,9 @@ impl Registry {
 
         for item in self.items.values() {
             let who = format!("item '{}'", item.id);
+            if let Some(npc) = item.follower.as_ref().filter(|npc| !self.npcs.contains_key(*npc)) {
+                problems.push(format!("{who}: follows as unknown monster '{npc}'"));
+            }
             if let Some(weapon) = &item.weapon {
                 if item.slot != Some(EquipSlot::Weapon) {
                     problems.push(format!("{who}: has weapon data but is not in the weapon slot"));

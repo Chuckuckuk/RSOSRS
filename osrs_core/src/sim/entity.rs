@@ -53,6 +53,8 @@ pub enum Behavior {
     Boss(BossState),
     Healer(HealerState),
     Passive,
+    /// The player's pet: it walks after the player and fights nobody.
+    Follower,
 }
 
 /// Where one of a monster's `summons` stands: whether the call will be answered when its hitpoints
@@ -133,6 +135,17 @@ impl Entity {
             let seed = (id.0 as i32).wrapping_mul(7919) ^ start.x.wrapping_mul(31) ^ start.z;
             entity.wander = Some(Wander::new(start, def.wander_radius, seed));
         }
+        entity
+    }
+
+    /// A pet following the player, drawn and named as `def` says. It never blocks anyone (pets
+    /// walk through, and are walked through by, everything that moves).
+    pub fn new_follower(id: EntityId, start: TileCoord, def: &Rc<NpcDef>, map: &mut CollisionMap) -> Self {
+        let actor = Actor::new(ActorKind::Npc, start, def.size, def.hitpoints, npc_factory::stats_from_def(def));
+        let mut mover = Mover::new(actor, map);
+        mover.leave_map(map);
+        let mut entity = Self::new(id, &def.name, mover, Behavior::Follower);
+        entity.def = Some(Rc::clone(def));
         entity
     }
 
@@ -225,6 +238,7 @@ impl Entity {
             Behavior::Boss(_) => "It looks extremely dangerous.",
             Behavior::Healer(_) => "It's healing its master.",
             Behavior::Passive => "It doesn't seem interested in fighting.",
+            Behavior::Follower => "It's following you around.",
         };
         format!("{}: {}", self.name, flavour)
     }

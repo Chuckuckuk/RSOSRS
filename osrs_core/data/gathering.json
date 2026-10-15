@@ -79,7 +79,7 @@
       "success_message": "You get some logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Tree, Dead tree, Dying tree and Evergreen tree pages (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Respawn 36-60 s. The dead, dying and evergreen charts stop at dragon; their crystal row is taken as the tree's."
+      "notes": "OSRS wiki Tree, Dead tree, Dying tree and Evergreen tree pages (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Respawn 36-60 s. The dead, dying and evergreen charts stop at dragon; their crystal row is taken as the tree's."
     },
     {
       "id": "achey_tree",
@@ -91,7 +91,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 1, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more achey tree logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 250,
@@ -114,7 +114,7 @@
       "success_message": "You get some achey tree logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Achey Tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Respawn 35.4-58.8 s."
+      "notes": "OSRS wiki Achey Tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Respawn 35.4-58.8 s."
     },
     {
       "id": "burnt_tree",
@@ -150,7 +150,7 @@
       "success_message": "You get some charcoal.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Burnt tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Respawn 35.4-58.8 s. Its chart stops at dragon (crystal taken as the tree's), and the Beaver page has no burnt tree (taken as a regular tree's)."
+      "notes": "OSRS wiki Burnt tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Respawn 35.4-58.8 s. Its chart stops at dragon (crystal taken as the tree's), and the Beaver page has no burnt tree (taken as a regular tree's)."
     },
     {
       "id": "oak_tree",
@@ -164,7 +164,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 15, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more oak logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 375,
@@ -187,7 +187,7 @@
       "success_message": "You get some oak logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Oak tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+      "notes": "OSRS wiki Oak tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
     },
     {
       "id": "willow_tree",
@@ -202,7 +202,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 30, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more willow logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 675,
@@ -225,7 +225,7 @@
       "success_message": "You get some willow logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Willow tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+      "notes": "OSRS wiki Willow tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
     },
     {
       "id": "teak_tree",
@@ -239,7 +239,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 35, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more teak logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 850,
@@ -262,7 +262,7 @@
       "success_message": "You get some teak logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Teak tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+      "notes": "OSRS wiki Teak tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
     },
     {
       "id": "mature_juniper_tree",
@@ -274,7 +274,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 42, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more juniper logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 350,
@@ -297,7 +297,7 @@
       "success_message": "You get some juniper logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Mature juniper tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Depletes 1 in 16 per log (wiki Woodcutting). The wiki has no chart or respawn time for it: both are rsmod's (the regular tree's chart, 15 ticks)."
+      "notes": "OSRS wiki Mature juniper tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Depletes 1 in 16 per log (wiki Woodcutting). The wiki has no chart or respawn time for it: both are rsmod's (the regular tree's chart, 15 ticks)."
     },
     {
       "id": "maple_tree",
@@ -311,7 +311,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 45, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more maple logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 1000,
@@ -334,7 +334,7 @@
       "success_message": "You get some maple logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Maple tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+      "notes": "OSRS wiki Maple tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
     },
     {
       "id": "hollow_tree",
@@ -370,7 +370,7 @@
       "success_message": "You get some bark.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Hollow tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Its chart stops at dragon; crystal is taken as dragon."
+      "notes": "OSRS wiki Hollow tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Its chart stops at dragon; crystal is taken as dragon."
     },
     {
       "id": "mahogany_tree",
@@ -384,7 +384,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 50, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more mahogany logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 1250,
@@ -407,7 +407,7 @@
       "success_message": "You get some mahogany logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Mahogany tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+      "notes": "OSRS wiki Mahogany tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
     },
     {
       "id": "arctic_pine_tree",
@@ -419,7 +419,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 54, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more arctic pine logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 400,
@@ -442,7 +442,7 @@
       "success_message": "You get some arctic pine logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Arctic pine tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+      "notes": "OSRS wiki Arctic pine tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
     },
     {
       "id": "yew_tree",
@@ -458,7 +458,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 60, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more yew logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 1750,
@@ -481,7 +481,7 @@
       "success_message": "You get some yew logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Yew tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+      "notes": "OSRS wiki Yew tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
     },
     {
       "id": "camphor_tree",
@@ -493,7 +493,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 66, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more camphor logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 1435,
@@ -516,7 +516,7 @@
       "success_message": "You get some camphor logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Camphor tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Stump from the wiki infobox."
+      "notes": "OSRS wiki Camphor tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Stump from the wiki infobox."
     },
     {
       "id": "magic_tree",
@@ -528,7 +528,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 75, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more magic logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 2500,
@@ -551,7 +551,7 @@
       "success_message": "You get some magic logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Magic tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
+      "notes": "OSRS wiki Magic tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt."
     },
     {
       "id": "ironwood_tree",
@@ -563,7 +563,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 80, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more ironwood logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 1750,
@@ -586,7 +586,7 @@
       "success_message": "You get some ironwood logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Ironwood tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Stump from the wiki infobox."
+      "notes": "OSRS wiki Ironwood tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Stump from the wiki infobox."
     },
     {
       "id": "redwood_tree",
@@ -599,7 +599,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 90, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more redwood logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 3800,
@@ -622,7 +622,7 @@
       "success_message": "You get some redwood logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Redwood tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Depleted forms from the wiki infobox."
+      "notes": "OSRS wiki Redwood tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Depleted forms from the wiki infobox."
     },
     {
       "id": "rosewood_tree",
@@ -634,7 +634,7 @@
       "requirements": [
         { "level": { "skill": "woodcutting", "level": 92, "message": "You need a {skill} level of {level} to chop down this tree." } },
         { "tool": { "category": "axe", "message": "You do not have an axe which you have the woodcutting level to use." } },
-        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more logs." } }
+        { "free_slots": { "slots": 1, "message": "Your inventory is too full to hold any more rosewood logs." } }
       ],
       "roll_interval_ticks": 4,
       "xp_tenths": 2125,
@@ -657,7 +657,7 @@
       "success_message": "You get some rosewood logs.",
       "attempt_sound": 2735,
       "depleted_sound": 2734,
-      "notes": "OSRS wiki Rosewood tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Despawn 4 min 34.8 s and respawn 2 min 3 s from the wiki Woodcutting page. Stump from the wiki infobox."
+      "notes": "OSRS wiki Rosewood tree (level, XP, Skilling success chart, despawn and respawn); Beaver page (pet base chance). Stumps: rsmod TreeLocs.kt, checked by name and size in the cache. The full-inventory message names the product, as in OSRS (LostCity woodcut.rs2). Sounds: RuneLite SoundEffectID TREE_CHOP 2735 and TREE_FALLING 2734; the chop plays with each attempt. Despawn 4 min 34.8 s and respawn 2 min 3 s from the wiki Woodcutting page. Stump from the wiki infobox."
     }
   ]
 }
