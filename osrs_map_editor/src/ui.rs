@@ -58,6 +58,8 @@ pub struct UiState {
     pub play_dialog: Option<(String, Option<(i32, i32)>)>,
     /// The project's cache is older than its edits: its name, and where to start playing.
     pub rebuild_dialog: Option<(String, Option<(i32, i32)>)>,
+    /// The NPC palette lists only the NPCs with combat stats.
+    pub npcs_with_stats_only: bool,
 }
 
 impl Default for UiState {
@@ -74,6 +76,7 @@ impl Default for UiState {
             play_here: true,
             play_dialog: None,
             rebuild_dialog: None,
+            npcs_with_stats_only: false,
         }
     }
 }
@@ -374,12 +377,22 @@ fn palette(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, state: &mu
             });
         }
         PaletteTab::Npcs => {
-            ui.label("NPCs the server knows (data/npcs.json)");
-            egui::ScrollArea::vertical().id_salt("npcs").show(ui, |ui| {
-                for n in catalog.npcs.iter().filter(|n| matches(&n.name, &n.id)) {
-                    let chosen = editor.brush == Some(Brush::Npc(n.id.clone()));
-                    if ui.selectable_label(chosen, format!("{} (level {})  {}", n.name, n.combat_level, n.id)).clicked() {
-                        choose(editor, Brush::Npc(n.id.clone()));
+            ui.checkbox(&mut state.npcs_with_stats_only, "Only NPCs with combat stats (\u{2605})");
+            let rows: Vec<_> = catalog
+                .npcs
+                .iter()
+                .filter(|n| !state.npcs_with_stats_only || n.has_stats)
+                .filter(|n| matches(&n.name, &n.cache_id.map(|i| i.to_string()).unwrap_or_default()) || matches("", &n.key))
+                .collect();
+            ui.label(format!("{} NPCs; \u{2605} = has combat stats (data/npcs.json), others stand and cannot be fought", rows.len()));
+            egui::ScrollArea::vertical().id_salt("npcs").show_rows(ui, row_height, rows.len(), |ui, range| {
+                for n in &rows[range] {
+                    let chosen = editor.brush == Some(Brush::Npc(n.key.clone()));
+                    let level = if n.combat_level > 0 { format!(" (level {})", n.combat_level) } else { String::new() };
+                    let id = n.cache_id.map_or_else(|| "no model yet".to_string(), |i| format!("#{i}"));
+                    let star = if n.has_stats { "  \u{2605}" } else { "" };
+                    if ui.selectable_label(chosen, format!("{}{level}  {id}{star}", n.name)).clicked() {
+                        choose(editor, Brush::Npc(n.key.clone()));
                     }
                 }
             });
@@ -426,8 +439,11 @@ fn inspector(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view: &m
         }
         Some(Selected::Npc(i)) => {
             if let Some(s) = editor.project.npc_spawns.get(i).cloned() {
-                let name = catalog.npcs.iter().find(|n| n.id == s.npc).map_or(s.npc.clone(), |n| n.name.clone());
+                let name = catalog.npc_name(&s.npc);
                 ui.label(format!("NPC {name} ({})", s.npc));
+                if !catalog.npc(&s.npc).is_some_and(|n| n.has_stats) {
+                    ui.label("No combat stats yet: it stands where it is put and cannot be fought.");
+                }
                 ui.label(format!("tile {}, {}, plane {}", s.x, s.z, s.plane + 1));
                 if ui.button("Remove (Delete)").clicked() {
                     remove(editor, catalog, Selected::Npc(i));
@@ -517,7 +533,7 @@ fn project_panel(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view
         let mut remove_at = None;
         for (i, s) in editor.project.npc_spawns.iter().enumerate() {
             ui.horizontal(|ui| {
-                let name = catalog.npcs.iter().find(|n| n.id == s.npc).map_or(s.npc.as_str(), |n| n.name.as_str());
+                let name = catalog.npc_name(&s.npc);
                 if ui.link(format!("{name} at {}, {}", s.x, s.z)).clicked() {
                     goto = Some((s.x, s.z));
                 }
@@ -779,7 +795,7 @@ fn world_labels(ctx: &egui::Context, painter: &egui::Painter, editor: &Editor, c
     };
     for s in &editor.project.npc_spawns {
         let Some(p) = screen(s.x, s.z, 2.1) else { continue };
-        let name = catalog.npcs.iter().find(|n| n.id == s.npc).map_or(s.npc.clone(), |n| n.name.clone());
+        let name = catalog.npc_name(&s.npc);
         painter.text(p, egui::Align2::CENTER_BOTTOM, name, egui::FontId::proportional(13.0), egui::Color32::from_rgb(255, 160, 40));
     }
     for &((x, z), area) in &view.icons.0 {

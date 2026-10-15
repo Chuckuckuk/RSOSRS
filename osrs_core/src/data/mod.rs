@@ -24,7 +24,10 @@ pub use firemaking::LogDef;
 pub use doors::{DoorDef, DoorLeafDef, DoorSwing, LeafMove};
 pub use gathering::{DepletionDef, GatheringNodeDef, NodeLocDef, PetDropDef, Requirement, ToolDef};
 pub use items::{AmmoDef, AmmoWeight, EquipSlot, ItemDef, SetDef, SpecialAttackDef, StanceDef, StanceKind, WeaponDef};
-pub use npcs::{AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels, NpcMovementDef, NpcSounds, RotationDef, SummonDef};
+pub use npcs::{
+    cache_npc_def, cache_npc_id, cache_npc_key, AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels,
+    NpcMovementDef, NpcSounds, RotationDef, SummonDef, CACHE_NPC_PREFIX,
+};
 pub use prayers::PrayerDef;
 pub use scenario::{builtin_scenarios, load_scenario, InventoryStack, NpcSpawn, PlayerSetup, ScenarioDef, SkillLevelsDef};
 pub use spells::{LevelScaling, SpellDef};
@@ -240,6 +243,12 @@ impl Registry {
 
     pub fn npc(&self, id: &str) -> Option<&NpcDef> {
         self.npcs.get(id)
+    }
+
+    /// The curated monster drawn as cache NPC `appearance`, if `npcs.json` has one: a spawn of
+    /// `cache:<id>` uses its stats.
+    pub fn npc_with_appearance(&self, appearance: u32) -> Option<&NpcDef> {
+        self.npcs.values().find(|d| d.appearance == Some(appearance))
     }
 
     /// Replaces (or adds) a monster definition: tests tweak a bundled one this way.

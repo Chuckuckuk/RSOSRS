@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use osrs_cache::config::{Configs, ObjectDef};
 use osrs_cache::Cache;
-use osrs_core::data::Registry;
+use osrs_core::data::{cache_npc_id, cache_npc_key, Registry};
 use std::collections::{BTreeMap, HashMap};
 
 /// An object the palette can place.
@@ -14,11 +14,17 @@ pub struct ObjectEntry {
     pub kind: u8,
 }
 
-/// An NPC from `data/npcs.json` (only those have stats and behaviour on the server).
+/// An NPC the palette can place: every NPC the cache can draw, plus the curated ones in
+/// `data/npcs.json` (only those have combat stats on the server).
 pub struct NpcEntry {
-    pub id: String,
+    /// What a spawn stores: the curated id when `npcs.json` has the NPC, else `cache:<id>`.
+    pub key: String,
     pub name: String,
     pub combat_level: i32,
+    /// The cache NPC it is drawn as, if any.
+    pub cache_id: Option<u32>,
+    /// Whether `npcs.json` gives it combat stats.
+    pub has_stats: bool,
 }
 
 /// A map function (minimap icon).
@@ -37,6 +43,8 @@ pub struct Catalog {
     /// Gathering resources: object id -> the node it belongs to (`"tree"`, `"oak_tree"`...).
     pub resources: BTreeMap<u32, String>,
     pub npcs: Vec<NpcEntry>,
+    /// Index into `npcs` by spawn key.
+    npc_index: HashMap<String, usize>,
     pub areas: Vec<AreaEntry>,
 }
 
@@ -97,16 +105,53 @@ impl Catalog {
                 resources.insert(loc.loc, node.id.clone());
             }
         }
-        let mut npcs: Vec<NpcEntry> =
-            registry.npcs().map(|n| NpcEntry { id: n.id.clone(), name: n.name.clone(), combat_level: n.combat_level }).collect();
-        npcs.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+        let mut npcs = Vec::new();
+        // every NPC the cache can draw: it has models of its own (not one that turns into others
+        // by game state) and a standing animation
+        for def in Configs::new(base)?.npcs()?.into_values() {
+            if def.models.is_empty() || def.stand.is_none() || def.name.is_empty() || def.name == "null" {
+                continue;
+            }
+            let curated = registry.npc_with_appearance(def.id);
+            npcs.push(NpcEntry {
+                key: curated.map_or_else(|| cache_npc_key(def.id), |c| c.id.clone()),
+                name: def.name.clone(),
+                combat_level: curated.map_or(def.combat_level.map_or(0, i32::from), |c| c.combat_level),
+                cache_id: Some(def.id),
+                has_stats: curated.is_some(),
+            });
+        }
+        // curated ones the cache cannot draw yet (no appearance): placeable, but invisible in game
+        for n in registry.npcs().filter(|n| n.appearance.is_none()) {
+            npcs.push(NpcEntry { key: n.id.clone(), name: n.name.clone(), combat_level: n.combat_level, cache_id: None, has_stats: true });
+        }
+        npcs.sort_by(|a, b| a.name.cmp(&b.name).then(a.combat_level.cmp(&b.combat_level)).then(a.cache_id.cmp(&b.cache_id)));
+        // a curated NPC drawn as one cache id appears once; its other cache ids stay as cache NPCs
+        let mut npc_index = HashMap::new();
+        for (i, n) in npcs.iter().enumerate() {
+            npc_index.entry(n.key.clone()).or_insert(i);
+        }
 
         let mut areas: Vec<AreaEntry> = osrs_cache::minimap::map_functions(base)?
             .into_iter()
             .filter_map(|(id, (sprite, name))| Some(AreaEntry { id: u16::try_from(id).ok()?, name, sprite }))
             .collect();
         areas.sort_by_key(|a| a.id);
-        Ok(Catalog { defs, objects, resources, npcs, areas })
+        Ok(Catalog { defs, objects, resources, npcs, npc_index, areas })
+    }
+
+    /// The palette entry a spawn's `npc` key names.
+    pub fn npc(&self, key: &str) -> Option<&NpcEntry> {
+        self.npc_index.get(key).map(|&i| &self.npcs[i]).or_else(|| {
+            // a cache NPC that has since been given stats is listed under its curated id
+            let id = cache_npc_id(key)?;
+            self.npcs.iter().find(|n| n.cache_id == Some(id))
+        })
+    }
+
+    /// A spawn's NPC's name, or its key when the palette does not know it.
+    pub fn npc_name(&self, key: &str) -> String {
+        self.npc(key).map_or_else(|| key.to_owned(), |n| n.name.clone())
     }
 
     pub fn object_name(&self, id: u32) -> String {

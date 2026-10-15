@@ -382,11 +382,15 @@ fn main() {
                 }
             }
         }
-        let registry = std::rc::Rc::new(Registry::builtin());
+        let mut registry = Registry::builtin();
 
         // a cache built by the map editor says who stands where; its squares are loaded now so
         // each NPC has ground under it, however far from the player
-        let npc_spawns = scenario.is_none().then(|| osrs_cache::active::npc_spawns(source.cache().dir())).flatten();
+        let mut npc_spawns = scenario.is_none().then(|| osrs_cache::active::npc_spawns(source.cache().dir())).flatten();
+        if let Some(spawns) = &mut npc_spawns {
+            resolve_cache_npcs(&mut registry, &source, spawns);
+        }
+        let registry = std::rc::Rc::new(registry);
         for s in npc_spawns.iter().flatten() {
             let square = square_of(s.x, s.z);
             if loaded.insert(square) {
@@ -599,6 +603,41 @@ fn start_scenario(
         server.link.send(ClientCommand::SetPaused(false));
         *started = true;
         println!("[client] the scenario starts");
+    }
+}
+
+/// Makes every spawn of a cache NPC (`cache:<id>`) name a definition the registry has: the curated
+/// one drawn as that NPC when `npcs.json` has it (so stats added there reach spawns already
+/// placed), else one made from the cache's own definition, which cannot be fought.
+fn resolve_cache_npcs(registry: &mut Registry, source: &MapSource, spawns: &mut [osrs_cache::project::NpcSpawn]) {
+    use osrs_core::data::{cache_npc_def, cache_npc_id, DataFile};
+    let mut cache_defs = None;
+    let mut made = Vec::new();
+    for s in spawns.iter_mut() {
+        let Some(id) = cache_npc_id(&s.npc) else { continue };
+        if let Some(curated) = registry.npc_with_appearance(id) {
+            s.npc = curated.id.clone();
+            continue;
+        }
+        if registry.npc(&s.npc).is_some() || made.iter().any(|d: &osrs_core::data::NpcDef| d.id == s.npc) {
+            continue;
+        }
+        let defs = cache_defs.get_or_insert_with(|| {
+            osrs_cache::config::Configs::new(source.cache()).and_then(|c| c.npcs()).unwrap_or_else(|e| {
+                eprintln!("[server] could not read the cache's NPC definitions: {e}");
+                Default::default()
+            })
+        });
+        match defs.get(&id) {
+            Some(def) => made.push(cache_npc_def(id, &def.name, def.combat_level, def.size)),
+            None => eprintln!("[server] the cache has no NPC {id}"),
+        }
+    }
+    if !made.is_empty() {
+        println!("[server] {} NPC kinds come from the cache alone (no combat stats)", made.len());
+        if let Err(e) = registry.merge(DataFile { npcs: made, ..Default::default() }) {
+            eprintln!("[server] cache NPCs: {e}");
+        }
     }
 }
 

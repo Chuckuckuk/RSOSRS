@@ -48,7 +48,7 @@ pub fn remove(editor: &mut Editor, catalog: &Catalog, target: Selected) {
             editor.status = format!("Removed {} ({})", catalog.object_name(placement.id), placement.id);
         }
         Selected::Npc(i) => {
-            let name = editor.project.npc_spawns.get(i).map(|s| s.npc.clone()).unwrap_or_default();
+            let name = editor.project.npc_spawns.get(i).map(|s| catalog.npc_name(&s.npc)).unwrap_or_default();
             editor.remove_npc(i);
             editor.status = format!("Removed NPC {name}");
         }
@@ -86,7 +86,7 @@ fn place(editor: &mut Editor, catalog: &Catalog, tile: (i32, i32)) {
         Some(Brush::Npc(npc)) => {
             editor.add_npc(NpcSpawn { npc: npc.clone(), x: tile.0, z: tile.1, plane: editor.plane });
             editor.selected = Some(Selected::Npc(editor.project.npc_spawns.len() - 1));
-            editor.status = format!("Placed NPC {npc} at {}, {}", tile.0, tile.1);
+            editor.status = format!("Placed NPC {} at {}, {}", catalog.npc_name(&npc), tile.0, tile.1);
         }
         Some(Brush::Icon(area)) => {
             editor.place_icon(square, x, z, area, catalog);

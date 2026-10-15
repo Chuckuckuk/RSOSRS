@@ -234,6 +234,37 @@ pub struct NpcDef {
     pub notes: String,
 }
 
+/// How a spawn names an NPC straight from the game cache, by its cache id: `cache:415`. Every NPC
+/// the cache has can be placed this way, curated in `npcs.json` or not (see [`cache_npc_def`]).
+pub const CACHE_NPC_PREFIX: &str = "cache:";
+
+/// The spawn id of cache NPC `id`.
+pub fn cache_npc_key(id: u32) -> String {
+    format!("{CACHE_NPC_PREFIX}{id}")
+}
+
+/// The cache id a spawn id like `cache:415` names, if it is one.
+pub fn cache_npc_id(key: &str) -> Option<u32> {
+    key.strip_prefix(CACHE_NPC_PREFIX)?.parse().ok()
+}
+
+/// A definition for cache NPC `id` that nobody has written stats for: it looks and is named as
+/// the cache says, stands where it is put, and cannot be fought (its combat stats live on the
+/// wiki, and are added to `npcs.json` when an NPC needs them; a curated entry whose `appearance`
+/// is `id` then takes its place).
+pub fn cache_npc_def(id: u32, name: &str, combat_level: Option<u16>, size: u8) -> NpcDef {
+    NpcDef {
+        id: cache_npc_key(id),
+        name: name.to_owned(),
+        combat_level: combat_level.map_or(0, i32::from),
+        size: i32::from(size.max(1)),
+        appearance: Some(id),
+        attackable_if: Condition::Not(Box::new(Condition::Always)),
+        notes: "From the game cache only: no combat stats yet.".into(),
+        ..NpcDef::default()
+    }
+}
+
 impl Default for NpcDef {
     fn default() -> Self {
         Self {
@@ -273,6 +304,33 @@ impl NpcDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cache_npc_key_round_trips_and_its_def_cannot_be_fought() {
+        assert_eq!(cache_npc_key(3105), "cache:3105");
+        assert_eq!(cache_npc_id("cache:3105"), Some(3105));
+        assert_eq!(cache_npc_id("man"), None);
+        assert_eq!(cache_npc_id("cache:x"), None);
+
+        let def = cache_npc_def(3105, "Hans", None, 0);
+        assert_eq!((def.id.as_str(), def.name.as_str(), def.appearance), ("cache:3105", "Hans", Some(3105)));
+        assert_eq!((def.combat_level, def.size), (0, 1));
+        assert!(def.attacks.is_empty() && !def.aggression.aggressive);
+        let ctx = crate::model::ConditionContext {
+            style: AttackStyle::Melee,
+            damage_type: DamageType::Slash,
+            target_attributes: AttributeSet::default(),
+            flags: &[],
+        };
+        assert!(!def.attackable_if.holds(&ctx));
+    }
+
+    #[test]
+    fn a_curated_monster_is_found_by_the_cache_npc_it_is_drawn_as() {
+        let registry = crate::data::Registry::builtin();
+        assert_eq!(registry.npc_with_appearance(415).map(|d| d.id.as_str()), Some("abyssal_demon"));
+        assert!(registry.npc_with_appearance(3105).is_none());
+    }
 
     #[test]
     fn a_monster_parses_with_sparse_json() {
