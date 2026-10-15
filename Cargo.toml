@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["osrs_core", "osrs_cache", "osrs_render", "osrs_viewer"]
+members = ["osrs_core", "osrs_cache", "osrs_render", "osrs_viewer", "osrs_map_editor"]
 
 # Profiles only take effect at the workspace root.
 [profile.dev]

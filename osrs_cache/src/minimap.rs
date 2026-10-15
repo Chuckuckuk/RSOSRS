@@ -124,15 +124,23 @@ fn decode_area(d: &[u8]) -> Option<(Option<u32>, String)> {
     Some((sprite, name))
 }
 
+/// Every map function (area definition with an icon): area id -> (sprite group, name). An object
+/// definition's map icon (opcode 82) names one of these.
+pub fn map_functions(cache: &Cache) -> Result<HashMap<u32, (u32, String)>> {
+    let configs = Configs::new(cache)?;
+    let mut areas = HashMap::new();
+    for (id, d) in configs.group_files(AREA_GROUP).unwrap_or_default() {
+        if let Some((Some(sprite), name)) = decode_area(&d) {
+            areas.insert(id, (sprite, name));
+        }
+    }
+    Ok(areas)
+}
+
 impl<'a> MinimapSource<'a> {
     pub fn new(cache: &'a Cache) -> Result<MinimapSource<'a>> {
         let configs = Configs::new(cache)?;
-        let mut areas = HashMap::new();
-        for (id, d) in configs.group_files(AREA_GROUP).unwrap_or_default() {
-            if let Some((Some(sprite), name)) = decode_area(&d) {
-                areas.insert(id, (sprite, name));
-            }
-        }
+        let areas = map_functions(cache)?;
         let sprites = cache.index(idx::SPRITES)?;
         let mut scenes = Vec::new();
         if let Some(group) = sprites.group_by_name("mapscene") {

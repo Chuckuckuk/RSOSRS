@@ -1,0 +1,11 @@
+[package]
+name = "osrs_map_editor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.20.0"
+bevy_egui = "0.43.1"
+osrs_cache = { path = "../osrs_cache" }
+osrs_core = { path = "../osrs_core" }
+osrs_render = { path = "../osrs_render" }

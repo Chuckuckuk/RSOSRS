@@ -48,6 +48,12 @@ pub struct Manifest {
 /// ([`Cache::ignoring_overlay`]) so edits are applied to the cache as stored, not on top of
 /// themselves.
 pub fn build(project: &MapProject, base: &Cache) -> Result<Containers> {
+    build_with(project, base, Compression::Gzip)
+}
+
+/// [`build`] with the containers packed as `compression` says: the editor's preview skips
+/// compressing, which is most of the work.
+pub fn build_with(project: &MapProject, base: &Cache, compression: Compression) -> Result<Containers> {
     let mut out = Containers::new();
     let mut tables: BTreeMap<u8, RefTable> = BTreeMap::new();
 
@@ -70,7 +76,7 @@ pub fn build(project: &MapProject, base: &Cache) -> Result<Containers> {
             let placed = edits.apply(&locs::decode(&files[1].1));
             files[1].1 = locs::encode(&placed);
             let data = join_files(&files.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
-            let packed = container::encode(&data, Compression::Gzip);
+            let packed = container::encode(&data, compression);
             maps.touch(gid, &packed, data.len());
             out.insert((idx::MAPS, gid), packed);
         }
@@ -85,7 +91,7 @@ pub fn build(project: &MapProject, base: &Cache) -> Result<Containers> {
             files.insert(m.id, m.encode());
         }
         let data = join_files(&files.values().map(Vec::as_slice).collect::<Vec<_>>());
-        let packed = container::encode(&data, Compression::Gzip);
+        let packed = container::encode(&data, compression);
         let Some(group) = config.group_mut(cfg::OBJECT) else {
             return fmt_err("the config archive has no object group");
         };
@@ -99,7 +105,7 @@ pub fn build(project: &MapProject, base: &Cache) -> Result<Containers> {
 
     for (archive, mut table) in tables {
         table.revision = table.revision.wrapping_add(1);
-        out.insert((META, archive as u32), container::encode(&table.encode(), Compression::Gzip));
+        out.insert((META, archive as u32), container::encode(&table.encode(), compression));
     }
     Ok(out)
 }
