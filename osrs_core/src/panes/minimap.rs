@@ -1,7 +1,9 @@
 //! The minimap (content type 1338) and the compass (1339).
 //!
 //! The picture of a map square (`osrs_cache::minimap`, 4 pixels a tile) is decoded on a worker
-//! thread, the first time its square comes near, and kept. Each time the interface is drawn the
+//! thread, the first time its square comes near, and kept. It is drawn with the scenery as it
+//! stands (an opened door where it swung to): when the server's changes in a square differ from
+//! the ones its picture has, it is drawn again, the old picture showing until the new one is back. Each time the interface is drawn the
 //! minimap component is filled by looking up, for every pixel inside its mask sprite, the map
 //! pixel it stands for after turning the map by the camera's yaw around the player's exact
 //! position. (The mask sprite is opaque outside the round window and transparent inside it.) Map icons (banks, altars...) and the dots (NPCs yellow, the player white in the
@@ -11,7 +13,7 @@
 //! (x east, z north) and the screen's right is (cos y, sin y).
 
 use osrs_cache::font::decode_frames;
-use osrs_cache::minimap::{Minimap, MinimapSource, SIZE};
+use osrs_cache::minimap::{Minimap, MinimapSource, Swap, SIZE};
 use osrs_cache::textures::Texture;
 use osrs_cache::ui::{Assets, Canvas, Rect};
 use osrs_cache::{idx, Cache};
@@ -60,15 +62,20 @@ impl MapParams {
     }
 }
 
+type Request = ((i32, i32), Vec<Swap>);
 type Reply = ((i32, i32), Option<Minimap>);
 
 /// The minimap pictures, and what is drawn on them.
 pub struct MinimapView {
-    requests: Sender<(i32, i32)>,
+    requests: Sender<Request>,
     results: Receiver<Reply>,
     /// Squares that came back (`None`: could not be drawn).
     squares: HashMap<(i32, i32), Option<Minimap>>,
     requested: HashSet<(i32, i32)>,
+    /// The scenery changes in each square, as the server last listed them (sorted).
+    swaps: HashMap<(i32, i32), Vec<Swap>>,
+    /// The changes each requested square was last asked to be drawn with.
+    drawn_with: HashMap<(i32, i32), Vec<Swap>>,
     /// Frames of the `mapdots` sprite (item, NPC, player, ...).
     dots: Vec<Texture>,
     pub params: MapParams,
@@ -78,7 +85,7 @@ pub struct MinimapView {
 impl MinimapView {
     /// Starts the thread that draws squares. It opens its own cache.
     pub fn spawn(cache: &Cache) -> MinimapView {
-        let (request_tx, request_rx) = mpsc::channel::<(i32, i32)>();
+        let (request_tx, request_rx) = mpsc::channel::<Request>();
         let (result_tx, result_rx) = mpsc::channel::<Reply>();
         thread::spawn(move || {
             let cache = Cache::open_default();
@@ -89,8 +96,8 @@ impl MinimapView {
                     None
                 }
             });
-            for (sx, sz) in request_rx {
-                let picture = source.as_ref().and_then(|s| match s.render(sx, sz) {
+            for ((sx, sz), swaps) in request_rx {
+                let picture = source.as_ref().and_then(|s| match s.render_changed(sx, sz, &swaps) {
                     Ok(p) => Some(p),
                     Err(e) => {
                         eprintln!("[minimap] square ({sx}, {sz}) cannot be drawn: {e}");
@@ -107,6 +114,8 @@ impl MinimapView {
             results: result_rx,
             squares: HashMap::new(),
             requested: HashSet::new(),
+            swaps: HashMap::new(),
+            drawn_with: HashMap::new(),
             dots: load_dots(cache),
             params: MapParams::default(),
             npc_dots: Vec::new(),
@@ -128,11 +137,43 @@ impl MinimapView {
         for sz in lo_z..=hi_z {
             for sx in lo_x..=hi_x {
                 if self.requested.insert((sx, sz)) {
-                    let _ = self.requests.send((sx, sz));
+                    self.request((sx, sz));
                 }
             }
         }
         arrived
+    }
+
+    /// Notes the scenery that stands as something else now. A square already asked for whose
+    /// changes differ from the ones it was drawn with is drawn again. A swap counts in the
+    /// squares of both its ends: a door on a square's edge can swing into the next.
+    pub fn set_swaps(&mut self, swaps: &[Swap]) {
+        let by_square = swaps_by_square(swaps);
+        if by_square == self.swaps {
+            return;
+        }
+        self.swaps = by_square;
+        let stale: Vec<(i32, i32)> = self
+            .requested
+            .iter()
+            .copied()
+            .filter(|square| self.drawn_with.get(square).map_or(&[][..], Vec::as_slice) != self.swaps_in(*square))
+            .collect();
+        for square in stale {
+            self.request(square);
+        }
+    }
+
+    /// The changes in `square`, sorted.
+    fn swaps_in(&self, square: (i32, i32)) -> &[Swap] {
+        self.swaps.get(&square).map_or(&[], Vec::as_slice)
+    }
+
+    /// Asks the worker to draw `square` with its changes as they are now.
+    fn request(&mut self, square: (i32, i32)) {
+        let swaps = self.swaps_in(square).to_vec();
+        self.drawn_with.insert(square, swaps.clone());
+        let _ = self.requests.send((square, swaps));
     }
 
     /// How many squares are drawn (for the fingerprint: a new one changes the picture).
@@ -245,6 +286,27 @@ fn inside_mask(mask: Option<&Texture>, rect: Rect, ox: i32, oy: i32) -> bool {
     m.rgba[o + 3] == 0
 }
 
+/// `swaps` under the square of each end (once if both ends are in one), sorted.
+fn swaps_by_square(swaps: &[Swap]) -> HashMap<(i32, i32), Vec<Swap>> {
+    let mut by_square: HashMap<(i32, i32), Vec<Swap>> = HashMap::new();
+    for swap in swaps {
+        let (from, to) = (square_of(swap.0.x, swap.0.z), square_of(swap.1.x, swap.1.z));
+        by_square.entry(from).or_default().push(*swap);
+        if to != from {
+            by_square.entry(to).or_default().push(*swap);
+        }
+    }
+    for list in by_square.values_mut() {
+        list.sort();
+    }
+    by_square
+}
+
+/// The map square holding world tile (`x`, `z`).
+fn square_of(x: i32, z: i32) -> (i32, i32) {
+    (x.div_euclid(64), z.div_euclid(64))
+}
+
 fn load_dots(cache: &Cache) -> Vec<Texture> {
     let Ok(sprites) = cache.index(idx::SPRITES) else { return Vec::new() };
     let Some(group) = sprites.group_by_name("mapdots") else { return Vec::new() };
@@ -283,6 +345,18 @@ mod tests {
         let p = MapParams { yaw: -std::f32::consts::FRAC_PI_2, ..p };
         let (x, z) = p.tile_at(0.0, -8.0);
         assert!((x - 102.0).abs() < 1e-3 && (z - 200.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_door_swinging_across_a_square_edge_redraws_both_squares() {
+        use osrs_cache::minimap::MapObject;
+        let door = |x, z, orientation| MapObject { id: 1535, x, z, kind: 0, orientation };
+        let inside = (door(3205, 3210, 0), door(3204, 3210, 1));
+        let across = (door(3200, 3210, 0), door(3199, 3210, 1));
+        let by_square = swaps_by_square(&[across, inside]);
+        assert_eq!(by_square.get(&(50, 50)), Some(&vec![across, inside]));
+        assert_eq!(by_square.get(&(49, 50)), Some(&vec![across]));
+        assert_eq!(by_square.len(), 2);
     }
 
     #[test]

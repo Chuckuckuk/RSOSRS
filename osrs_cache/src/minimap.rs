@@ -14,9 +14,13 @@
 //! Map function icons (bank, shops, altars...) are not part of the picture: the client draws them over
 //! it at runtime, so [`Minimap::icons`] lists them for the caller to draw.
 //!
+//! Scenery that is, for now, something else (an opened door, a felled tree's stump) is drawn as it
+//! stands by [`MinimapSource::render_changed`], which swaps those placements before drawing.
+//!
 //! Faithfulness notes are in the README ("Minimap").
 
 use crate::config::{Configs, ObjectDef, Overlay, Underlay};
+use crate::locs::Placement;
 use crate::model::hsl_to_rgb;
 use crate::terrain::REGION;
 use crate::terrain_mesh::{
@@ -51,6 +55,20 @@ pub struct MapIcon {
     pub sprite: u32,
     pub name: String,
 }
+
+/// A ground-level (plane 0) placement in world tiles: what a [`Swap`] takes out or puts in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MapObject {
+    pub id: u32,
+    pub x: i32,
+    pub z: i32,
+    pub kind: u8,
+    pub orientation: u8,
+}
+
+/// A placement shown as another for now: the one the map has, and what stands in for it (an
+/// opened door, moved and turned).
+pub type Swap = (MapObject, MapObject);
 
 pub struct Minimap {
     /// 256 x 256 RGBA, north up, x east. Pixel (px, py) covers tile
@@ -146,6 +164,13 @@ impl<'a> MinimapSource<'a> {
     }
 
     pub fn render(&self, sx: i32, sz: i32) -> Result<Minimap> {
+        self.render_changed(sx, sz, &[])
+    }
+
+    /// Like [`Self::render`], with each swap's original placement taken out and its replacement
+    /// put in, so walls, doors and map scenes are drawn where they stand now. A swap whose
+    /// original is not on the map still puts its replacement in.
+    pub fn render_changed(&self, sx: i32, sz: i32, swaps: &[Swap]) -> Result<Minimap> {
         let grid = TerrainGrid::load(
             self.cache,
             sx - 1,
@@ -155,7 +180,20 @@ impl<'a> MinimapSource<'a> {
             self.underlays.clone(),
             self.overlays.clone(),
         )?;
-        let placed = PlacedObjects::load(self.cache, &grid)?;
+        let mut placed = PlacedObjects::load(self.cache, &grid)?;
+        let (ox, oz) = (grid.region_x * 64, grid.region_y * 64);
+        for (from, to) in swaps {
+            let is_from = |(gx, gz, p): &(i32, i32, Placement)| {
+                p.plane == 0
+                    && (gx + ox, gz + oz) == (from.x, from.z)
+                    && (p.id, p.kind, p.orientation) == (from.id, from.kind, from.orientation)
+            };
+            placed.placements.retain(|placement| !is_from(placement));
+            let (gx, gz) = (to.x - ox, to.z - oz);
+            let local = |g: i32| g.rem_euclid(REGION as i32) as u8;
+            let p = Placement { id: to.id, plane: 0, x: local(gx), z: local(gz), kind: to.kind, orientation: to.orientation };
+            placed.placements.push((gx, gz, p));
+        }
         Ok(self.render_from(&grid, &placed))
     }
 
