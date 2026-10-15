@@ -12,7 +12,7 @@ use crate::actors::{ActorKind, EntityId, MovementPolicy, StationaryMovementPolic
 use crate::collision::{CollisionFlag, CollisionMap};
 use crate::data::{EquipSlot, Registry};
 use crate::combat::{
-    AttackDefinition, AttackStyle, CombatState, CombatStats, HazardAnchor, HomingPulseOrb, NpcCombatState, ReactionKind, get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor,
+    AttackDefinition, AttackStyle, CombatState, CombatStats, NpcCombatState, PendingGroundStrike, get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor,
 };
 use crate::encounters::{EncounterContext, Phase, TriggerAction, TriggerBinding};
 use crate::model::{ConditionContext, Skill};
@@ -95,6 +95,9 @@ pub struct World {
     pub(super) scenery_state: SceneryState,
     /// Items lying on the ground.
     pub(super) ground_items: super::ground_items::GroundItems,
+    /// Ground-targeted attacks released and waiting out their delay. They belong to the world, not
+    /// to whoever released them, so they still land if it dies.
+    ground_strikes: Vec<PendingGroundStrike>,
 }
 
 fn slot_index(id: EntityId) -> Option<usize> {
@@ -174,6 +177,8 @@ impl World {
 
         let mut scheduler = TickScheduler::new();
         scheduler.register(TickPhase::Regen, ENCOUNTER_CLOCK_ID);
+        // first in the AI phase, so strikes land before any monster picks its next attack
+        scheduler.register(TickPhase::NpcAi, ENCOUNTER_CLOCK_ID);
         scheduler.register(TickPhase::PlayerQueue, PLAYER_ID);
         scheduler.register(TickPhase::PlayerMovement, PLAYER_ID);
         scheduler.register(TickPhase::Regen, PLAYER_ID);
@@ -199,6 +204,7 @@ impl World {
             scenery: SceneryIndex::new(),
             scenery_state: SceneryState::new(),
             ground_items: Default::default(),
+            ground_strikes: Vec::new(),
         }
     }
 
@@ -692,6 +698,7 @@ impl World {
         self.dead.remove(&Combatant::Player);
         self.dying.retain(|who| *who != Combatant::Player);
         self.aggro_region_ticks = 0;
+        self.ground_strikes.clear();
 
         // whatever was fighting the player loses it, as in the game
         for entity in self.entities.iter_mut().flatten() {
@@ -708,10 +715,14 @@ impl World {
 
     fn dispatch(&mut self, phase: TickPhase, id: EntityId, _tick: i32, registrar: &mut TickRegistrar<EntityId>) {
         if id == ENCOUNTER_CLOCK_ID {
-            if phase == TickPhase::Regen {
-                self.encounter.advance_tick();
-                self.update_aggro_region();
-                self.advance_scenery();
+            match phase {
+                TickPhase::Regen => {
+                    self.encounter.advance_tick();
+                    self.update_aggro_region();
+                    self.advance_scenery();
+                }
+                TickPhase::NpcAi => self.advance_ground_strikes(),
+                _ => {}
             }
             return;
         }
@@ -978,9 +989,8 @@ impl World {
         }
     }
 
-    /// Resolves an attack that has just finished telegraphing against the player: a Doom-style
-    /// attack (impact delay > 0) is handed to the player's pending queue to roll later;
-    /// anything else rolls now and its damage goes to the player's damage buffer.
+    /// Resolves an attack that has just finished telegraphing against the player: what the
+    /// attacker is seen and heard doing, then `deliver_attack`.
     fn fire_at_player(
         &mut self,
         attacker: EntityId,
@@ -989,20 +999,12 @@ impl World {
         attack: &Rc<AttackDefinition>,
         hazard_origin: TileCoord,
     ) {
-        // a telegraphed attack was reported when its telegraph began (`report_telegraph_start`)
-        if attack.telegraph_ticks == 0 {
-            self.events.push(WorldEvent::Attack {
-                attacker: Combatant::Npc(attacker),
-                target: Combatant::Player,
-                animation: attack.animation,
-            });
-            self.play_sound(attack.sound, Combatant::Npc(attacker), 0);
-        }
+        self.announce_attack(attacker, attack);
         // an attack with a sound of its own at the roll (Jad's stomp) is heard now
         self.play_sound(attack.hit_sound, Combatant::Npc(attacker), 0);
         // what the client draws of it: the hit lands after the delay and the flight
-        let lands_in = attack.impact_delay_ticks + attack.projectile_travel_ticks;
         if let Some(graphic) = attack.projectile {
+            let lands_in = attack.impact_delay_ticks + attack.projectile_travel_ticks;
             self.events.push(WorldEvent::Projectile {
                 from: Combatant::Npc(attacker),
                 to: Combatant::Player,
@@ -1012,22 +1014,140 @@ impl World {
                 released: attack.telegraph_ticks > 0,
             });
         }
+        self.deliver_attack(Some(attacker), attacker_name, attacker_stats, attack, hazard_origin);
+    }
+
+    /// Resolves a ground-targeted attack that has just finished telegraphing: the attacker is seen
+    /// and heard as for any attack, and the strike over `tiles` waits out the attack's own delay
+    /// (or lands at once without one). Whoever it hits is decided when it lands.
+    fn fire_at_ground(
+        &mut self,
+        attacker: EntityId,
+        attacker_name: &str,
+        attacker_stats: CombatStats,
+        attack: &Rc<AttackDefinition>,
+        tiles: Vec<TileCoord>,
+        origin: TileCoord,
+    ) {
+        self.announce_attack(attacker, attack);
+        let strike = PendingGroundStrike::new(Rc::clone(attack), tiles, origin, attacker, attacker_name, attacker_stats);
+        if attack.impact_delay_ticks > 0 {
+            self.log_line(format!(
+                "{attacker_name} aims {} at {} tile(s) (impact in {} ticks).",
+                attack.name,
+                strike.tiles.len(),
+                attack.impact_delay_ticks
+            ));
+            self.ground_strikes.push(strike);
+        } else {
+            self.land_ground_strike(&strike);
+        }
+    }
+
+    /// The attacker's attack animation and sound, for an attack that has no telegraph (a
+    /// telegraphed one was reported when its telegraph began, `report_telegraph_start`).
+    fn announce_attack(&mut self, attacker: EntityId, attack: &AttackDefinition) {
+        if attack.telegraph_ticks == 0 {
+            self.events.push(WorldEvent::Attack {
+                attacker: Combatant::Npc(attacker),
+                target: Combatant::Player,
+                animation: attack.animation,
+            });
+            self.play_sound(attack.sound, Combatant::Npc(attacker), 0);
+        }
+    }
+
+    /// Counts every waiting ground strike down a tick and lands the ones that are due. Called once
+    /// a tick from the encounter clock, so they land before any monster picks its next attack.
+    /// They need a living player in the world to be worth resolving.
+    fn advance_ground_strikes(&mut self) {
+        if self.ground_strikes.is_empty() || self.player.is_dead() {
+            return;
+        }
+        let mut waiting = std::mem::take(&mut self.ground_strikes);
+        waiting.retain_mut(|strike| {
+            let lands = strike.advance();
+            if lands {
+                self.land_ground_strike(strike);
+            }
+            !lands
+        });
+        // keep anything released meanwhile
+        waiting.append(&mut self.ground_strikes);
+        self.ground_strikes = waiting;
+    }
+
+    /// Resolves a strike against whoever stands on its tiles right now (`targets_on_tiles`), each
+    /// through the same roll a monster's direct attack takes - never against whoever it was aimed
+    /// at, so a player who has stepped off is untouched.
+    fn land_ground_strike(&mut self, strike: &PendingGroundStrike) {
+        let attack = &strike.attack;
+        let attacker = Combatant::Npc(strike.attacker);
+        self.play_sound(attack.hit_sound, attacker, 0);
+        for target in self.targets_on_tiles(&strike.tiles) {
+            // a monster's attack only ever hurts the player (and so never its own helpers)
+            if target == Combatant::Player {
+                self.show_hit_graphics(attack, attack.projectile_travel_ticks);
+                self.roll_on_player(&strike.attacker_name, strike.attacker_stats, attack, strike.origin);
+            }
+        }
+    }
+
+    /// Everything alive whose footprint overlaps any of `tiles`: the potential targets of an area
+    /// attack, before any rule about who it may hurt.
+    fn targets_on_tiles(&self, tiles: &[TileCoord]) -> Vec<Combatant> {
+        let mut found = Vec::new();
+        if !self.player.is_dead() && tiles.contains(&self.player.tile()) {
+            found.push(Combatant::Player);
+        }
+        for entity in self.entities() {
+            if entity.is_dead() {
+                continue;
+            }
+            let (origin, size) = (entity.tile(), entity.mover.actor.footprint_size());
+            let covered = tiles.iter().any(|tile| {
+                tile.plane == origin.plane && (origin.x..origin.x + size).contains(&tile.x) && (origin.z..origin.z + size).contains(&tile.z)
+            });
+            if covered {
+                found.push(Combatant::Npc(entity.id));
+            }
+        }
+        found
+    }
+
+    /// The graphics a hit puts on the player: one as the attack is released, one as it lands
+    /// `lands_in` ticks later.
+    fn show_hit_graphics(&mut self, attack: &AttackDefinition, lands_in: i32) {
         if let Some(graphic) = attack.target_graphic {
             self.events.push(WorldEvent::Graphic { on: Combatant::Player, graphic, delay_ticks: 0 });
         }
         if let Some(graphic) = attack.impact_graphic {
             self.events.push(WorldEvent::Graphic { on: Combatant::Player, graphic, delay_ticks: lands_in });
         }
+    }
+
+    /// The half of an attack that lands on the player: the graphics on the player, then either the
+    /// hit (rolled now) or, for a Doom-style attack (impact delay > 0), the pending queue to roll
+    /// later. `attacker` is captured with a delayed hit, so if it dies first the shot dies with it.
+    /// Returns the damage rolled now (0 for a deferred attack).
+    fn deliver_attack(
+        &mut self,
+        attacker: Option<EntityId>,
+        attacker_name: &str,
+        attacker_stats: CombatStats,
+        attack: &Rc<AttackDefinition>,
+        hazard_origin: TileCoord,
+    ) -> i32 {
+        self.show_hit_graphics(attack, attack.impact_delay_ticks + attack.projectile_travel_ticks);
 
         // The attacker's own turn ends the instant it launches the attack; waiting out the delay
-        // moves to the TARGET's queue. The attacker's ID is captured too, so if it dies before
-        // the delay elapses, the shot still dies with it.
+        // moves to the TARGET's queue.
         if attack.impact_delay_ticks > 0 {
             for _ in 0..attack.hit_count {
                 self.player.pending_attacks.enqueue(
                     Rc::clone(attack),
                     hazard_origin,
-                    Some(attacker),
+                    attacker,
                     attacker_stats,
                     attack.impact_delay_ticks,
                 );
@@ -1036,9 +1156,21 @@ impl World {
                 "{attacker_name} fires {} at the player (impact in {} ticks).",
                 attack.name, attack.impact_delay_ticks
             ));
-            return;
+            return 0;
         }
+        self.roll_on_player(attacker_name, attacker_stats, attack, hazard_origin)
+    }
 
+    /// Rolls each of `attack`'s hits against the player now and enqueues them in the player's
+    /// damage buffer. Returns the total damage rolled.
+    fn roll_on_player(
+        &mut self,
+        attacker_name: &str,
+        attacker_stats: CombatStats,
+        attack: &Rc<AttackDefinition>,
+        hazard_origin: TileCoord,
+    ) -> i32 {
+        let mut total = 0;
         for _ in 0..attack.hit_count {
             let player_view = self.player.view();
             let multiplier =
@@ -1059,7 +1191,9 @@ impl World {
                 ".".to_owned()
             };
             self.log_line(format!("{attacker_name} uses {} on the player for {damage}{landing}", attack.name));
+            total += damage;
         }
+        total
     }
 
     /// Reports an attack whose telegraph has just begun (`advance` moved `combat_state` from idle
@@ -1112,18 +1246,7 @@ impl World {
         }
 
         let attack = Rc::clone(state.combat_state.current_attack().expect("an attack resolved, so one was selected"));
-        // Reaction.Anchor picks which tile CAPTURED AT TELEGRAPH START this attack's hazard is
-        // centered on - never a live tile, or moving away during the telegraph would never
-        // actually dodge a target-anchored hazard.
-        let hazard_origin = match attack.reaction.kind {
-            ReactionKind::MoveOffTile(anchor) => {
-                match anchor {
-                    HazardAnchor::Target => state.combat_state.target_tile_at_selection(),
-                    HazardAnchor::SelfTile => state.combat_state.self_tile_at_selection(),
-                }
-            }
-            _ => state.combat_state.self_tile_at_selection(),
-        };
+        let hazard_origin = state.combat_state.hazard_origin(&attack);
         let stats = actor.stats();
 
         self.fire_at_player(id, &entity.name, stats, &attack, hazard_origin);
@@ -1209,14 +1332,6 @@ impl World {
 
         let target_alive = state.targets_player && !self.player.is_dead();
 
-        // Orbs are deliberately independent of this boss's own attack-selection loop (and of
-        // whether THIS boss is still alive) - they only need a living target to home toward, so
-        // they advance unconditionally, before any of the early-returns below that gate the
-        // boss's OWN turn to act.
-        if target_alive && !state.active_orbs.is_empty() {
-            self.advance_orbs(&mut state.active_orbs);
-        }
-
         if !target_alive || state.current_phase.is_none() {
             return;
         }
@@ -1265,63 +1380,22 @@ impl World {
 
         let attack = Rc::clone(combat_state.current_attack().expect("an attack resolved, so one was selected"));
 
-        if let Some(orb_definition) = &attack.spawns_orb {
-            // Slicer: this boss's own part is done the instant it's conjured - the orb lives and
-            // pulses on its own from here, independent of this NPC's attack-selection loop.
-            state.active_orbs.push(HomingPulseOrb::new(Rc::clone(orb_definition), actor.current_tile(), actor.stats()));
-            let message = format!("{} conjures {}.", entity.name, orb_definition.name);
-            self.log_line(message);
+        if let Some(ground) = &attack.ground_target {
+            // aimed at tiles fixed now, from where both sides stood when the attack was selected
+            let tiles = ground.tiles(
+                combat_state.self_tile_at_selection(),
+                combat_state.target_tile_at_selection(),
+                self.encounter.rng(),
+            );
+            let origin = combat_state.hazard_origin(&attack);
+            self.fire_at_ground(id, &entity.name, actor.stats(), &attack, tiles, origin);
             return;
         }
 
-        let hazard_origin = match attack.reaction.kind {
-            ReactionKind::MoveOffTile(anchor) => {
-                match anchor {
-                    HazardAnchor::Target => combat_state.target_tile_at_selection(),
-                    HazardAnchor::SelfTile => combat_state.self_tile_at_selection(),
-                }
-            }
-            _ => combat_state.self_tile_at_selection(),
-        };
+        let hazard_origin = combat_state.hazard_origin(&attack);
         let stats = actor.stats();
 
         self.fire_at_player(id, &entity.name, stats, &attack, hazard_origin);
-    }
-
-    // TODO: move away from explicitly handling the Purutu orbs
-    // these are a mobile hazard similar to Hunllef's tornadoes or Alchemical Hydra's lightning attack
-    // such entities should be handled in a generic way allowing for stationary or mobile hazards to exist and persist based on lifetime, not resolution
-    fn advance_orbs(&mut self, orbs: &mut Vec<HomingPulseOrb>) {
-        let player_view = self.player.view();
-
-        for i in (0..orbs.len()).rev() {
-            let pulsed = orbs[i].advance(player_view.tile);
-            if pulsed && orbs[i].is_within_pulse_radius(player_view.tile) {
-                let pulse_attack = Rc::clone(&orbs[i].definition().pulse_attack);
-                let multiplier = get_damage_multiplier(
-                    &pulse_attack,
-                    Some(&self.player.reaction_state),
-                    orbs[i].current_tile(),
-                    player_view.tile,
-                );
-                let damage = roll_damage(
-                    &pulse_attack,
-                    &orbs[i].attacker_stats(),
-                    &player_view.stats,
-                    player_view.kind == ActorKind::Npc,
-                    self.encounter.rng(),
-                    multiplier,
-                );
-                if damage > 0 {
-                    self.player.damage_buffer.enqueue(damage, pulse_attack.projectile_travel_ticks, pulse_attack.on_hit_status_effect);
-                    orbs[i].extend_on_hit();
-                }
-            }
-
-            if orbs[i].is_expired() {
-                orbs.remove(i);
-            }
-        }
     }
 
     fn apply_boss_action(

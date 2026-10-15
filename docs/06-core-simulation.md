@@ -297,20 +297,25 @@ scheduler runs (primer 1.7).
      `every_ticks` ticks while within `range`, emitting `WorldEvent::Heal`. A helper the player
      has attacked (`targets_player`) does not heal; it gives the player up once they are more
      than `forget_player_beyond` tiles away.
-  4. Advance any homing orbs (chapter 4.10).
-  5. Evaluate phase triggers (before the death check, so "on death" triggers fire on the killing
+  4. Evaluate phase triggers (before the death check, so "on death" triggers fire on the killing
      tick). Apply their actions.
-  6. Ask the current phase's pattern whether any attack can reach the player (`engages`).
-  7. Advance the `NpcCombatState`. If a telegraph has just begun, `report_telegraph_start` pushes
+  5. Ask the current phase's pattern whether any attack can reach the player (`engages`).
+  6. Advance the `NpcCombatState`. If a telegraph has just begun, `report_telegraph_start` pushes
      the `Attack` event now, carrying the attack's own `animation`: the wind-up is the warning the
-     player reacts to (Jad). If an attack resolved: either conjure its orb, or call
-     `fire_at_player`.
+     player reacts to (Jad). If an attack resolved: either release a ground strike
+     (`fire_at_ground`), or call `fire_at_player`. A positional reaction's origin comes from
+     `NpcCombatState::hazard_origin`.
+* **`advance_ground_strikes`** runs from the encounter clock at the start of the AI phase (so
+  strikes land before any monster picks an attack) and counts down every world-owned
+  `PendingGroundStrike` (chapter 4.10); one that is due is resolved by `land_ground_strike`.
 * **`fire_at_player`** pushes an `Attack` event (only for attacks without a telegraph, which were
-  not announced yet) and the attack's graphics (`Projectile`, marked `released` for a telegraphed
-  attack; `Graphic` events for its target and impact graphics), then for each hit either queues a
-  delayed roll in
-  the player's `PendingAttackQueue` (impact delay > 0), or computes the reaction multiplier from
-  the player's current prayer, rolls (floor 0), and enqueues into the player's `DamageBuffer`.
+  not announced yet), the attack's sounds and its `Projectile` (marked `released` for a telegraphed
+  attack), then calls **`deliver_attack`**: it pushes the `Graphic` events for the attack's target
+  and impact graphics, then for each hit either queues a delayed roll in the player's
+  `PendingAttackQueue` (impact delay > 0), or goes to **`roll_on_player`**, which computes the
+  reaction multiplier from the player's current prayer, rolls (floor 0), and enqueues into the
+  player's `DamageBuffer`. A ground-targeted attack goes through `fire_at_ground` instead, which
+  announces it and queues a strike; its landing uses `roll_on_player` too.
 * **`run_*_movement`** for every NPC kind starts with `advance_incoming`: advance the NPC's own
   pending queue and damage buffer (landing hits and emitting `Hit` events). Then, if alive and not
   hostile: a summoned healer walks to stand beside the monster it heals (`walk_to_leader`), and
@@ -465,8 +470,8 @@ for real swings and for `expected_dps`.
 
 `AttackPlan::finish(distance)` sets the projectile travel ticks and wraps the definition in `Rc`.
 
-`expected_dps` runs `analyze_attack` on the plan and returns hit chance, max hit, swing interval
-and damage per second. The `simulate` binary prints it.
+`expected_dps` throws the plan's real dice 20,000 times (`simulate_swings`, fixed seed) and returns
+the simulated hit rate, max hit, swing interval and damage per second. The `simulate` binary prints it.
 
 ### The `Regen` phase: `run_regen`
 

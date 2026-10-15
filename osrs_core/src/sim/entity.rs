@@ -8,7 +8,7 @@ use crate::actors::{Actor, ActorKind, CombatTargetView, EntityId, Health, Moveme
 use crate::collision::CollisionMap;
 use crate::data::NpcDef;
 use crate::combat::{
-    AttackDefinition, AttackRangeKind, AttackStyle, DamageBuffer, FixedRotationPattern, HomingPulseOrb, NpcCombatState,
+    AttackDefinition, AttackStyle, DamageBuffer, FixedRotationPattern, NpcCombatState,
     PendingAttackQueue, ProtectionPrayer, ReactionRequirement,
 };
 use crate::encounters::{Phase, TriggerBinding};
@@ -24,12 +24,11 @@ pub struct NpcState {
     pub movement_policy: Rc<dyn MovementPolicy>,
 }
 
-/// State specific to a `BossCombatant`: its phases, triggers and live Slicer-style orbs.
+/// State specific to a `BossCombatant`: its phases and triggers.
 pub struct BossState {
     pub targets_player: bool,
     pub phases_by_name: HashMap<String, Phase>,
     pub triggers: Vec<TriggerBinding>,
-    pub active_orbs: Vec<HomingPulseOrb>,
     pub current_phase: Option<Phase>,
     /// `None` until `World::configure_boss` is called.
     pub combat_state: Option<NpcCombatState>,
@@ -122,7 +121,6 @@ impl Entity {
                 targets_player: false,
                 phases_by_name,
                 triggers: Vec::new(),
-                active_orbs: Vec::new(),
                 combat_state: Some(NpcCombatState::new(Rc::clone(&phase.attack_pattern))),
                 current_phase: Some(phase),
             })
@@ -141,7 +139,7 @@ impl Entity {
     pub fn new_npc(id: EntityId, name: &str, start: TileCoord, config: &NpcConfig, map: &mut CollisionMap) -> Self {
         let actor = Actor::new(ActorKind::Npc, start, config.footprint_size, config.max_health, config.levels.to_stats());
         let mover = Mover::new(actor, map);
-        let attack = AttackDefinition::new("Melee", AttackRangeKind::Melee, 0, config.melee_telegraph_ticks, AttackStyle::Melee)
+        let attack = AttackDefinition::new("Melee", 0, config.melee_telegraph_ticks, AttackStyle::Melee)
             .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Melee))
             .shared();
         // Only one attack exists, so a one-entry FixedRotationPattern is just "always this attack".
@@ -162,7 +160,6 @@ impl Entity {
             targets_player: config.targets_player,
             phases_by_name: HashMap::new(),
             triggers: Vec::new(),
-            active_orbs: Vec::new(),
             current_phase: None,
             combat_state: None,
         };

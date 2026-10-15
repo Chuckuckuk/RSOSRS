@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use super::player::Player;
 use crate::combat::{
-    AttackDefinition, AttackRangeKind, AttackStyle, CombatStats, MaxHitSource, ProtectionPrayer,
+    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProtectionPrayer,
 };
 use crate::data::{ConsumableEffect, EquipSlot, Registry, StanceDef, StanceKind, WeaponDef};
 use crate::model::{Attribute, DamageType, EquipmentBonuses, Modifier, PrayerEffects, ScalingContext, Skill, StanceBonuses};
@@ -19,10 +19,17 @@ pub const UNARMED_SPEED_FALLBACK: i32 = 4;
 /// Longest range a ranged weapon can reach however it is configured (reference §3, Longrange).
 const MAX_RANGED_ATTACK_RANGE: i32 = 10;
 
-/// The result of `Player::expected_dps`.
+/// Swings thrown for `Player::expected_dps`, and the fixed seed they are thrown from, so the
+/// figure is the same every run.
+const DPS_SWINGS: u32 = 20_000;
+const DPS_SEED: i32 = 0x0D95;
+
+/// The result of `Player::expected_dps`, measured by simulating the swings.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Dps {
-    pub analysis: crate::combat::RollAnalysis,
+    /// Fraction of simulated swings that got past the defence roll.
+    pub hit_rate: f64,
+    pub max_hit: i32,
     pub hits_per_swing: i32,
     pub swing_ticks: i32,
     pub per_swing: f64,
@@ -383,7 +390,6 @@ impl Player {
             range = if style == AttackStyle::Ranged { raw_range.clamp(1, MAX_RANGED_ATTACK_RANGE) } else { raw_range.max(1) };
         }
 
-        let range_kind = if style == AttackStyle::Melee && range <= 1 { AttackRangeKind::Melee } else { AttackRangeKind::Ranged };
         let scaling = ScalingContext {
             attacker_hp: hp_now,
             attacker_max_hp: hp_max,
@@ -392,7 +398,7 @@ impl Player {
         };
         let modifiers = modifiers.iter().map(|m| m.resolved(&scaling)).collect();
 
-        let mut definition = AttackDefinition::new(name, range_kind, range, 0, style)
+        let mut definition = AttackDefinition::new(name, range, 0, style)
             .with_damage_type(damage_type)
             .with_max_hit(max_hit)
             .with_modifiers(modifiers)
@@ -409,14 +415,24 @@ impl Player {
 
     // ---- damage per second ----
 
-    /// The expected damage per second of the current setup against `target`, by the wiki's
-    /// average-damage-per-swing expression. Special-attack procs that roll extra dice (Keris) and
-    /// the monster's own protection are not folded in.
+    /// The expected damage per second of the current setup against `target`, by Monte Carlo: it
+    /// throws the same dice a real swing does (`simulate_swings`) and averages them, so every
+    /// modifier and proc is folded in, but the monster's own protection is not.
     pub fn expected_dps(&self, registry: &Registry, target: &CombatStats) -> Result<Dps, String> {
         let plan = self.plan_attack(registry, target)?;
-        let analysis = crate::combat::analyze_attack(&plan.definition, &self.mover.actor.stats(), target, true);
-        let per_swing = analysis.average_damage() * plan.definition.hit_count as f64;
-        Ok(Dps { analysis, hits_per_swing: plan.definition.hit_count, swing_ticks: plan.speed, per_swing, per_second: per_swing / (plan.speed as f64 * 0.6) })
+        let stats = self.mover.actor.stats();
+        let max_hit = crate::combat::analyze_attack(&plan.definition, &stats, target, true).max_hit;
+        let mut rng = crate::rng::DotNetRandom::new(DPS_SEED);
+        let swings = crate::combat::simulate_swings(&plan.definition, &stats, target, true, &mut rng, DPS_SWINGS);
+        let per_swing = swings.mean_damage * plan.definition.hit_count as f64;
+        Ok(Dps {
+            hit_rate: swings.hit_rate,
+            max_hit,
+            hits_per_swing: plan.definition.hit_count,
+            swing_ticks: plan.speed,
+            per_swing,
+            per_second: per_swing / (plan.speed as f64 * 0.6),
+        })
     }
 
     /// Lets a freshly built player use several consumables back to back (setup, not gameplay).

@@ -77,15 +77,15 @@ impl AttackPattern for RangeAwarePattern {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::{AttackRangeKind, AttackStyle};
+    use crate::combat::AttackStyle;
     use crate::rng::DotNetRandom;
 
     fn melee() -> Rc<AttackDefinition> {
-        AttackDefinition::new("Melee", AttackRangeKind::Melee, 0, 1, AttackStyle::Melee).shared()
+        AttackDefinition::new("Melee", 0, 1, AttackStyle::Melee).shared()
     }
 
     fn magic() -> Rc<AttackDefinition> {
-        AttackDefinition::new("Magic", AttackRangeKind::Ranged, 10, 1, AttackStyle::Magic).shared()
+        AttackDefinition::new("Magic", 10, 1, AttackStyle::Magic).shared()
     }
 
     fn context(counter: i32, target: TileCoord) -> AttackSelectionContext {

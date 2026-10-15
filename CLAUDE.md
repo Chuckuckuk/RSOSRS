@@ -82,6 +82,7 @@ Every issue gets:
 | `area: client` | area | Game client and rendering (`osrs_core` binary, `osrs_render`) |
 | `area: cache` | area | Cache decoding (`osrs_cache`) |
 | `area: data` | area | JSON game data (`osrs_core/data`) |
+| `combat` | topic | Combat rules: attacks, reactions, prayers, boss and NPC encounters |
 | `skilling` | topic | Skills, XP, tools, resources, skilling pets |
 | `scenery` | topic | World objects: trees, doors, stumps, object interactions |
 | `interface` | topic | In-game UI: tabs, chatbox, overlays, click feedback |

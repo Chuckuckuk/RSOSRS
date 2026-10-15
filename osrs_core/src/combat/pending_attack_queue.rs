@@ -126,14 +126,14 @@ mod tests {
     use super::*;
     use crate::actors::Health;
     use crate::combat::test_support::FakeCombatTarget;
-    use crate::combat::{AttackRangeKind, AttackStyle, ProtectionPrayer, ReactionRequirement};
+    use crate::combat::{AttackStyle, ProtectionPrayer, ReactionRequirement};
     use crate::rng::{DotNetRandom, ScriptedRng};
 
     const ATTACKER: EntityId = EntityId(1);
     const ATTACKER_TILE: TileCoord = TileCoord { x: 5, z: 5, plane: 0 };
 
     fn make_attack(projectile_travel_ticks: i32, reaction: ReactionRequirement) -> Rc<AttackDefinition> {
-        AttackDefinition::new("Test Doom-style", AttackRangeKind::Ranged, 10, 0, AttackStyle::Magic)
+        AttackDefinition::new("Test Doom-style", 10, 0, AttackStyle::Magic)
             .with_reaction(reaction)
             .with_projectile_travel_ticks(projectile_travel_ticks)
             .shared()
@@ -143,9 +143,9 @@ mod tests {
         CombatStats::new(50, 50, 50, 50, 50).unwrap()
     }
 
-    /// Guarantees a hit (0.0 is less than any positive hit chance) and a scripted damage amount.
+    /// Guarantees a hit (an attack die of 1 over a defence die of 0) and a scripted damage amount.
     fn guaranteed_hit_of(amount: i32) -> ScriptedRng {
-        ScriptedRng::new(vec![0.0], vec![amount])
+        ScriptedRng::from_ints(vec![1, 0, amount])
     }
 
     fn alive(_: EntityId) -> bool {

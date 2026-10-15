@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use super::{AttackDefinition, AttackRangeKind, AttackStyle, CombatStats, DamageBuffer};
+use super::{AttackDefinition, AttackStyle, CombatStats, DamageBuffer};
 use crate::actors::{ActorKind, CombatTargetView, Health};
 use crate::tiles::TileCoord;
 
@@ -31,5 +31,5 @@ impl FakeCombatTarget {
 
 /// A plain melee attack with the given telegraph, for tests that only care about identity/timing.
 pub(crate) fn melee_attack(name: &str, telegraph_ticks: i32) -> Rc<AttackDefinition> {
-    AttackDefinition::new(name, AttackRangeKind::Melee, 0, telegraph_ticks, AttackStyle::Melee).shared()
+    AttackDefinition::new(name, 0, telegraph_ticks, AttackStyle::Melee).shared()
 }

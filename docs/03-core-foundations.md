@@ -71,8 +71,9 @@ These are the only two random operations the game logic needs. Code that rolls d
   1,559,595,546 and seed 42 must give 1,434,747,710. Matching .NET means the Rust simulation and
   the original Unity C# draw identical numbers from the same seed.
 * **`ScriptedRng`** returns a fixed list of doubles and ints in order, and panics if the code asks
-  for one more than expected. Tests use it to force a hit or a miss: `ScriptedRng::new(vec![0.0],
-  vec![7])` means "the accuracy roll passes, the damage roll is 7".
+  for one more than expected. Tests use it to force a hit or a miss: `ScriptedRng::from_ints(vec![1, 0,
+  7])` means "the attack die throws 1 against a defence die of 0, so it hits, and the damage roll
+  is 7".
 
 Python comparison: `random.Random(seed)` is reproducible too, but only within CPython's
 Mersenne Twister. Here the requirement is reproducibility across two languages, so the algorithm
@@ -120,7 +121,6 @@ roll            = effective_level * max(0, equipment_bonus + 64)
 | `roll(effective, bonus)` | attack or defence roll; a bonus below -64 is clamped so the roll is never negative |
 | `monster_defence_roll(level, bonus)` | monsters defend with `level + 9`, not the player pipeline |
 | `player_magic_defence_level(eff_magic, eff_defence)` | players defend against magic with `floor((7 * magic + 3 * defence) / 10)` |
-| `hit_chance(att, def)` | if `att > def`: `1 - (def + 2) / (2 * (att + 1))`, else `att / (2 * (def + 1))` |
 | `base_max_hit(eff_strength, strength_bonus)` | `floor((eff * (bonus + 64) + 320) / 640)`; used for melee and ranged |
 | `apply_multipliers(value, &[Ratio])` | applies each ratio with a floor in between, then clamps to 0..=200 |
 | `MAX_HIT_CAP` | 200, the game's ceiling on one hit |

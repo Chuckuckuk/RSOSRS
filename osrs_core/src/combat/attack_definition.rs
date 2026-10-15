@@ -1,8 +1,7 @@
 use std::rc::Rc;
 
-use super::attack_range_kind::AttackRangeKind;
 use super::attack_style::AttackStyle;
-use super::homing_pulse_orb_definition::HomingPulseOrbDefinition;
+use super::ground_target::GroundTarget;
 use super::max_hit_source::MaxHitSource;
 use super::reaction_requirement::ReactionRequirement;
 use super::status_effect::StatusEffectDefinition;
@@ -20,7 +19,6 @@ use crate::tiles::TileCoord;
 #[derive(Debug, Clone)]
 pub struct AttackDefinition {
     pub name: String,
-    pub range_kind: AttackRangeKind,
     pub range: i32,
     pub telegraph_ticks: i32,
     pub style: AttackStyle,
@@ -33,7 +31,9 @@ pub struct AttackDefinition {
     /// Ticks between the roll and the damage actually landing.
     pub projectile_travel_ticks: i32,
     pub on_hit_status_effect: Option<StatusEffectDefinition>,
-    pub spawns_orb: Option<Rc<HomingPulseOrbDefinition>>,
+    /// Aims the attack at the ground instead of at the player: it covers these tiles and, after
+    /// `impact_delay_ticks`, rolls against whoever is standing on them.
+    pub ground_target: Option<GroundTarget>,
     /// Which defence bonus this attack rolls against (stab/slash/crush for melee). Defaults to the
     /// style's usual type.
     pub damage_type: DamageType,
@@ -68,14 +68,12 @@ pub struct AttackDefinition {
 impl AttackDefinition {
     pub fn new(
         name: impl Into<String>,
-        range_kind: AttackRangeKind,
         range: i32,
         telegraph_ticks: i32,
         style: AttackStyle,
     ) -> Self {
         Self {
             name: name.into(),
-            range_kind,
             range,
             telegraph_ticks,
             style,
@@ -84,7 +82,7 @@ impl AttackDefinition {
             impact_delay_ticks: 0,
             projectile_travel_ticks: 0,
             on_hit_status_effect: None,
-            spawns_orb: None,
+            ground_target: None,
             damage_type: DamageType::default_for(style),
             max_hit: MaxHitSource::Derived,
             modifiers: Vec::new(),
@@ -189,8 +187,8 @@ impl AttackDefinition {
         self
     }
 
-    pub fn with_spawns_orb(mut self, orb: Rc<HomingPulseOrbDefinition>) -> Self {
-        self.spawns_orb = Some(orb);
+    pub fn with_ground_target(mut self, ground_target: GroundTarget) -> Self {
+        self.ground_target = Some(ground_target);
         self
     }
 
@@ -199,12 +197,20 @@ impl AttackDefinition {
         Rc::new(self)
     }
 
+    /// Whether this is a melee attack at base reach (range 1): it must be orthogonally adjacent
+    /// to the attacker's footprint. A melee attack with a longer reach (a halberd's 2) is measured
+    /// like any other: within `range` tiles.
+    pub fn is_melee_reach(&self) -> bool {
+        self.style == AttackStyle::Melee && self.range <= 1
+    }
+
     /// The target spec an attacker standing at `attacker_tile` with the given footprint must
     /// satisfy for this attack to be in range of a tile.
     pub fn build_range_check(&self, attacker_tile: TileCoord, attacker_footprint: i32) -> TargetSpec {
-        match self.range_kind {
-            AttackRangeKind::Melee => TargetSpec::adjacent(attacker_tile, attacker_footprint, attacker_footprint),
-            AttackRangeKind::Ranged => TargetSpec::within_range_of(attacker_tile, self.range),
+        if self.is_melee_reach() {
+            TargetSpec::adjacent(attacker_tile, attacker_footprint, attacker_footprint)
+        } else {
+            TargetSpec::within_range_of(attacker_tile, self.range)
         }
     }
 }
@@ -215,31 +221,31 @@ mod tests {
 
     #[test]
     fn new_defaults_the_optional_fields() {
-        let attack = AttackDefinition::new("Test", AttackRangeKind::Melee, 0, 1, AttackStyle::Melee);
+        let attack = AttackDefinition::new("Test", 0, 1, AttackStyle::Melee);
 
         assert_eq!(attack.prayer_penetration, 0.0);
         assert_eq!(attack.reaction, ReactionRequirement::none());
         assert_eq!(attack.impact_delay_ticks, 0);
         assert_eq!(attack.projectile_travel_ticks, 0);
         assert!(attack.on_hit_status_effect.is_none());
-        assert!(attack.spawns_orb.is_none());
+        assert!(attack.ground_target.is_none());
     }
 
     #[test]
     #[should_panic]
     fn prayer_penetration_above_one_panics() {
-        AttackDefinition::new("Test", AttackRangeKind::Melee, 0, 1, AttackStyle::Melee).with_prayer_penetration(1.5);
+        AttackDefinition::new("Test", 0, 1, AttackStyle::Melee).with_prayer_penetration(1.5);
     }
 
     #[test]
     #[should_panic]
     fn negative_impact_delay_panics() {
-        AttackDefinition::new("Test", AttackRangeKind::Melee, 0, 1, AttackStyle::Melee).with_impact_delay_ticks(-1);
+        AttackDefinition::new("Test", 0, 1, AttackStyle::Melee).with_impact_delay_ticks(-1);
     }
 
     #[test]
     fn melee_range_check_is_adjacency_to_the_attackers_footprint() {
-        let attack = AttackDefinition::new("Test", AttackRangeKind::Melee, 0, 1, AttackStyle::Melee);
+        let attack = AttackDefinition::new("Test", 0, 1, AttackStyle::Melee);
 
         let check = attack.build_range_check(TileCoord::new(5, 5), 2);
 
@@ -250,7 +256,7 @@ mod tests {
 
     #[test]
     fn ranged_range_check_is_chebyshev_distance_from_the_attacker_tile() {
-        let attack = AttackDefinition::new("Test", AttackRangeKind::Ranged, 3, 1, AttackStyle::Magic);
+        let attack = AttackDefinition::new("Test", 3, 1, AttackStyle::Magic);
 
         let check = attack.build_range_check(TileCoord::new(5, 5), 1);
 

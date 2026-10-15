@@ -179,7 +179,7 @@ A pattern you will see constantly is a constructor plus chained `with_*` methods
 
 ```rust
 // osrs_core/src/sim/npc_factory.rs
-AttackDefinition::new(def.name.clone(), range_kind, def.range, def.telegraph_ticks, def.style)
+AttackDefinition::new(def.name.clone(), def.range, def.telegraph_ticks, def.style)
     .with_damage_type(...)
     .with_max_hit(MaxHitSource::Fixed(def.max_hit))
     .with_attack_speed(def.speed)

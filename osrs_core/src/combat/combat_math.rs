@@ -21,18 +21,6 @@ pub fn defence_roll(defence_level: i32, defender_is_monster: bool) -> i32 {
     level * 64
 }
 
-/// The two-branch hit-chance formula, as a probability in `[0, 1)`.
-pub fn hit_chance(attack_roll: i32, defence_roll: i32) -> f64 {
-    let attack_roll = attack_roll as f64;
-    let defence_roll = defence_roll as f64;
-
-    if attack_roll > defence_roll {
-        1.0 - (defence_roll + 2.0) / (2.0 * (attack_roll + 1.0))
-    } else {
-        attack_roll / (2.0 * (defence_roll + 1.0))
-    }
-}
-
 /// `floor(0.5 + effective_level * 64/640)`, i.e. the melee max-hit formula with
 /// StrengthBonus fixed at 0 - see OSRS_COMBAT_REFERENCE.md §5 for the general form and why
 /// it's equivalent to `floor((effective_level * (bonus+320))/640)` written the other way.
@@ -68,33 +56,6 @@ mod tests {
         // effective_level(+8) pipeline - a deliberate asymmetry, not a typo.
         assert_eq!(defence_roll(0, true), 9 * 64);
         assert_eq!(defence_roll(99, true), 108 * 64);
-    }
-
-    #[test]
-    fn hit_chance_when_attack_roll_exceeds_defence_roll_uses_the_first_branch() {
-        let chance = hit_chance(100, 50);
-        let expected = 1.0 - (50.0 + 2.0) / (2.0 * (100.0 + 1.0));
-        assert!((chance - expected).abs() < 1e-12);
-    }
-
-    #[test]
-    fn hit_chance_when_defence_roll_meets_or_exceeds_attack_roll_uses_the_second_branch() {
-        let chance_equal = hit_chance(50, 50);
-        assert!((chance_equal - 50.0 / (2.0 * (50.0 + 1.0))).abs() < 1e-12);
-
-        let chance_lower = hit_chance(20, 50);
-        assert!((chance_lower - 20.0 / (2.0 * (50.0 + 1.0))).abs() < 1e-12);
-    }
-
-    #[test]
-    fn hit_chance_is_always_within_the_valid_probability_range() {
-        for &attack in &[0, 1, 64, 1000, 100000] {
-            for &defence in &[0, 1, 64, 1000, 100000] {
-                let chance = hit_chance(attack, defence);
-                assert!(chance >= 0.0);
-                assert!(chance <= 1.0);
-            }
-        }
     }
 
     #[test]
