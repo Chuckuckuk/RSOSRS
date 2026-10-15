@@ -115,8 +115,15 @@ attack is measured by is `attack.range` if it has one, else the attacker's:
 
 So an archer with `attack_range: 7` has attacks that inherit 7, while Jad (`attack_range: 15`)
 gives his melee swing `range: 1`, which keeps it needing adjacency.
-`AttackDefinition::build_range_check(tile, footprint, attacker_range)` is the one place that
-answers.
+`AttackDefinition::build_range_check(tile, footprint, attacker_range)` answers the outer reach.
+
+An attack may also name a `min_range`: the fewest tiles away it can be used from. With `range`
+that is a distance band, so one monster can have different attacks available at different
+distances (a lob that only works from 4+ tiles, a swipe that only works up close).
+`AttackDefinition::is_in_reach(tile, footprint, attacker_range, target)` applies both bounds, and
+`RangeAwarePattern` and the plain NPC AI use it to decide what is usable and whether to engage.
+`min_range` is measured to the nearest tile of the attacker's footprint, and validation rejects
+one beyond the attack's own reach.
 
 ### Attack speed: a stat of the attacker
 

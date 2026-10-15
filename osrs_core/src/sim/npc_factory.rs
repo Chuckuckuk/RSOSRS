@@ -47,6 +47,9 @@ fn attack_sounding(def: &NpcAttackDef, fallback_sound: Option<u32>) -> Rc<Attack
     if let Some(speed) = def.speed {
         attack = attack.with_attack_speed(speed);
     }
+    if let Some(min_range) = def.min_range {
+        attack = attack.with_min_range(min_range);
+    }
     if let (Some(speed), 0) = (def.projectile_speed, def.impact_delay_ticks) {
         attack = attack.with_projectile_speed(ProjectileSpeed::tiles_per_tick(speed));
     }

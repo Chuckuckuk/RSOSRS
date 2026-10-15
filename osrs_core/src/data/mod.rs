@@ -447,6 +447,14 @@ impl Registry {
                 if attack.range.is_some_and(|range| range < 1) {
                     problems.push(format!("{who}: attack '{}' range must be at least 1", attack.name));
                 }
+                if attack.min_range.is_some_and(|min| min < 1) {
+                    problems.push(format!("{who}: attack '{}' min_range must be at least 1", attack.name));
+                }
+                if let Some(min) = attack.min_range {
+                    if min > attack.range.unwrap_or(npc.attack_range) {
+                        problems.push(format!("{who}: attack '{}' min_range is beyond its range, so it could never be used", attack.name));
+                    }
+                }
                 if attack.speed.is_some_and(|speed| speed < 1) {
                     problems.push(format!("{who}: attack '{}' speed must be at least 1", attack.name));
                 }

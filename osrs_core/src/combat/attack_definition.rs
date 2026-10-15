@@ -32,6 +32,10 @@ pub struct AttackDefinition {
     /// Overrides the attacker's own attack range for this attack: how many tiles away it can be
     /// used from. `None` uses the attacker's.
     pub range: Option<i32>,
+    /// The fewest tiles away this attack can be used from: with `range` it gives a distance band,
+    /// so an attacker can have different attacks available at different distances. `None` has no
+    /// lower bound.
+    pub min_range: Option<i32>,
     /// Overrides the attacker's own attack speed for this attack: the ticks between this attack
     /// resolving and the next one (OSRS attack speed). `None` uses the attacker's.
     pub attack_speed: Option<i32>,
@@ -155,6 +159,7 @@ impl AttackDefinition {
         Self {
             name,
             range,
+            min_range: None,
             attack_speed: None,
             on_hit_status_effect: None,
             animation: None,
@@ -357,6 +362,14 @@ impl AttackDefinition {
         self
     }
 
+    /// Restricts this attack to targets at least `min_range` tiles away (chebyshev, measured to
+    /// the nearest tile of the attacker's footprint). Combined with `range` this is a band.
+    pub fn with_min_range(mut self, min_range: i32) -> Self {
+        assert!(min_range >= 1, "min_range must be at least 1");
+        self.min_range = Some(min_range);
+        self
+    }
+
     /// Wraps the finished definition for sharing.
     pub fn shared(self) -> Rc<Self> {
         Rc::new(self)
@@ -383,6 +396,17 @@ impl AttackDefinition {
         } else {
             TargetSpec::within_range_of(attacker_tile, self.reach(attacker_range))
         }
+    }
+
+    /// Whether `target_tile` is in this attack's distance band for an attacker standing at
+    /// `attacker_tile`: within its reach (`build_range_check`) and not closer than `min_range`.
+    pub fn is_in_reach(&self, attacker_tile: TileCoord, attacker_footprint: i32, attacker_range: i32, target_tile: TileCoord) -> bool {
+        if !self.build_range_check(attacker_tile, attacker_footprint, attacker_range).is_satisfied_by(target_tile) {
+            return false;
+        }
+        self.min_range.is_none_or(|min| {
+            TargetSpec::distance_to_rect(target_tile, attacker_tile, attacker_footprint, attacker_footprint) >= min
+        })
     }
 }
 
@@ -544,5 +568,23 @@ mod tests {
 
         assert!(!attack.is_melee_reach(2));
         assert!(attack.build_range_check(TileCoord::new(0, 0), 1, 2).is_satisfied_by(TileCoord::new(2, 2)));
+    }
+
+    #[test]
+    fn a_min_range_makes_a_distance_band() {
+        let attack = AttackDefinition::instant("Lob", Some(8), AttackStyle::Ranged).with_min_range(3);
+        let from = TileCoord::new(0, 0);
+
+        assert!(!attack.is_in_reach(from, 1, 1, TileCoord::new(2, 0)), "too close");
+        assert!(attack.is_in_reach(from, 1, 1, TileCoord::new(3, 0)));
+        assert!(attack.is_in_reach(from, 1, 1, TileCoord::new(8, 0)));
+        assert!(!attack.is_in_reach(from, 1, 1, TileCoord::new(9, 0)), "too far");
+    }
+
+    #[test]
+    fn an_attack_without_a_min_range_has_no_lower_bound() {
+        let attack = AttackDefinition::instant("Arrow", Some(8), AttackStyle::Ranged);
+
+        assert!(attack.is_in_reach(TileCoord::new(0, 0), 1, 1, TileCoord::new(1, 0)));
     }
 }

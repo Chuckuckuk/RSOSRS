@@ -40,6 +40,9 @@ pub struct NpcAttackDef {
     /// Tiles away it can be used from, for an attack that differs from the monster's own
     /// `attack_range`; absent uses that. A melee-style attack of range 1 needs adjacency.
     pub range: Option<i32>,
+    /// The fewest tiles away it can be used from; with `range` this is a distance band, so a
+    /// monster can have different attacks at different distances. Absent has no lower bound.
+    pub min_range: Option<i32>,
     /// Ticks of visible wind-up before the roll (the Jad-style archetype); 0 for traditional. An
     /// attack is either telegraphed or has an `impact_delay_ticks`, not both.
     pub telegraph_ticks: i32,
@@ -88,6 +91,7 @@ impl Default for NpcAttackDef {
             max_hit: 1,
             speed: None,
             range: None,
+            min_range: None,
             telegraph_ticks: 0,
             impact_delay_ticks: 0,
             projectile_speed: None,

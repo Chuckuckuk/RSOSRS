@@ -1194,7 +1194,7 @@ impl World {
         }
 
         let player_tile = self.player.tile();
-        let in_range = state.attack.build_range_check(actor.current_tile(), actor.footprint_size(), state.attack_range).is_satisfied_by(player_tile);
+        let in_range = state.attack.is_in_reach(actor.current_tile(), actor.footprint_size(), state.attack_range, player_tile);
         let health_percent = actor.health().current() as f32 / actor.health().max() as f32;
         let combat_style = self.player.reaction_state.combat_style;
 

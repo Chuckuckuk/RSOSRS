@@ -40,9 +40,7 @@ impl RangeAwarePattern {
 
     fn usable(&self, self_tile: TileCoord, target_tile: TileCoord) -> Vec<usize> {
         (0..self.attacks.len())
-            .filter(|&i| {
-                self.attacks[i].0.build_range_check(self_tile, self.footprint, self.attack_range).is_satisfied_by(target_tile)
-            })
+            .filter(|&i| self.attacks[i].0.is_in_reach(self_tile, self.footprint, self.attack_range, target_tile))
             .collect()
     }
 }
@@ -108,6 +106,15 @@ mod tests {
         assert_eq!(pattern.usable(TileCoord::new(0, 0), TileCoord::new(1, 0)), vec![0, 1]);
         assert_eq!(pattern.usable(TileCoord::new(0, 0), TileCoord::new(6, 0)), vec![1]);
         assert!(!pattern.engages(TileCoord::new(0, 0), TileCoord::new(30, 0)));
+    }
+
+    #[test]
+    fn a_min_range_hides_an_attack_up_close() {
+        let lob = AttackDefinition::targeted("Lob", Some(10), 1, AttackStyle::Ranged).with_min_range(4).shared();
+        let pattern = RangeAwarePattern::new(vec![(melee(), 1.0), (lob, 1.0)], RotationMode::Fixed, 1, 1);
+
+        assert_eq!(pattern.usable(TileCoord::new(0, 0), TileCoord::new(1, 0)), vec![0]);
+        assert_eq!(pattern.usable(TileCoord::new(0, 0), TileCoord::new(5, 0)), vec![1]);
     }
 
     #[test]
