@@ -105,13 +105,21 @@ Closing the window saves the project.
 
 ---
 
-## 11.2 Projects: [`osrs_cache::project`](../osrs_cache/src/project.rs)
+## 11.2 Projects: [`osrs_map_editor::project`](../osrs_map_editor/src/project.rs)
+
+Where each part lives:
+
+| Part | Crate | Why there |
+|---|---|---|
+| projects, compiling, built caches and their manifests | `osrs_map_editor` (its library: `project`, `compile`, `builds`) | editor concepts; the editor binary is the window on top |
+| NPC spawns (`NpcSpawnPoint`, `npc_spawns.json`) | `osrs_core::data` | the game server reads them |
+| encoders, the reference table, the cache writer, the overlay, choosing the active cache | `osrs_cache` | the cache file format, the inverse of its decoders |
 
 ```
 MapProject {
     name,
     squares: { "sx_sy": SquareEdits { removed: [Placement], added: [Placement] } },
-    npc_spawns: [NpcSpawn { npc: "man", x, z, plane }],
+    npc_spawns: [NpcSpawnPoint { npc: "man", x, z, plane }],
     marker_defs: [MarkerDef { id, map_icon }],
     cache: Some("castle"),           // the compiled cache it plays on, once made
 }
@@ -162,7 +170,8 @@ spawns placed before.
   * an object the cache already has for that icon, if one has no model, blocks nothing and has no
     options (`compile::existing_marker`);
   * otherwise one the project mints: a `MarkerDef` with the next free object id, compiled into the
-    object definitions as `[2 "Map icon"][17][18][82 icon][0]`.
+    object definitions as `[2 "Map icon"][17][18][82 icon][0]`
+    (`osrs_cache::config::encode_icon_marker`).
 
 Because a project is a list of edits, not a copy of the map, it can be compiled again after
 RuneLite updates the installed cache.
@@ -186,7 +195,11 @@ the real cache:
 
 * every reference table re-encodes byte for byte;
 * every map square's placements re-encode to the same placements, and to the same bytes in all but
-  one square of about 25,000 (it stores some in an order the encoder does not reproduce).
+  one square of about 25,000 (it stores some in an order the encoder does not reproduce);
+* a group written into a copy reads back there, and the cache it was copied from is untouched.
+
+The editor's library builds on those ([`osrs_map_editor/src/compile.rs`](../osrs_map_editor/src/compile.rs);
+end-to-end tests in [`osrs_map_editor/tests/compile.rs`](../osrs_map_editor/tests/compile.rs)).
 
 **`compile::build`** turns a project into finished containers:
 
@@ -206,8 +219,9 @@ the real cache:
   a compiled cache (it has no `rsosrs_cache.json`).
 * `CacheWriter::create` copies the base's `main_file_cache.*` files into `<out>.building`, and the
   containers are appended there.
-* Two files are added beside the cache: `npc_spawns.json` and the manifest, `rsosrs_cache.json`
-  (base, project, time, counts).
+* Two files are added beside the cache: `npc_spawns.json` (`osrs_core::data::write_npc_spawns`)
+  and the manifest, `rsosrs_cache.json` (`builds::Manifest`: base, project, time, counts, the
+  project's fingerprint).
 * Last, the staging directory replaces `<out>`. A failed compile never leaves half a cache, and an
   earlier compile of the same name stays whole until the new one is complete.
 
@@ -230,7 +244,7 @@ A selected directory that holds no cache falls back to the live one, with a warn
 tests that build on it use it. `RSOSRS_HOME` moves `~/.rsosrs` (for experiments and tests).
 
 The game prints `[cache] reading <dir>` at start. The server looks for `npc_spawns.json` beside
-the active cache (`active::npc_spawns`):
+the active cache (`osrs_core::data::read_npc_spawns`):
 
 * **If it is there,** every spawn in it is placed on ground level, at the nearest open tile. The
   server loads each spawn's map square first, however far it is from the player.
@@ -242,24 +256,31 @@ the active cache (`active::npc_spawns`):
 
 The editor shows its edits through the same decoders the game uses:
 
+* It keeps one **`Overlay`**, a map of `(archive, group) → container` behind an `Arc`.
 * After every change it runs `compile::build_with(project, base, Compression::None)` and puts the
-  containers in the **overlay**, a process-wide map of `(archive, group) → container`.
-* `Cache::read_raw` answers from the overlay first.
-* The changed square and its eight neighbours are then decoded again by the square loader thread.
+  containers in the overlay.
+* The caches the world, minimap and thumbnails are drawn from are the base cache opened
+  [`with_overlay`](../osrs_cache/src/cache.rs). `Cache::read_raw` answers from the overlay first.
+  * The square loader thread gets one as well, through `SquareStream::spawn_with_cache`.
+* The changed square and its eight neighbours are then decoded again.
 
 So terrain, objects, collision and the minimap preview show exactly what a compiled cache will
-hold. The base cache the edits are built on is opened with `Cache::ignoring_overlay()`, so edits
-are never applied on top of themselves.
-
-The editor also sets `OSRS_CACHE_DIR` to its base cache for its own process. Its loader thread
-therefore reads the base plus the overlay, whatever cache the game has been switched to.
+hold. The base cache the edits are built on is opened without an overlay, so edits are never
+applied on top of themselves. The editor reads its base cache directly, whatever cache the game
+has been switched to.
 
 ---
 
 ## 11.6 The editor's code: [`osrs_map_editor/src`](../osrs_map_editor/src/)
 
+The crate is a library (`lib.rs`: what the editor knows, testable without a window) and a binary
+(`main.rs`: the window).
+
 | File | What it does |
 |---|---|
+| `lib.rs` → `project.rs` | `MapProject`: the edits, saving and loading, the fingerprint, which built cache it plays on |
+| `lib.rs` → `compile.rs` | building a project's groups (`build`, `build_with`) and a new cache (`compile`); markers |
+| `lib.rs` → `builds.rs` | `~/.rsosrs/projects` and `caches`, a built cache's `Manifest`, listing the built caches |
 | `main.rs` | arguments, the headless `--compile`, the Bevy app, `OSRS_SCREENSHOT`, saving on close |
 | `catalog.rs` | the palette: object definitions, gathering resources, NPCs, map functions; shapes and footprints |
 | `editor.rs` | the `Editor` resource: project, tool settings, the undo stack, every edit, rebuilding the overlay |

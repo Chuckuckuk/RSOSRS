@@ -1,11 +1,10 @@
-//! Which cache the game reads: the installed game's ("live"), or one the map editor compiled.
+//! Which cache the game reads: the installed game's ("live"), or another one, such as a copy the
+//! map editor built.
 //!
-//! The editor never writes to the installed cache. It builds a full copy with the edits applied
-//! under `~/.rsosrs/caches/<name>/` ([`crate::compile`]), and the game reads whichever cache is
-//! *active*:
+//! [`Cache::open_default`](crate::Cache::open_default) opens the *active* cache:
 //!
 //! 1. `OSRS_CACHE_DIR`, if set: a cache directory, or `live`;
-//! 2. else `~/.rsosrs/active_cache`, a text file holding a directory or `live` (the editor's
+//! 2. else `~/.rsosrs/active_cache`, a text file holding a directory or `live` (the map editor's
 //!    Caches menu writes it);
 //! 3. else the live cache.
 //!
@@ -19,10 +18,6 @@ pub const ENV_CACHE_DIR: &str = "OSRS_CACHE_DIR";
 pub const ENV_HOME: &str = "RSOSRS_HOME";
 /// What the selection file or variable holds to mean the installed game's cache.
 pub const LIVE: &str = "live";
-/// The file a compiled cache carries to say where it came from ([`crate::compile::Manifest`]).
-pub const MANIFEST: &str = "rsosrs_cache.json";
-/// The NPC spawns a compiled cache carries ([`crate::project::NpcSpawn`]).
-pub const NPC_SPAWNS: &str = "npc_spawns.json";
 
 /// A choice of cache.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +43,8 @@ fn user_home() -> PathBuf {
     PathBuf::from(std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default())
 }
 
-/// `~/.rsosrs`, where compiled caches, editor projects and the active selection live.
+/// `~/.rsosrs`, where the active selection lives (and the map editor keeps its projects and
+/// builds).
 pub fn rsosrs_dir() -> PathBuf {
     match std::env::var(ENV_HOME) {
         Ok(d) if !d.is_empty() => PathBuf::from(d),
@@ -56,21 +52,8 @@ pub fn rsosrs_dir() -> PathBuf {
     }
 }
 
-pub fn caches_dir() -> PathBuf {
-    rsosrs_dir().join("caches")
-}
-
-pub fn projects_dir() -> PathBuf {
-    rsosrs_dir().join("projects")
-}
-
 fn selection_file() -> PathBuf {
     rsosrs_dir().join("active_cache")
-}
-
-/// The directory a compiled cache called `name` lives in.
-pub fn cache_dir_of(name: &str) -> PathBuf {
-    caches_dir().join(name)
 }
 
 /// Whether `dir` holds a cache (its data file).
@@ -118,44 +101,6 @@ pub fn set_active(selection: &Selection) -> std::io::Result<()> {
         Selection::Dir(dir) => dir.display().to_string(),
     };
     std::fs::write(selection_file(), text)
-}
-
-/// One compiled cache under [`caches_dir`].
-#[derive(Debug, Clone)]
-pub struct CacheInfo {
-    pub name: String,
-    pub dir: PathBuf,
-    pub manifest: Option<crate::compile::Manifest>,
-}
-
-/// Every compiled cache, by name.
-pub fn list_caches() -> Vec<CacheInfo> {
-    let Ok(entries) = std::fs::read_dir(caches_dir()) else { return Vec::new() };
-    let mut out: Vec<CacheInfo> = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| is_cache_dir(p))
-        .map(|dir| CacheInfo {
-            name: dir.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-            manifest: std::fs::read_to_string(dir.join(MANIFEST)).ok().and_then(|s| serde_json::from_str(&s).ok()),
-            dir,
-        })
-        .collect();
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    out
-}
-
-/// The NPC spawns carried by the cache in `dir`, if it has any (a compiled cache does; the live
-/// one does not).
-pub fn npc_spawns(dir: &Path) -> Option<Vec<crate::project::NpcSpawn>> {
-    let text = std::fs::read_to_string(dir.join(NPC_SPAWNS)).ok()?;
-    match serde_json::from_str(&text) {
-        Ok(spawns) => Some(spawns),
-        Err(e) => {
-            eprintln!("[cache] {} is unreadable: {e}", dir.join(NPC_SPAWNS).display());
-            None
-        }
-    }
 }
 
 #[cfg(test)]

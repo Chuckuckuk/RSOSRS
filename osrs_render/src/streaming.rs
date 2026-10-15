@@ -63,8 +63,14 @@ pub struct SquareLoader {
 }
 
 impl SquareLoader {
+    /// A loader reading the active cache (`Cache::open_default`).
     pub fn open() -> osrs_cache::Result<SquareLoader> {
-        let source = MapSource::open()?;
+        SquareLoader::from_cache(osrs_cache::Cache::open_default()?)
+    }
+
+    /// A loader reading `cache` (one with an overlay, say: the map editor's uncompiled edits).
+    pub fn from_cache(cache: osrs_cache::Cache) -> osrs_cache::Result<SquareLoader> {
+        let source = MapSource::from_cache(cache)?;
         let texture_hsl = Configs::new(source.cache())?.texture_average_hsl()?;
         Ok(SquareLoader { source, texture_hsl, models: HashMap::new(), items: None })
     }
@@ -186,11 +192,23 @@ pub struct SquareStream {
 }
 
 impl SquareStream {
+    /// A loading thread reading the active cache.
     pub fn spawn() -> SquareStream {
+        SquareStream::spawn_with(SquareLoader::open)
+    }
+
+    /// A loading thread reading `cache`.
+    pub fn spawn_with_cache(cache: osrs_cache::Cache) -> SquareStream {
+        SquareStream::spawn_with(move || SquareLoader::from_cache(cache))
+    }
+
+    /// A loading thread whose loader `make` builds (on that thread: a loader cannot move between
+    /// threads).
+    fn spawn_with(make: impl FnOnce() -> osrs_cache::Result<SquareLoader> + Send + 'static) -> SquareStream {
         let (request_tx, request_rx) = mpsc::channel::<Request>();
         let (result_tx, result_rx) = mpsc::channel();
         thread::spawn(move || {
-            let mut loader = match SquareLoader::open() {
+            let mut loader = match make() {
                 Ok(loader) => loader,
                 Err(e) => {
                     // nothing can be loaded; report every request as failed

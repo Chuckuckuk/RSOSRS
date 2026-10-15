@@ -4574,6 +4574,8 @@ dependencies = [
  "osrs_cache",
  "osrs_core",
  "osrs_render",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

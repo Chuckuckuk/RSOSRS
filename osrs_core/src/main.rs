@@ -386,7 +386,7 @@ fn main() {
 
         // a cache built by the map editor says who stands where; its squares are loaded now so
         // each NPC has ground under it, however far from the player
-        let mut npc_spawns = scenario.is_none().then(|| osrs_cache::active::npc_spawns(source.cache().dir())).flatten();
+        let mut npc_spawns = scenario.is_none().then(|| osrs_core::data::read_npc_spawns(source.cache().dir())).flatten();
         if let Some(spawns) = &mut npc_spawns {
             resolve_cache_npcs(&mut registry, &source, spawns);
         }
@@ -610,7 +610,7 @@ fn start_scenario(
 /// `npcs.json` has the monster (drawn as that NPC, or listing it in `cache_ids`), it fights with
 /// those stats, drawn as its own model, so stats added there reach spawns already placed.
 /// Otherwise it is made from the cache's own definition, and cannot be fought.
-fn resolve_cache_npcs(registry: &mut Registry, source: &MapSource, spawns: &mut [osrs_cache::project::NpcSpawn]) {
+fn resolve_cache_npcs(registry: &mut Registry, source: &MapSource, spawns: &mut [osrs_core::data::NpcSpawnPoint]) {
     use osrs_core::data::{cache_npc_def, cache_npc_id, cache_npc_variant, DataFile};
     let mut cache_defs = None;
     let mut made = Vec::new();

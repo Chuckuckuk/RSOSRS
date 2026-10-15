@@ -1,30 +1,31 @@
-//! The in-memory overlay, against the installed game cache (skipped when absent). A test binary
-//! of its own: the overlay is process-wide and would change what other tests read.
+//! A cache opened with an overlay reads the groups it holds from it, and everything else from its
+//! files; a cache without one never sees it. Against the installed game cache (skipped when
+//! absent).
 
-use osrs_cache::compile;
-use osrs_cache::locs::{self, Placement};
-use osrs_cache::project::MapProject;
+use osrs_cache::container::{self, Compression};
+use osrs_cache::overlay::Overlay;
 use osrs_cache::*;
+use std::sync::Arc;
 
 #[test]
-fn the_overlay_shows_built_edits_without_writing_anything() {
-    let Ok(base) = Cache::open_live() else { return };
-    let base_dir = base.dir().to_path_buf();
-    let (sx, sy) = (50, 50);
-    let gid = ((sx << 8) | sy) as u32;
-    let mut project = MapProject::new("overlay");
-    let tree = Placement { id: 1276, plane: 0, x: 1, z: 1, kind: 10, orientation: 0 };
-    project.square_mut(sx, sy).added.push(tree);
-    let built = compile::build(&project, &Cache::open(&base_dir).unwrap().ignoring_overlay()).unwrap();
-    assert!(built.contains_key(&(idx::MAPS, gid)) && built.contains_key(&(255, idx::MAPS as u32)));
+fn a_cache_with_an_overlay_reads_its_groups_from_it() {
+    let Ok(plain) = Cache::open_live() else { return };
+    let dir = plain.dir().to_path_buf();
+    let overlay = Overlay::new();
+    let with = Cache::open(&dir).unwrap().with_overlay(Arc::clone(&overlay));
+    let also = Cache::open(&dir).unwrap().with_overlay(Arc::clone(&overlay));
 
-    let has_tree = |c: &Cache| {
-        let maps = c.index(idx::MAPS).unwrap();
-        locs::decode(&c.read_files(&maps, gid).unwrap()[1].1).contains(&tree)
-    };
-    osrs_cache::overlay::set(built);
-    assert!(has_tree(&Cache::open(&base_dir).unwrap()));
-    assert!(!has_tree(&Cache::open(&base_dir).unwrap().ignoring_overlay()));
-    osrs_cache::overlay::clear();
-    assert!(!has_tree(&Cache::open(&base_dir).unwrap()));
+    let replaced = container::encode(b"not the real model", Compression::None);
+    let original = plain.read_raw(idx::MODELS, 1).unwrap();
+    overlay.set([((idx::MODELS, 1), replaced.clone())]);
+
+    assert_eq!(with.read_raw(idx::MODELS, 1).unwrap(), replaced);
+    assert_eq!(also.read_raw(idx::MODELS, 1).unwrap(), replaced, "caches sharing an overlay see the same groups");
+    assert_eq!(with.read_group(idx::MODELS, 1).unwrap(), b"not the real model");
+    assert_eq!(plain.read_raw(idx::MODELS, 1).unwrap(), original, "a cache without the overlay never sees it");
+    assert_eq!(with.read_raw(idx::MODELS, 2).unwrap(), plain.read_raw(idx::MODELS, 2).unwrap(), "other groups come from the files");
+    assert_eq!(overlay.keys(), vec![(idx::MODELS, 1)]);
+
+    overlay.clear();
+    assert_eq!(with.read_raw(idx::MODELS, 1).unwrap(), original);
 }

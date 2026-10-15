@@ -6,7 +6,9 @@
 //!
 //! Saved as JSON under `~/.rsosrs/projects/<name>.json`.
 
-use crate::locs::Placement;
+use crate::builds::{self, Manifest};
+use osrs_cache::locs::Placement;
+use osrs_core::data::NpcSpawnPoint;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,7 +20,7 @@ pub struct MapProject {
     #[serde(default)]
     pub squares: BTreeMap<String, SquareEdits>,
     #[serde(default)]
-    pub npc_spawns: Vec<NpcSpawn>,
+    pub npc_spawns: Vec<NpcSpawnPoint>,
     /// Invisible objects minted to carry a minimap icon where the cache has none for that icon.
     #[serde(default)]
     pub marker_defs: Vec<MarkerDef>,
@@ -59,17 +61,6 @@ impl SquareEdits {
     }
 }
 
-/// An NPC standing in the world when the server starts. `npc` is an id in `data/npcs.json`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct NpcSpawn {
-    pub npc: String,
-    /// World tile.
-    pub x: i32,
-    pub z: i32,
-    #[serde(default)]
-    pub plane: u8,
-}
-
 /// An object definition the compile adds: no model, does not block, carries map icon `map_icon`
 /// (an area id, config group 35).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -79,15 +70,9 @@ pub struct MarkerDef {
 }
 
 impl MarkerDef {
-    /// The definition's bytes: name (opcode 2), no clipping (17), not impenetrable (18), map icon
-    /// (82), end (0).
+    /// The definition's bytes (see `osrs_cache::config::encode_icon_marker`).
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = vec![2];
-        out.extend_from_slice(b"Map icon\0");
-        out.extend_from_slice(&[17, 18, 82]);
-        out.extend_from_slice(&self.map_icon.to_be_bytes());
-        out.push(0);
-        out
+        osrs_cache::config::encode_icon_marker("Map icon", self.map_icon)
     }
 }
 
@@ -109,7 +94,7 @@ impl MapProject {
 
     /// `~/.rsosrs/projects/<name>.json`.
     pub fn path_of(name: &str) -> PathBuf {
-        crate::active::projects_dir().join(format!("{name}.json"))
+        builds::projects_dir().join(format!("{name}.json"))
     }
 
     pub fn load(path: &Path) -> std::io::Result<MapProject> {
@@ -149,12 +134,12 @@ impl MapProject {
     /// whose manifest says it was built from a project of this name.
     pub fn compiled_cache(&self) -> Option<PathBuf> {
         if let Some(name) = &self.cache {
-            let dir = crate::active::cache_dir_of(name);
-            if crate::active::is_cache_dir(&dir) {
+            let dir = builds::cache_dir_of(name);
+            if osrs_cache::active::is_cache_dir(&dir) {
                 return Some(dir);
             }
         }
-        crate::active::list_caches()
+        builds::list_caches()
             .into_iter()
             .find(|c| c.manifest.as_ref().is_some_and(|m| m.project == self.name))
             .map(|c| c.dir)
@@ -172,10 +157,7 @@ impl MapProject {
     /// Whether the compiled cache in `dir` was built from the project as it is now. A cache whose
     /// manifest has no fingerprint (built before they were kept) counts as out of date.
     pub fn is_compiled_into(&self, dir: &Path) -> bool {
-        let manifest = std::fs::read_to_string(dir.join(crate::active::MANIFEST))
-            .ok()
-            .and_then(|s| serde_json::from_str::<crate::compile::Manifest>(&s).ok());
-        manifest.and_then(|m| m.fingerprint) == Some(self.fingerprint())
+        Manifest::read(dir).and_then(|m| m.fingerprint) == Some(self.fingerprint())
     }
 
     /// Whether the project changes nothing.
@@ -187,18 +169,6 @@ impl MapProject {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ObjectDef;
-
-    #[test]
-    fn a_marker_def_is_an_invisible_non_blocking_icon() {
-        let d = MarkerDef { id: 60_000, map_icon: 13 }.encode();
-        let (def, clean) = ObjectDef::decode_with(60_000, &d, &[]);
-        assert!(clean, "consumed exactly");
-        assert_eq!(def.map_icon, Some(13));
-        assert!(def.models.is_empty());
-        assert_eq!(def.interact_type, 0);
-        assert!(!def.solid);
-    }
 
     #[test]
     fn removing_takes_out_one_equal_placement_and_adding_appends() {
@@ -214,7 +184,7 @@ mod tests {
         a.cache = Some("elsewhere".into());
         a.name = "renamed".into();
         assert_eq!(a.fingerprint(), blank);
-        a.npc_spawns.push(NpcSpawn { npc: "man".into(), x: 1, z: 2, plane: 0 });
+        a.npc_spawns.push(NpcSpawnPoint { npc: "man".into(), x: 1, z: 2, plane: 0 });
         assert_ne!(a.fingerprint(), blank);
         assert_eq!(a.fingerprint(), a.clone().fingerprint());
     }

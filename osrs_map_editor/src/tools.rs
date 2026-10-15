@@ -5,7 +5,7 @@ use crate::editor::{Brush, Editor, Selected, Tool};
 use crate::world::{placing_object, Hover};
 use bevy::prelude::*;
 use osrs_cache::locs::Placement;
-use osrs_cache::project::NpcSpawn;
+use osrs_core::data::NpcSpawnPoint;
 use osrs_cache::squares::SQUARE;
 use osrs_render::streaming::{square_of, StreamedWorld};
 
@@ -84,7 +84,7 @@ fn place(editor: &mut Editor, catalog: &Catalog, tile: (i32, i32)) {
             editor.status = format!("Placed {} ({id}) at {}, {}", catalog.object_name(id), tile.0, tile.1);
         }
         Some(Brush::Npc(npc)) => {
-            editor.add_npc(NpcSpawn { npc: npc.clone(), x: tile.0, z: tile.1, plane: editor.plane });
+            editor.add_npc(NpcSpawnPoint { npc: npc.clone(), x: tile.0, z: tile.1, plane: editor.plane });
             editor.selected = Some(Selected::Npc(editor.project.npc_spawns.len() - 1));
             editor.status = format!("Placed NPC {} at {}, {}", catalog.npc_name(&npc), tile.0, tile.1);
         }

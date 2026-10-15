@@ -48,7 +48,9 @@ installed game's under `%USERPROFILE%\.runelite\jagexcache\oldschool\LIVE` (then
 The crate also writes caches, for the map editor: every layer below has an inverse
 (`locs::encode`, `cache::join_files`, `container::encode`, `reftable::RefTable::encode`,
 `writer::CacheWriter`), described in chapter 11.3. Writing only ever targets a copy; the installed
-cache is read only.
+cache is read only. A cache opened `with_overlay(Arc<overlay::Overlay>)` answers reads of the
+groups the overlay holds from memory instead of its files (the map editor's uncompiled edits,
+chapter 11.5).
 
 1. **Index entry.** `main_file_cache.idxN` is an array of 6-byte records, one per group: a 24-bit
    length and a 24-bit first sector number. The whole idx file is read once and memoised behind

@@ -1,4 +1,4 @@
-//! Turning a [`MapProject`] into cache data.
+//! Turning a [`MapProject`] into cache data, with `osrs_cache`'s encoders and writer.
 //!
 //! [`build`] works out every group the project changes, as finished containers:
 //! * each edited map square (archive 5): its placements file re-encoded with the edits applied,
@@ -8,21 +8,20 @@
 //! * the reference table of each archive touched (archive 255), with the new CRCs and revisions,
 //!   and new file ids for minted objects.
 //!
-//! The map editor shows those containers through the in-memory [`overlay`](crate::overlay);
+//! The editor shows those containers through a cache [`Overlay`](osrs_cache::overlay::Overlay);
 //! [`compile`] writes them into a copy of the base cache, beside the project's NPC spawns and a
-//! manifest. The base cache is only read.
+//! [`Manifest`]. The base cache is only read.
 
-use crate::active::{self, MANIFEST, NPC_SPAWNS};
-use crate::cache::join_files;
-use crate::config::ObjectDef;
-use crate::container::{self, Compression};
+use crate::builds::{Manifest, MANIFEST};
 use crate::project::{parse_square_key, MapProject};
-use crate::reftable::RefTable;
-use crate::writer::CacheWriter;
-use crate::{cfg, fmt_err, idx, locs, Cache, Result};
-use serde::{Deserialize, Serialize};
+use osrs_cache::cache::join_files;
+use osrs_cache::config::ObjectDef;
+use osrs_cache::container::{self, Compression};
+use osrs_cache::reftable::RefTable;
+use osrs_cache::writer::CacheWriter;
+use osrs_cache::{cfg, idx, locs, Cache, Error, Result};
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Containers by `(archive, group)`.
 pub type Containers = BTreeMap<(u8, u32), Vec<u8>>;
@@ -30,26 +29,12 @@ pub type Containers = BTreeMap<(u8, u32), Vec<u8>>;
 /// The reference-table archive.
 const META: u8 = 255;
 
-/// What a compiled cache records about itself (`rsosrs_cache.json`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Manifest {
-    pub name: String,
-    pub project: String,
-    /// The cache it was built on.
-    pub base: PathBuf,
-    /// Seconds since the Unix epoch.
-    pub compiled_at: u64,
-    pub squares: usize,
-    pub npc_spawns: usize,
-    pub marker_defs: usize,
-    /// [`MapProject::fingerprint`] of the project as compiled.
-    #[serde(default)]
-    pub fingerprint: Option<u64>,
+fn fail<T>(why: impl Into<String>) -> Result<T> {
+    Err(Error::Format(why.into()))
 }
 
-/// The containers `project` changes, built on `base`. `base` should ignore the overlay
-/// ([`Cache::ignoring_overlay`]) so edits are applied to the cache as stored, not on top of
-/// themselves.
+/// The containers `project` changes, built on `base`. `base` should read its own files only (no
+/// overlay), so edits are applied to the cache as stored, not on top of themselves.
 pub fn build(project: &MapProject, base: &Cache) -> Result<Containers> {
     build_with(project, base, Compression::Gzip)
 }
@@ -66,15 +51,15 @@ pub fn build_with(project: &MapProject, base: &Cache, compression: Compression) 
         let index = maps.to_index(idx::MAPS);
         for (key, edits) in squares {
             let Some((sx, sy)) = parse_square_key(key) else {
-                return fmt_err(format!("bad square key {key:?} in the project"));
+                return fail(format!("bad square key {key:?} in the project"));
             };
             let gid = ((sx << 8) | sy) as u32;
             if !index.groups.contains_key(&gid) {
-                return fmt_err(format!("map square {sx}_{sy} is not in the cache; only existing squares can be edited"));
+                return fail(format!("map square {sx}_{sy} is not in the cache; only existing squares can be edited"));
             }
             let mut files = base.read_files(&index, gid)?;
             if files.len() < 2 {
-                return fmt_err(format!("map square {sx}_{sy} has no placements file"));
+                return fail(format!("map square {sx}_{sy} has no placements file"));
             }
             let placed = edits.apply(&locs::decode(&files[1].1));
             files[1].1 = locs::encode(&placed);
@@ -96,7 +81,7 @@ pub fn build_with(project: &MapProject, base: &Cache, compression: Compression) 
         let data = join_files(&files.values().map(Vec::as_slice).collect::<Vec<_>>());
         let packed = container::encode(&data, compression);
         let Some(group) = config.group_mut(cfg::OBJECT) else {
-            return fmt_err("the config archive has no object group");
+            return fail("the config archive has no object group");
         };
         // keep the name hashes of the files already listed; minted ones have none
         let names: HashMap<u32, i32> = group.files.iter().copied().collect();
@@ -148,22 +133,20 @@ pub fn compile(project: &MapProject, base_dir: &Path, out_dir: &Path, mut progre
         _ => false,
     };
     if same(base_dir, out_dir) {
-        return fmt_err("a cache cannot be compiled over its own base");
+        return fail("a cache cannot be compiled over its own base");
     }
-    if active::live_dir().is_some_and(|live| same(&live, out_dir)) {
-        return fmt_err("the live game cache is never written to");
+    if osrs_cache::active::live_dir().is_some_and(|live| same(&live, out_dir)) {
+        return fail("the live game cache is never written to");
     }
     if out_dir.exists() && !out_dir.join(MANIFEST).exists() {
-        return fmt_err(format!("{} exists and is not a compiled cache; choose another name", out_dir.display()));
+        return fail(format!("{} exists and is not a compiled cache; choose another name", out_dir.display()));
     }
     let Some(name) = out_dir.file_name().map(|n| n.to_string_lossy().into_owned()) else {
-        return fmt_err("the output needs a directory name");
+        return fail("the output needs a directory name");
     };
 
     progress(Stage::Building);
-    let base = Cache::open(base_dir)?.ignoring_overlay();
-    let containers = build(project, &base)?;
-    drop(base);
+    let containers = build(project, &Cache::open(base_dir)?)?;
 
     // build beside the destination, then swap it in, so a failed compile leaves the old one whole
     let staging = out_dir.with_file_name(format!("{name}.building"));
@@ -188,19 +171,14 @@ pub fn compile(project: &MapProject, base_dir: &Path, out_dir: &Path, mut progre
         marker_defs: project.marker_defs.len(),
         fingerprint: Some(project.fingerprint()),
     };
-    std::fs::write(staging.join(NPC_SPAWNS), pretty_json(&project.npc_spawns))?;
-    std::fs::write(staging.join(MANIFEST), pretty_json(&manifest))?;
+    osrs_core::data::write_npc_spawns(&staging, &project.npc_spawns)?;
+    manifest.write(&staging)?;
 
     if out_dir.exists() {
-        std::fs::remove_dir_all(out_dir).map_err(|e| {
-            crate::Error::Format(format!("could not replace {} (is the game running on it?): {e}", out_dir.display()))
-        })?;
+        std::fs::remove_dir_all(out_dir)
+            .map_err(|e| Error::Format(format!("could not replace {} (is the game running on it?): {e}", out_dir.display())))?;
     }
     std::fs::rename(&staging, out_dir)?;
     progress(Stage::Done);
     Ok(manifest)
-}
-
-fn pretty_json<T: Serialize>(v: &T) -> String {
-    serde_json::to_string_pretty(v).expect("plain data serialises")
 }

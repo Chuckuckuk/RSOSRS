@@ -9,11 +9,6 @@ use osrs_cache::textures::Texture;
 use osrs_cache::{idx, Cache, Index};
 use std::collections::HashMap;
 
-/// A cache that sees the overlay, kept for the life of the program so minimap sources can borrow it.
-pub fn leak_cache(dir: &std::path::Path) -> osrs_cache::Result<&'static Cache> {
-    Ok(Box::leak(Box::new(Cache::open(dir)?)))
-}
-
 #[derive(Resource)]
 pub struct MinimapPreview {
     pub open: bool,

@@ -1,6 +1,6 @@
 //! Map editor: place and remove scenery, resource nodes, NPC spawns and minimap icons, then
 //! compile the edits into a new game cache the game can be switched to. The installed game's
-//! cache is never written to (see `osrs_cache::compile` and `osrs_cache::active`).
+//! cache is never written to (see `osrs_map_editor::compile` and `osrs_cache::active`).
 //!
 //! usage: osrs_map_editor [--project <name>] [--base <cache dir>] [--at <x>,<z>]
 //!                        [--compile <cache name>] [--activate] [--play]
@@ -33,8 +33,10 @@ mod world;
 use bevy::prelude::*;
 use bevy::window::WindowCloseRequested;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
-use osrs_cache::project::MapProject;
+use osrs_cache::overlay::Overlay;
 use osrs_cache::Cache;
+use osrs_map_editor::project::MapProject;
+use std::sync::Arc;
 use osrs_render::streaming::{SquareStream, StreamedWorld};
 use osrs_render::world::{MaterialCache, TextureStore, WorldRenderPlugin};
 use std::path::PathBuf;
@@ -99,9 +101,6 @@ fn main() {
     if !osrs_cache::active::is_cache_dir(&base_dir) {
         fail("not a cache", base_dir.display());
     }
-    // everything in this process (the square loader thread too) reads the base cache, plus the
-    // overlay of edits, whichever cache the game has been switched to
-    std::env::set_var(osrs_cache::active::ENV_CACHE_DIR, &base_dir);
     println!("[editor] editing on {}", base_dir.display());
 
     let path = MapProject::path_of(&args.project);
@@ -128,9 +127,9 @@ fn main() {
                     .clone()
                     .or_else(|| stale.as_ref().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned()))
                     .unwrap_or_else(|| ui::clean_name(&project.name));
-                let out = osrs_cache::active::cache_dir_of(&name);
+                let out = osrs_map_editor::builds::cache_dir_of(&name);
                 let started = std::time::Instant::now();
-                let manifest = osrs_cache::compile::compile(&project, &base_dir, &out, |stage| println!("[editor] {stage:?}"))
+                let manifest = osrs_map_editor::compile::compile(&project, &base_dir, &out, |stage| println!("[editor] {stage:?}"))
                     .unwrap_or_else(|e| fail("the compile failed", e));
                 println!(
                     "[editor] compiled {} in {:.1?}: {} squares, {} NPC spawns, {} icon objects",
@@ -158,13 +157,18 @@ fn main() {
         return;
     }
 
-    let base = Cache::open(&base_dir).unwrap_or_else(|e| fail("could not open the cache", e)).ignoring_overlay();
+    // the base cache as stored, for building edits on; and the same cache with the edits held in
+    // memory over it, for drawing the world, the minimap and thumbnails
+    let open = || Cache::open(&base_dir).unwrap_or_else(|e| fail("could not open the cache", e));
+    let base = open();
+    let overlay = Overlay::new();
     let catalog = catalog::Catalog::load(&base).unwrap_or_else(|e| fail("could not read the cache's definitions", e));
     let textures = osrs_cache::textures::load_textures(&base).unwrap_or_else(|e| fail("could not read the cache's textures", e));
     let picker = world::EditorPicker::new(&catalog);
-    let mut editor = editor::Editor::new(project, path, base, base_dir.clone());
+    let mut editor = editor::Editor::new(project, path, base, base_dir.clone(), Arc::clone(&overlay));
     editor.status = format!("{} objects, {} NPCs, {} icons", catalog.objects.len(), catalog.npcs.len(), catalog.areas.len());
-    let shared = preview::leak_cache(&base_dir).unwrap_or_else(|e| fail("could not open the cache", e));
+    let shared: &'static Cache = Box::leak(Box::new(open().with_overlay(Arc::clone(&overlay))));
+    let stream = SquareStream::spawn_with_cache(open().with_overlay(overlay));
     // OSRS_NPC_PICKER=<name>: start with that NPC's model picker open (for screenshots)
     let mut ui_state = ui::UiState::default();
     if let Ok(name) = std::env::var("OSRS_NPC_PICKER") {
@@ -217,7 +221,7 @@ fn main() {
     .add_systems(EguiPrimaryContextPass, ui::editor_ui)
     .add_systems(Update, picker::manage_picker_window)
     .add_systems(picker::PickerContextPass, picker::picker_ui);
-    app.world_mut().insert_non_send(SquareStream::spawn());
+    app.world_mut().insert_non_send(stream);
     app.run();
 }
 

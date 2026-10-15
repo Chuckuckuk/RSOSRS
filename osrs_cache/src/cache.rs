@@ -14,8 +14,8 @@ pub struct Cache {
     dat: Option<Mutex<File>>,
     idx: Mutex<HashMap<u8, Vec<(u32, u32)>>>,
     bundle: Option<std::sync::Arc<crate::bundle::Bundle>>,
-    /// Whether reads answer from the editor's in-memory [`overlay`](crate::overlay) first.
-    use_overlay: bool,
+    /// Groups replaced in memory, answered before the files (see [`Cache::with_overlay`]).
+    overlay: Option<std::sync::Arc<crate::overlay::Overlay>>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,17 +55,18 @@ impl Cache {
     pub fn open(dir: impl AsRef<Path>) -> Result<Cache> {
         let dir = dir.as_ref().to_path_buf();
         let dat = File::open(dir.join("main_file_cache.dat2"))?;
-        Ok(Cache { dir, dat: Some(Mutex::new(dat)), idx: Mutex::new(HashMap::new()), bundle: None, use_overlay: true })
+        Ok(Cache { dir, dat: Some(Mutex::new(dat)), idx: Mutex::new(HashMap::new()), bundle: None, overlay: None })
     }
 
     /// A cache that reads from `bundle` only.
     pub fn from_bundle(bundle: std::sync::Arc<crate::bundle::Bundle>) -> Cache {
-        Cache { dir: PathBuf::new(), dat: None, idx: Mutex::new(HashMap::new()), bundle: Some(bundle), use_overlay: true }
+        Cache { dir: PathBuf::new(), dat: None, idx: Mutex::new(HashMap::new()), bundle: Some(bundle), overlay: None }
     }
 
-    /// This cache, reading its own files only: the map editor's uncompiled edits are not seen.
-    pub fn ignoring_overlay(mut self) -> Cache {
-        self.use_overlay = false;
+    /// This cache, answering reads of the groups `overlay` holds from it rather than from its
+    /// files (the map editor's uncompiled edits).
+    pub fn with_overlay(mut self, overlay: std::sync::Arc<crate::overlay::Overlay>) -> Cache {
+        self.overlay = Some(overlay);
         self
     }
 
@@ -118,8 +119,8 @@ impl Cache {
     /// Raw (still compressed/encrypted) container bytes of `index/group`.
     pub fn read_raw(&self, index: u8, group: u32) -> Result<Vec<u8>> {
         crate::bundle::record(index, group);
-        // groups the map editor has changed but not yet compiled into a cache
-        if let Some(raw) = self.use_overlay.then(|| crate::overlay::get(index, group)).flatten() {
+        // groups replaced in memory (the map editor's uncompiled edits)
+        if let Some(raw) = self.overlay.as_ref().and_then(|o| o.get(index, group)) {
             return Ok(raw.to_vec());
         }
         if let Some(bundle) = &self.bundle {

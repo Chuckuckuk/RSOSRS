@@ -11,8 +11,9 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use osrs_cache::active::{self, Selection};
-use osrs_cache::compile::{self, Manifest, Stage};
-use osrs_cache::project::MapProject;
+use osrs_map_editor::builds::{self, Manifest};
+use osrs_map_editor::compile::{self, Stage};
+use osrs_map_editor::project::MapProject;
 use osrs_cache::squares::SQUARE;
 use osrs_render::streaming::{square_of, StreamedWorld};
 use std::sync::mpsc::{self, Receiver};
@@ -245,7 +246,7 @@ fn menu_bar(ui: &mut egui::Ui, editor: &mut Editor, state: &mut UiState, minimap
                 }
             };
             pick(ui, "The installed game's cache (live)".into(), Selection::Live);
-            for info in active::list_caches() {
+            for info in builds::list_caches() {
                 let detail = info.manifest.as_ref().map(|m| format!(" (project {})", m.project)).unwrap_or_default();
                 pick(ui, format!("{}{detail}", info.name), Selection::Dir(info.dir.clone()));
             }
@@ -285,7 +286,7 @@ fn menu_bar(ui: &mut egui::Ui, editor: &mut Editor, state: &mut UiState, minimap
 }
 
 fn list_projects() -> Vec<(String, std::path::PathBuf)> {
-    let Ok(entries) = std::fs::read_dir(active::projects_dir()) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(builds::projects_dir()) else { return Vec::new() };
     let mut out: Vec<_> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -615,7 +616,7 @@ fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
                 ui.text_edit_singleline(&mut name);
             });
             let clean = clean_name(&name);
-            let out = active::cache_dir_of(&clean);
+            let out = builds::cache_dir_of(&clean);
             if !clean.is_empty() {
                 ui.label(format!("Into: {}", out.display()));
                 if out.exists() {
@@ -647,7 +648,7 @@ fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
                 ui.text_edit_singleline(&mut name);
             });
             let clean = clean_name(&name);
-            let out = active::cache_dir_of(&clean);
+            let out = builds::cache_dir_of(&clean);
             if !clean.is_empty() {
                 ui.label(format!("Into: {}", out.display()));
                 if out.exists() {
@@ -680,7 +681,7 @@ fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
                     keep = false;
                 }
                 if ui.button("Play the last build").clicked() {
-                    launch(editor, &active::cache_dir_of(&name), spawn);
+                    launch(editor, &builds::cache_dir_of(&name), spawn);
                     keep = false;
                 }
                 if ui.button("Cancel").clicked() {
@@ -717,10 +718,10 @@ fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
             match result {
                 Ok(m) => {
                     ui.label(format!("Built cache \u{201c}{}\u{201d}: {} squares, {} NPC spawns, {} new icon objects.", m.name, m.squares, m.npc_spawns, m.marker_defs));
-                    ui.label(active::cache_dir_of(&m.name).display().to_string());
+                    ui.label(builds::cache_dir_of(&m.name).display().to_string());
                     ui.horizontal(|ui| {
                         if ui.button("Play on it (set active)").clicked() {
-                            match active::set_active(&Selection::Dir(active::cache_dir_of(&m.name))) {
+                            match active::set_active(&Selection::Dir(builds::cache_dir_of(&m.name))) {
                                 Ok(()) => editor.status = format!("The game will read {} next time it starts", m.name),
                                 Err(e) => editor.status = format!("could not choose the cache: {e}"),
                             }
@@ -757,7 +758,7 @@ fn start_compile(editor: &mut Editor, name: String, then_play: Option<Option<(i3
     let (tx, rx) = mpsc::channel();
     let project = editor.project.clone();
     let base = editor.base_dir.clone();
-    let out = active::cache_dir_of(&name);
+    let out = builds::cache_dir_of(&name);
     std::thread::spawn(move || {
         let progress = tx.clone();
         let result = compile::compile(&project, &base, &out, |stage| {
@@ -784,7 +785,7 @@ fn poll_job(state: &mut UiState, editor: &mut Editor) {
                         editor.project.cache = Some(m.name.clone());
                         editor.save();
                         if let Some(spawn) = then_play {
-                            launch(editor, &active::cache_dir_of(&m.name), spawn);
+                            launch(editor, &builds::cache_dir_of(&m.name), spawn);
                             return;
                         }
                     }

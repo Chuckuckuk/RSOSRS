@@ -2,20 +2,24 @@
 //! the project (each undoable).
 //!
 //! An edit changes only the [`MapProject`]. The world on screen follows it: after each change the
-//! changed groups are rebuilt with [`osrs_cache::compile::build_with`] and put in the cache
-//! [`overlay`](osrs_cache::overlay), and the squares they touch are decoded again, through the same
-//! code the game uses, so what is drawn is what a compiled cache will hold.
+//! changed groups are rebuilt with [`compile::build_with`] and put in the editor's cache
+//! [`Overlay`], which the caches the world is drawn from read first, and the squares they touch
+//! are decoded again, through the same code the game uses, so what is drawn is what a compiled
+//! cache will hold.
 
 use crate::catalog::{footprint, Catalog};
 use bevy::prelude::*;
-use osrs_cache::compile;
 use osrs_cache::container::Compression;
 use osrs_cache::locs::Placement;
-use osrs_cache::project::{MapProject, MarkerDef, NpcSpawn};
+use osrs_cache::overlay::Overlay;
 use osrs_cache::squares::SQUARE;
 use osrs_cache::{idx, Cache};
+use osrs_core::data::NpcSpawnPoint;
+use osrs_map_editor::compile;
+use osrs_map_editor::project::{MapProject, MarkerDef};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// What a left click in the world does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,9 +56,12 @@ pub struct Editor {
     pub dirty: bool,
     undo: Vec<MapProject>,
     redo: Vec<MapProject>,
-    /// The cache edits are made on, read without the overlay.
+    /// The cache edits are made on, as stored (it has no overlay).
     pub base: Cache,
     pub base_dir: PathBuf,
+    /// The uncompiled edits, as cache groups: the caches the world and minimap are drawn from read
+    /// this first.
+    pub overlay: Arc<Overlay>,
     pub tool: Tool,
     pub brush: Option<Brush>,
     /// Plane new placements go on, and the plane the Select tool looks at.
@@ -75,7 +82,7 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new(project: MapProject, path: PathBuf, base: Cache, base_dir: PathBuf) -> Editor {
+    pub fn new(project: MapProject, path: PathBuf, base: Cache, base_dir: PathBuf, overlay: Arc<Overlay>) -> Editor {
         let mut editor = Editor {
             project,
             path,
@@ -84,6 +91,7 @@ impl Editor {
             redo: Vec::new(),
             base,
             base_dir,
+            overlay,
             tool: Tool::Select,
             brush: None,
             plane: 0,
@@ -221,7 +229,7 @@ impl Editor {
         self.changed(square);
     }
 
-    pub fn add_npc(&mut self, spawn: NpcSpawn) {
+    pub fn add_npc(&mut self, spawn: NpcSpawnPoint) {
         self.checkpoint();
         self.project.npc_spawns.push(spawn);
     }
@@ -314,7 +322,7 @@ impl Editor {
     /// Rebuilds the in-memory overlay from the project.
     pub fn refresh_overlay(&mut self) {
         match compile::build_with(&self.project, &self.base, Compression::None) {
-            Ok(groups) => osrs_cache::overlay::set(groups),
+            Ok(groups) => self.overlay.set(groups),
             Err(e) => {
                 self.status = format!("could not apply the edits: {e}");
                 eprintln!("[editor] {}", self.status);
@@ -345,6 +353,6 @@ impl Editor {
 
 /// The NPC a new project starts with: the man who stands in Lumbridge square in the open world
 /// when the cache carries no spawns, so a compiled cache keeps him until he is removed.
-pub fn default_spawns() -> Vec<NpcSpawn> {
-    vec![NpcSpawn { npc: "man".into(), x: 3226, z: 3215, plane: 0 }]
+pub fn default_spawns() -> Vec<NpcSpawnPoint> {
+    vec![NpcSpawnPoint { npc: "man".into(), x: 3226, z: 3215, plane: 0 }]
 }
