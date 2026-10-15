@@ -114,7 +114,9 @@ impl MapProject {
 
     pub fn load(path: &Path) -> std::io::Result<MapProject> {
         let text = std::fs::read_to_string(path)?;
-        serde_json::from_str(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        // a file saved by a Windows editor may start with a byte-order mark
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        serde_json::from_str(text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
@@ -158,6 +160,24 @@ impl MapProject {
             .map(|c| c.dir)
     }
 
+    /// A fingerprint of everything a compile writes from this project (its square edits, NPC
+    /// spawns and minted markers; not its name or cache): a compiled cache records the one it was
+    /// built from, so it can tell when the project has changed since. FNV-1a over the JSON, so it
+    /// is the same from run to run.
+    pub fn fingerprint(&self) -> u64 {
+        let json = serde_json::to_vec(&(&self.squares, &self.npc_spawns, &self.marker_defs)).expect("plain data serialises");
+        json.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
+    }
+
+    /// Whether the compiled cache in `dir` was built from the project as it is now. A cache whose
+    /// manifest has no fingerprint (built before they were kept) counts as out of date.
+    pub fn is_compiled_into(&self, dir: &Path) -> bool {
+        let manifest = std::fs::read_to_string(dir.join(crate::active::MANIFEST))
+            .ok()
+            .and_then(|s| serde_json::from_str::<crate::compile::Manifest>(&s).ok());
+        manifest.and_then(|m| m.fingerprint) == Some(self.fingerprint())
+    }
+
     /// Whether the project changes nothing.
     pub fn is_empty(&self) -> bool {
         self.squares.values().all(SquareEdits::is_empty) && self.npc_spawns.is_empty() && self.marker_defs.is_empty()
@@ -185,6 +205,18 @@ mod tests {
         let p = |id, x| Placement { id, plane: 0, x, z: 1, kind: 10, orientation: 0 };
         let edits = SquareEdits { removed: vec![p(5, 1), p(9, 9)], added: vec![p(7, 3)] };
         assert_eq!(edits.apply(&[p(5, 1), p(5, 1), p(6, 2)]), vec![p(5, 1), p(6, 2), p(7, 3)]);
+    }
+
+    #[test]
+    fn the_fingerprint_follows_the_edits_and_not_the_name_or_cache() {
+        let mut a = MapProject::new("a");
+        let blank = a.fingerprint();
+        a.cache = Some("elsewhere".into());
+        a.name = "renamed".into();
+        assert_eq!(a.fingerprint(), blank);
+        a.npc_spawns.push(NpcSpawn { npc: "man".into(), x: 1, z: 2, plane: 0 });
+        assert_ne!(a.fingerprint(), blank);
+        assert_eq!(a.fingerprint(), a.clone().fingerprint());
     }
 
     #[test]

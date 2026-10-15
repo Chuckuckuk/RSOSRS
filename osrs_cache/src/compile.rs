@@ -42,6 +42,9 @@ pub struct Manifest {
     pub squares: usize,
     pub npc_spawns: usize,
     pub marker_defs: usize,
+    /// [`MapProject::fingerprint`] of the project as compiled.
+    #[serde(default)]
+    pub fingerprint: Option<u64>,
 }
 
 /// The containers `project` changes, built on `base`. `base` should ignore the overlay
@@ -183,6 +186,7 @@ pub fn compile(project: &MapProject, base_dir: &Path, out_dir: &Path, mut progre
         squares: project.edited_squares().len(),
         npc_spawns: project.npc_spawns.len(),
         marker_defs: project.marker_defs.len(),
+        fingerprint: Some(project.fingerprint()),
     };
     std::fs::write(staging.join(NPC_SPAWNS), pretty_json(&project.npc_spawns))?;
     std::fs::write(staging.join(MANIFEST), pretty_json(&manifest))?;

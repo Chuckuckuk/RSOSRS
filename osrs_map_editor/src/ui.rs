@@ -56,6 +56,8 @@ pub struct UiState {
     pub play_here: bool,
     /// The project has no cache yet: the name offered for one, and where to start playing.
     pub play_dialog: Option<(String, Option<(i32, i32)>)>,
+    /// The project's cache is older than its edits: its name, and where to start playing.
+    pub rebuild_dialog: Option<(String, Option<(i32, i32)>)>,
 }
 
 impl Default for UiState {
@@ -71,6 +73,7 @@ impl Default for UiState {
             play_requested: false,
             play_here: true,
             play_dialog: None,
+            rebuild_dialog: None,
         }
     }
 }
@@ -146,10 +149,15 @@ fn request_play(editor: &mut Editor, state: &mut UiState, spawn: Option<(i32, i3
             // a project found by its manifest names its cache from now on
             let name = dir.file_name().map(|n| n.to_string_lossy().into_owned());
             if editor.project.cache != name {
-                editor.project.cache = name;
+                editor.project.cache = name.clone();
                 editor.save();
             }
-            launch(editor, &dir, spawn);
+            if editor.project.is_compiled_into(&dir) {
+                launch(editor, &dir, spawn);
+            } else {
+                // edits made since it was built: offer to build it again first
+                state.rebuild_dialog = Some((name.unwrap_or_default(), spawn));
+            }
         }
         None => {
             let name = editor.project.cache.clone().unwrap_or_else(|| clean_name(&editor.project.name));
@@ -249,7 +257,11 @@ fn menu_bar(ui: &mut egui::Ui, editor: &mut Editor, state: &mut UiState, minimap
             match &cache {
                 Some(dir) => {
                     ui.label(format!("Plays on {}", dir.display()));
-                    ui.label("Recompile it from the Cache menu to play newer edits.");
+                    if editor.project.is_compiled_into(dir) {
+                        ui.label("It has all your edits.");
+                    } else {
+                        ui.label("You have edited since it was built: Play offers to rebuild it.");
+                    }
                 }
                 None => {
                     ui.label("This project has no cache yet.");
@@ -432,7 +444,7 @@ fn inspector(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view: &m
     let plane = editor.plane;
     let here = editor.placements_at(tile, plane, catalog);
     if here.is_empty() && editor.npcs_at(tile).is_empty() {
-        ui.label(format!("nothing on plane {} at {}, {}", plane + 1, tile.0, tile.1));
+        ui.label(format!("nothing here on plane {}", plane + 1));
     }
     for (_, p) in here.iter().take(8) {
         ui.label(format!("{} ({}) {}", catalog.object_name(p.id), p.id, kind_name(p.kind)));
@@ -623,6 +635,30 @@ fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
         });
         if keep {
             state.play_dialog = Some((name, spawn));
+        }
+    }
+
+    if let Some((name, spawn)) = state.rebuild_dialog.take() {
+        let mut keep = true;
+        egui::Window::new("Rebuild the map before playing?").collapsible(false).show(ctx, |ui| {
+            ui.label(format!("You have edited \u{201c}{}\u{201d} since its cache \u{201c}{name}\u{201d} was built.", editor.project.name));
+            ui.label("Rebuilding takes a moment and puts your latest edits in the game.");
+            ui.horizontal(|ui| {
+                if ui.button("Rebuild and play").clicked() {
+                    state.job = Some(start_compile(editor, name.clone(), Some(spawn)));
+                    keep = false;
+                }
+                if ui.button("Play the last build").clicked() {
+                    launch(editor, &active::cache_dir_of(&name), spawn);
+                    keep = false;
+                }
+                if ui.button("Cancel").clicked() {
+                    keep = false;
+                }
+            });
+        });
+        if keep {
+            state.rebuild_dialog = Some((name, spawn));
         }
     }
 

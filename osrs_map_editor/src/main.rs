@@ -12,7 +12,8 @@
 //!              the project's cache) and exit
 //!   --activate no window: make the project's cache the one the game reads
 //!   --play     no window: start the game on the project's cache, compiling one first (named
-//!              after the project) if it has none
+//!              after the project) if it has none, or building it again if the project has
+//!              changed since
 //!
 //! controls: WASD move, Q/E down/up, hold right mouse to look, Shift = fast, wheel = speed;
 //!           V/B/X select, place, erase; R rotate; 1-4 plane; T roofs; Delete removes the
@@ -117,9 +118,14 @@ fn main() {
         // without one, compiles first
         let existing = if args.compile.is_none() { project.compiled_cache() } else { None };
         let dir = match existing {
-            Some(dir) => dir,
-            None => {
-                let name = args.compile.clone().unwrap_or_else(|| ui::clean_name(&project.name));
+            Some(dir) if project.is_compiled_into(&dir) => dir,
+            stale => {
+                // no window to ask from: a cache older than the edits is built again
+                let name = args
+                    .compile
+                    .clone()
+                    .or_else(|| stale.as_ref().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned()))
+                    .unwrap_or_else(|| ui::clean_name(&project.name));
                 let out = osrs_cache::active::cache_dir_of(&name);
                 let started = std::time::Instant::now();
                 let manifest = osrs_cache::compile::compile(&project, &base_dir, &out, |stage| println!("[editor] {stage:?}"))

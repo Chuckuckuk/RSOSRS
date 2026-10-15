@@ -40,7 +40,7 @@ cargo run -p osrs_map_editor --release -- --project castle --compile castle --ac
 | `--at x,z` | the tile the camera starts over |
 | `--compile <cache>` | no window: compile the project into `~/.rsosrs/caches/<cache>` (it becomes the project's cache) and exit |
 | `--activate` | no window: make the project's cache the one the game reads |
-| `--play` | no window: start the game on the project's cache, compiling one first (named after the project) if it has none; with `--at`, the game starts on that tile |
+| `--play` | no window: start the game on the project's cache, compiling one first (named after the project) if it has none, or rebuilding it if the project has changed since; with `--at`, the game starts on that tile |
 
 | Input | Effect |
 |---|---|
@@ -79,8 +79,11 @@ The **Cache** menu does two things:
 * It chooses the cache the game reads: the installed one ("live"), or any compiled one.
 
 The **Play** menu (F5) starts the game on the project's own cache:
-- **The project has a cache:** the game starts on it as it is. Recompile from the Cache menu to
-  play newer edits.
+- **The project has a cache with all its edits:** the game starts on it straight away.
+- **You have edited since the cache was built:** the editor asks to rebuild it first ("Rebuild
+  and play", or "Play the last build"). A compile stores the project's `fingerprint` (a hash of
+  its square edits, NPC spawns and markers) in the cache's manifest, and Play compares it with the
+  project as it is now.
 - **It has none:** the editor asks to create one (named after the project by default), compiles
   it, then starts the game.
 - **Where the game starts:** by default you enter the world on the tile the camera is looking at
