@@ -40,8 +40,15 @@ Vocabulary:
 
 ### Reading a group: [`cache.rs`](../osrs_cache/src/cache.rs)
 
-`Cache::open(dir)` opens `main_file_cache.dat2`. `Cache::open_default()` looks under
-`%USERPROFILE%\.runelite\jagexcache\oldschool\LIVE` and then `~/jagexcache/oldschool/LIVE`.
+`Cache::open(dir)` opens `main_file_cache.dat2`. `Cache::open_default()` opens the *active*
+cache (chapter 11.4): `OSRS_CACHE_DIR`, else the one chosen in `~/.rsosrs/active_cache`, else the
+installed game's under `%USERPROFILE%\.runelite\jagexcache\oldschool\LIVE` (then
+`~/jagexcache/oldschool/LIVE`). `Cache::open_live()` always opens the installed one.
+
+The crate also writes caches, for the map editor: every layer below has an inverse
+(`locs::encode`, `cache::join_files`, `container::encode`, `reftable::RefTable::encode`,
+`writer::CacheWriter`), described in chapter 11.3. Writing only ever targets a copy; the installed
+cache is read only.
 
 1. **Index entry.** `main_file_cache.idxN` is an array of 6-byte records, one per group: a 24-bit
    length and a 24-bit first sector number. The whole idx file is read once and memoised behind
@@ -60,7 +67,8 @@ Vocabulary:
    file from its chunks.
 
 `Cache::index(archive)` parses that archive's reference table (protocols 5-7; protocol 7 uses
-"big smart" ids). `Index::group_by_name` finds a group by the Jagex string hash
+"big smart" ids) through [`reftable::RefTable`](../osrs_cache/src/reftable.rs), which keeps every
+column so a table can be written back byte for byte. `Index::group_by_name` finds a group by the Jagex string hash
 ([`name_hash`](../osrs_cache/src/lib.rs)).
 
 Convenience methods: `read_group(archive, group)`, `read_files(&index, group)` and

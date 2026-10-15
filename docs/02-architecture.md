@@ -1,32 +1,33 @@
 # 2. Architecture
 
-This chapter is the map. It explains how the four crates divide the work, what runs on which
+This chapter is the map. It explains how the five crates divide the work, what runs on which
 thread, how a click becomes movement on screen, and the several coordinate systems you have to
 keep straight.
 
 ---
 
-## 2.1 The four crates
+## 2.1 The five crates
 
 ```
-            osrs_viewer (bin)          osrs_core (bin: client)
-                  │                       │          │
-                  ▼                       ▼          │
-              osrs_render  ◄──────────────┘          │
-                  │                                  ▼
-                  ▼                           osrs_core (lib: simulation)
-              osrs_cache  ◄───────────────────────── (tests only use osrs_cache;
-                                                      the lib itself does not)
+   osrs_map_editor (bin)   osrs_viewer (bin)          osrs_core (bin: client)
+        │      │                  │                       │          │
+        │      └────────────────► ▼                       ▼          │
+        │                     osrs_render  ◄──────────────┘          │
+        │                         │                                  ▼
+        │                         ▼                           osrs_core (lib: simulation)
+        │                     osrs_cache  ◄───────────────────────── (tests only use osrs_cache;
+        └──────────────────────► (and osrs_core lib, for npcs/gathering data)   the lib itself does not)
 ```
 
 | Crate | Kind | Depends on | Responsibility |
 |---|---|---|---|
-| [`osrs_cache`](../osrs_cache/) | library + ~30 probe binaries | `bzip2`, `flate2`, `serde` | Read the OSRS cache files from disk and decode them into plain Rust data: terrain grids, object placements, models, animations, item/NPC definitions, sprites, fonts. Also builds lit triangle meshes and collision flags. **No graphics engine.** |
+| [`osrs_cache`](../osrs_cache/) | library + ~30 probe binaries | `bzip2`, `flate2`, `serde` | Read the OSRS cache files from disk and decode them into plain Rust data: terrain grids, object placements, models, animations, item/NPC definitions, sprites, fonts. Also builds lit triangle meshes and collision flags, and writes edited copies of a cache for the map editor. **No graphics engine.** |
 | [`osrs_render`](../osrs_render/) | library | `bevy`, `osrs_cache` | Turn `osrs_cache` meshes into Bevy entities and materials, animate them, stream map squares in on a background thread, and convert mouse rays into tiles and objects. |
 | [`osrs_core`](../osrs_core/) | library | `serde`, `serde_json` (and Bevy for the binary) | **Library:** the game simulation and server. Pure logic, deterministic, testable without a window. |
 | | binary `osrs_core` | the library, `osrs_render`, `osrs_cache`, `bevy` | **The game client.** Starts the server on a thread, logs in, and draws what the server reports. |
 | | binary `simulate` | the library | Runs a JSON-described fight headlessly and prints the result. |
 | [`osrs_viewer`](../osrs_viewer/) | binary | `bevy`, `osrs_render`, `osrs_cache` | A free-flying camera over a block of map squares, for debugging rendering. |
+| [`osrs_map_editor`](../osrs_map_editor/) | binary | `bevy`, `bevy_egui`, `osrs_render`, `osrs_cache`, `osrs_core` | Places and removes scenery, resource nodes, NPC spawns and minimap icons, and compiles the edits into a new cache the game can be switched to (chapter 11). |
 
 A detail that surprises people: `osrs_core/Cargo.toml` lists Bevy and `osrs_cache` as
 dependencies, but nothing under `osrs_core/src/` *other than the client modules* imports them. The

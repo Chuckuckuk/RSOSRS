@@ -11,6 +11,8 @@
 | ...from the healer phase | `cargo run -p osrs_core --release -- --scenario jad_healers` |
 | Package the Jad fight as one .exe (needs the game cache) | `./package_jad.sh` (writes `dist/RSOSRS-Jad.exe`) |
 | Run the map viewer | `cargo run -p osrs_viewer --release -- 49 49 3 3` |
+| Run the map editor (chapter 11) | `cargo run -p osrs_map_editor --release -- --project <name>` |
+| Compile a map editor project into a cache and play on it | `cargo run -p osrs_map_editor --release -- --project <name> --compile <cache> --activate` |
 | Run a headless fight | `cargo run -p osrs_core --bin simulate -- whip_vs_zombie --ticks 60` |
 | List bundled fights | `cargo run -p osrs_core --bin simulate -- --list` |
 | Run a cache probe | `cargo run -p osrs_cache --release --bin tile_probe -- 3222 3218` |
@@ -26,7 +28,9 @@
 slower. The first build compiles Bevy and takes several minutes; later builds are incremental.
 
 Everything that reads the game cache needs RuneLite's cache at
-`%USERPROFILE%\.runelite\jagexcache\oldschool\LIVE`.
+`%USERPROFILE%\.runelite\jagexcache\oldschool\LIVE`. The game, and the tests that call
+`Cache::open_default`, read the *active* cache, which can be one the map editor compiled (chapter
+11.4). `OSRS_CACHE_DIR=live` forces the installed one for a run.
 
 ---
 
@@ -86,6 +90,8 @@ Set these in PowerShell with `$env:NAME = "value"` before `cargo run`.
 
 | Variable | Effect |
 |---|---|
+| `OSRS_CACHE_DIR=dir` or `live` | read this cache instead of the active one (chapter 11.4) |
+| `RSOSRS_HOME=dir` | where compiled caches, editor projects and the active-cache choice live (default `~/.rsosrs`) |
 | `OSRS_SPAWN=x,z` | enter the world on another tile (e.g. `3150,3235`, near Draynor) |
 | `OSRS_NAME=name` | login name |
 | `OSRS_WALK_TO=x,z` | ask the server to walk there at startup |
