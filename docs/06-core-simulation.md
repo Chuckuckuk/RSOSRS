@@ -592,16 +592,16 @@ its right-click menu. A picked inventory item clicked on a fire sends `UseItemOn
 
 * `SceneryIndex`: which object (`Loc { id, tile, kind, orientation, size }`) covers which tile.
   The server's map loader fills it with each square's ground-level objects that can change:
-  free-standing ones (shapes 10 and 11, trees) and wall pieces with an option (shapes 0-3,
-  doors), as it loads the square's collision (`square_map` in `main.rs`).
+  free-standing ones (shapes 10 and 11, trees) and wall pieces with an option (shapes 0-3 and
+  diagonal 9, doors), as it loads the square's collision (`square_map` in `main.rs`).
 * `SceneryState`: placements shown as another object for a while. A `LocChange`'s
   `replacement` is a whole `Loc`: on the same spot (a stump) or moved and turned (an opened
   door). Changes are counted down at the end of every tick by the world clock, can be put back
   early (`restore`), and are found where they now stand (`find`, which is how a click on an
   opened door resolves). The whole set goes to the client in every `Snapshot::scenery`.
 * `World::change_loc` / `restore_loc` are the one way scenery changes, and they move a wall's
-  collision with it (`CollisionMap::add_wall` / `remove_wall`, from `collision::wall_edges`).
-  A stump keeps its tree's collision.
+  collision with it (`CollisionMap::add_wall` / `remove_wall`, from `collision::wall_edges`; a
+  diagonal wall, shape 9, blocks its whole tile instead). A stump keeps its tree's collision.
 
 ### Objects and doors: [`sim/objects.rs`](../osrs_core/src/sim/objects.rs)
 
@@ -615,13 +615,20 @@ swing style (`single`, `double`, `gate`). A closed form belongs to one door; sev
 open into the same object, so a click finds its door by the object the map places there. A door:
 
 1. walks the player to where it can be used from, `TargetSpec::wall_reach` (its own tile, the
-   tile across its edge, and the tiles beside it unless walled off);
+   tile across its edge, and the tiles beside it unless walled off; a door on a diagonal wall
+   from the tiles next to it, like an object);
 2. swings its leaves: a leaf opens into the tile across its edge and turns a quarter
    (`DoorSwing::moves`, in the frame of a west-edge door, turned with the placement); a pair's
    leaves swing out on their outer hinges; a door the map places open shuts by the inverse move.
    A double door's or gate's leaves move one at a time, only the one chosen; which way it
-   swings comes from its partner beside it (`World::leaf_step`);
-3. moves the wall with it, so the doorway can be walked through;
+   swings comes from its partner beside it (`World::leaf_step`). A leaf the map places open is
+   first mapped back to its frame, where it stands shut; its partner may be open too, and an
+   open pair's mirror image (frames on the far side) loses to the frame in line with the wall.
+   A door on a diagonal wall swings onto the tile beside it (`LeafMove::DIAGONAL`, read from the
+   diagonal doors the map places open), a single leaf;
+3. moves the wall with it, so the doorway can be walked through, and plays the door's sound
+   (`DoorDef::sound`: `door_open`/`door_close`, a gate's `gate_open`/`gate_close`, or the
+   door's own `open_sound`/`close_sound`);
 4. goes back by itself after `DOOR_RESET_TICKS` (500, 300 s);
 5. answers "The door seems to be stuck." to the fifth close of the same door within
    `STUCK_WINDOW_TICKS` (8: the fastest five closes can go, an open between each).

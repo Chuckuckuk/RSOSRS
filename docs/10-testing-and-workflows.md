@@ -140,6 +140,8 @@ It finds every straight-wall placement whose only option is "Open", pairs it wit
 object of the same name (same models nearby, else the very next ids), and detects double doors
 and gates from two leaves side by side. On stderr it reports how many placements it covers and
 what it leaves out, and why (walk-through doors #25, doors with more than Open #26, curtains #27).
+Doors on diagonal walls use the same objects, so they need no entries; the report counts them
+as covered or as having no door type.
 `tests/doors.rs` checks every entry against the cache. `obj_actions <id>...` or
 `obj_actions --named "Gate"` shows an object's options when a pairing looks wrong. Check a door in
 the client with `OSRS_SPAWN` and `OSRS_DO`; near buildings the camera often sits in a roof (#28),

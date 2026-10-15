@@ -170,7 +170,8 @@ the same bit values as `osrs_core::collision::CollisionFlag`:
 
 Doors are baked as they are placed (a closed door is a wall); opening one moves its wall at run
 time on the server (`osrs_core::sim::objects`), with the same edge table
-(`collision::wall_edges`, shared by both crates). Only plane 0 is produced.
+(`collision::wall_edges`, shared by both crates). Only plane 0 is produced. The minimap draws
+such changes too: `MinimapSource::render_changed` swaps placements before drawing a square.
 
 ---
 
