@@ -129,12 +129,22 @@ map and start the client with `--scenario` (chapter 7.1); `data/scenarios/jad.js
 To have it stand about in the open world instead, add a `spawn_npc_def` call in the
 server-building closure in [`osrs_core/src/main.rs`](../osrs_core/src/main.rs).
 
-### Add a door or gate
+### Doors and gates
 
-No Rust changes. Find its closed and open object ids with `obj_actions <id>...` (the closed form
-has "Open", the open form "Close", with the same models) or `obj_actions --named "Gate"`, and add
-it to [`data/doors.json`](../osrs_core/data/doors.json) with its swing (`single`, `double`,
-`gate`). Pairs list both leaves. Try it in the client with `OSRS_SPAWN` and `OSRS_DO`.
+[`data/doors.json`](../osrs_core/data/doors.json) is generated from the whole map; don't edit it
+by hand. Regenerate it with
+
+    cargo run -p osrs_cache --release --bin door_table > osrs_core/data/doors.json
+
+It finds every straight-wall placement whose only option is "Open", pairs it with the "Close"
+object of the same name (same models nearby, else the very next ids), and detects double doors
+and gates from two leaves side by side. On stderr it reports how many placements it covers and
+what it leaves out, and why (walk-through doors #25, doors with more than Open #26, curtains #27).
+`tests/doors.rs` checks every entry against the cache. `obj_actions <id>...` or
+`obj_actions --named "Gate"` shows an object's options when a pairing looks wrong. Check a door in
+the client with `OSRS_SPAWN` and `OSRS_DO`; near buildings the camera often sits in a roof (#28),
+so a chained `Close` (answered "Nothing interesting happens." only if the open did not happen)
+is the more reliable check.
 
 ### Add a gathering resource (another tree, a rock)
 

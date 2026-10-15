@@ -609,9 +609,10 @@ its right-click menu. A picked inventory item clicked on a fire sends `UseItemOn
 dispatched: a door's "Open"/"Close", else a gathering node's option, else "Nothing interesting
 happens." It becomes the player's `PlayerAction` (`Gather` or `Door`).
 
-Doors come from [`data/doors.json`](../osrs_core/data/doors.json): each lists its leaves' closed
-and open object ids (paired with the `obj_actions` probe) and a swing style (`single`, `double`,
-`gate`). A door:
+Doors come from [`data/doors.json`](../osrs_core/data/doors.json), generated from the whole map
+by the `door_table` probe (chapter 10): each lists its leaves' closed and open object ids and a
+swing style (`single`, `double`, `gate`). A closed form belongs to one door; several doors may
+open into the same object, so a click finds its door by the object the map places there. A door:
 
 1. walks the player to where it can be used from, `TargetSpec::wall_reach` (its own tile, the
    tile across its edge, and the tiles beside it unless walled off);
