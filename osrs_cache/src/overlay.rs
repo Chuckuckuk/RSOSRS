@@ -28,17 +28,8 @@ impl Overlay {
         *self.groups.write().unwrap() = map;
     }
 
-    pub fn clear(&self) {
-        self.groups.write().unwrap().clear();
-    }
-
     /// The replacement container of `archive/group`, if there is one.
     pub fn get(&self, archive: u8, group: u32) -> Option<Arc<Vec<u8>>> {
         self.groups.read().unwrap().get(&(archive, group)).cloned()
-    }
-
-    /// Every `(archive, group)` replaced.
-    pub fn keys(&self) -> Vec<(u8, u32)> {
-        self.groups.read().unwrap().keys().copied().collect()
     }
 }

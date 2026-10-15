@@ -2,7 +2,7 @@
 //! by clicking an NPC palette row with several models. It shows each model as a thumbnail, five to
 //! a row; clicking one chooses it for placing and closes the window.
 
-use crate::catalog::Catalog;
+use crate::catalog::{star, Catalog};
 use crate::editor::{Brush, Editor, Tool};
 use crate::thumbs::{NpcThumbs, SIZE};
 use crate::ui::UiState;
@@ -28,16 +28,9 @@ pub struct PickerCamera;
 #[derive(Resource, Default)]
 pub struct PickerWindow {
     open: Option<(Entity, Entity, usize)>,
-    /// Frames drawn since the window opened or changed row: the grid is held at its top for the
-    /// first few, while the new window settles to its size (it otherwise starts part-scrolled).
-    frames_shown: u32,
-}
-
-impl PickerWindow {
-    /// The picker's window entity, while it is open.
-    pub fn window(&self) -> Option<Entity> {
-        self.open.map(|(window, _, _)| window)
-    }
+    /// The window's size the grid was last laid out for: a new window settles to its size over a
+    /// few frames, and the grid goes back to its top whenever the size changes.
+    laid_out_for: Option<egui::Rect>,
 }
 
 /// Opens, retitles and closes the picker window to follow `UiState::npc_picker`, and notices the
@@ -57,11 +50,7 @@ pub fn manage_picker_window(
             state.npc_picker = None;
         }
     }
-    let title = |g: usize| {
-        let group = &catalog.npc_groups[g];
-        let level = if group.combat_level > 0 { format!(" (level {})", group.combat_level) } else { String::new() };
-        format!("{}{level}: pick a model", group.name)
-    };
+    let title = |g: usize| format!("{}: pick a model", catalog.npc_groups[g].label());
     match (state.npc_picker, picker.open) {
         (Some(g), None) => {
             let rows = catalog.npc_groups[g].members.len().div_ceil(COLUMNS).clamp(1, 4) as u32;
@@ -82,14 +71,13 @@ pub fn manage_picker_window(
                 ))
                 .id();
             picker.open = Some((window, camera, g));
-            picker.frames_shown = 0;
+            picker.laid_out_for = None;
         }
         (Some(g), Some((window, camera, shown))) if g != shown => {
             if let Ok(mut w) = windows.get_mut(window) {
                 w.title = title(g);
             }
             picker.open = Some((window, camera, g));
-            picker.frames_shown = 0;
         }
         (None, Some(_)) => close(&mut commands, &mut picker, &mut thumbs),
         _ => {}
@@ -115,16 +103,19 @@ pub fn picker_ui(
 ) {
     let Some(g) = state.npc_picker else { return };
     let Ok(mut context) = contexts.single_mut() else { return };
-    let settling = picker.frames_shown < 10;
-    picker.frames_shown += 1;
+    thumbs.begin_frame();
     let ctx = context.get_mut().clone();
-    let mut root = egui::Ui::new(ctx.clone(), "picker_root".into(), egui::UiBuilder::new().max_rect(ctx.viewport_rect()));
+    let viewport = ctx.viewport_rect();
+    let resized = picker.laid_out_for != Some(viewport);
+    picker.laid_out_for = Some(viewport);
+    let mut root = egui::Ui::new(ctx.clone(), "picker_root".into(), egui::UiBuilder::new().max_rect(viewport));
     let mut picked = None;
     egui::Frame::central_panel(&ctx.global_style()).show(&mut root, |ui| {
         ui.label("\u{2605} = fights with the stats in data/npcs.json; the others stand and cannot be fought.");
         ui.separator();
-        let mut scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
-        if settling {
+        // a scroll position of its own per row, back at the top when the window changes size
+        let mut scroll = egui::ScrollArea::vertical().id_salt(("npc_models", g)).auto_shrink([false, false]);
+        if resized {
             scroll = scroll.vertical_scroll_offset(0.0);
         }
         scroll.show(ui, |ui| {
@@ -133,7 +124,7 @@ pub fn picker_ui(
                     let def = n.cache_id.and_then(|id| catalog.npc_defs.get(&id));
                     ui.vertical(|ui| {
                         let size = egui::vec2(SIZE as f32, SIZE as f32);
-                        let texture = def.and_then(|d| thumbs.get(&ctx, d, state.frame));
+                        let texture = def.and_then(|d| thumbs.get(&ctx, d));
                         let response = match &texture {
                             Some(tex) => ui.add(egui::Image::new(tex).fit_to_exact_size(size).sense(egui::Sense::click())),
                             None => {
@@ -147,7 +138,7 @@ pub fn picker_ui(
                             ui.painter().rect_stroke(response.rect, 2.0, egui::Stroke::new(2.0, egui::Color32::YELLOW), egui::StrokeKind::Outside);
                         }
                         let id = n.cache_id.map_or_else(|| "curated".to_string(), |i| format!("#{i}"));
-                        ui.label(format!("{id}{}", if n.has_stats { " \u{2605}" } else { "" }));
+                        ui.label(format!("{id}{}", star(n.has_stats)));
                         let response = match def {
                             Some(d) => {
                                 let options: Vec<&str> = d.actions.iter().map(String::as_str).filter(|a| !a.is_empty()).collect();

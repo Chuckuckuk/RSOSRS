@@ -24,8 +24,7 @@ fn a_cache_with_an_overlay_reads_its_groups_from_it() {
     assert_eq!(with.read_group(idx::MODELS, 1).unwrap(), b"not the real model");
     assert_eq!(plain.read_raw(idx::MODELS, 1).unwrap(), original, "a cache without the overlay never sees it");
     assert_eq!(with.read_raw(idx::MODELS, 2).unwrap(), plain.read_raw(idx::MODELS, 2).unwrap(), "other groups come from the files");
-    assert_eq!(overlay.keys(), vec![(idx::MODELS, 1)]);
 
-    overlay.clear();
+    overlay.set(std::iter::empty());
     assert_eq!(with.read_raw(idx::MODELS, 1).unwrap(), original);
 }

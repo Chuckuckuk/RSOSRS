@@ -13,10 +13,11 @@ use osrs_cache::container::Compression;
 use osrs_cache::locs::Placement;
 use osrs_cache::overlay::Overlay;
 use osrs_cache::squares::SQUARE;
-use osrs_cache::{idx, Cache};
+use osrs_cache::Cache;
 use osrs_core::data::NpcSpawnPoint;
-use osrs_map_editor::compile;
+use osrs_map_editor::compile::{self, Builder};
 use osrs_map_editor::project::{MapProject, MarkerDef};
+use osrs_render::streaming::square_of;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -56,12 +57,14 @@ pub struct Editor {
     pub dirty: bool,
     undo: Vec<MapProject>,
     redo: Vec<MapProject>,
-    /// The cache edits are made on, as stored (it has no overlay).
-    pub base: Cache,
-    pub base_dir: PathBuf,
+    /// Builds the project's groups on the base cache (as stored), keeping what it has read and
+    /// built, so an edit encodes only what it changed.
+    builder: Builder,
     /// The uncompiled edits, as cache groups: the caches the world and minimap are drawn from read
     /// this first.
     pub overlay: Arc<Overlay>,
+    /// Counts changes to the project, for whatever is worked out from it to know when to redo it.
+    pub generation: u64,
     pub tool: Tool,
     pub brush: Option<Brush>,
     /// Plane new placements go on, and the plane the Select tool looks at.
@@ -77,21 +80,22 @@ pub struct Editor {
     pub stale: HashSet<(i32, i32)>,
     /// Whether the minimap preview needs drawing again.
     pub minimap_stale: bool,
-    /// Each square's placements as the base cache has them.
-    base_placements: HashMap<(i32, i32), Vec<Placement>>,
+    /// Each square's placements as they are now (the base's with the edits applied), worked out
+    /// the first time they are asked for after a change.
+    placements: HashMap<(i32, i32), Arc<[Placement]>>,
 }
 
 impl Editor {
-    pub fn new(project: MapProject, path: PathBuf, base: Cache, base_dir: PathBuf, overlay: Arc<Overlay>) -> Editor {
+    pub fn new(project: MapProject, path: PathBuf, base: Cache, overlay: Arc<Overlay>) -> Editor {
         let mut editor = Editor {
             project,
             path,
             dirty: false,
             undo: Vec::new(),
             redo: Vec::new(),
-            base,
-            base_dir,
+            builder: Builder::new(base, Compression::None),
             overlay,
+            generation: 0,
             tool: Tool::Select,
             brush: None,
             plane: 0,
@@ -101,54 +105,55 @@ impl Editor {
             status: String::new(),
             stale: HashSet::new(),
             minimap_stale: true,
-            base_placements: HashMap::new(),
+            placements: HashMap::new(),
         };
-        editor.refresh_overlay();
+        editor.rebuild();
         editor
     }
 
+    /// The cache the edits are made on, as stored.
+    pub fn base(&self) -> &Cache {
+        self.builder.base()
+    }
+
     /// The placements of `square` as they are now (the base cache's, with the project's edits).
-    pub fn placements(&mut self, square: (i32, i32)) -> Vec<Placement> {
-        let base = self.base_placements_of(square).to_vec();
-        match self.project.square(square.0, square.1) {
-            Some(edits) => edits.apply(&base),
-            None => base,
+    pub fn placements(&mut self, square: (i32, i32)) -> Arc<[Placement]> {
+        if let Some(placed) = self.placements.get(&square) {
+            return Arc::clone(placed);
         }
+        let base = self.builder.base_placements(square.0, square.1);
+        let placed: Arc<[Placement]> = match self.project.square(square.0, square.1) {
+            Some(edits) => edits.apply(&base).into(),
+            None => base.into(),
+        };
+        self.placements.insert(square, Arc::clone(&placed));
+        placed
     }
 
-    fn base_placements_of(&mut self, square: (i32, i32)) -> &[Placement] {
-        let base = &self.base;
-        self.base_placements.entry(square).or_insert_with(|| {
-            let gid = ((square.0 << 8) | square.1) as u32;
-            base.index(idx::MAPS)
-                .and_then(|maps| base.read_files(&maps, gid))
-                .ok()
-                .and_then(|files| files.get(1).map(|(_, d)| osrs_cache::locs::decode(d)))
-                .unwrap_or_default()
-        })
-    }
-
-    /// Whether the base cache has map data for `square` (only those can be edited).
-    pub fn square_exists(&self, square: (i32, i32)) -> bool {
-        let gid = ((square.0 << 8) | square.1) as u32;
-        self.base.index(idx::MAPS).is_ok_and(|maps| maps.groups.contains_key(&gid))
+    /// Whether `square` can be edited (the base cache has it); says why not when it cannot.
+    fn editable(&mut self, square: (i32, i32)) -> bool {
+        let exists = self.builder.square_exists(square.0, square.1);
+        if !exists {
+            self.status = format!("map square {}_{} is not in the cache; only existing squares can be edited", square.0, square.1);
+        }
+        exists
     }
 
     /// The placements on `plane` whose footprint covers world tile `tile`, nearest the top first
     /// (scenery before walls before floor decorations).
     pub fn placements_at(&mut self, tile: (i32, i32), plane: u8, catalog: &Catalog) -> Vec<((i32, i32), Placement)> {
         let mut out = Vec::new();
+        let (sx, sz) = square_of(tile.0, tile.1);
         // a big object can reach in from a square to the south or west
         for dz in -1..=0 {
             for dx in -1..=0 {
-                let square = (tile.0.div_euclid(SQUARE) + dx, tile.1.div_euclid(SQUARE) + dz);
-                let (x0, z0) = (square.0 * SQUARE, square.1 * SQUARE);
-                for p in self.placements(square) {
+                let square = (sx + dx, sz + dz);
+                for &p in self.placements(square).iter() {
                     if p.plane != plane {
                         continue;
                     }
                     let (w, h) = footprint(catalog.defs.get(&p.id), p.orientation);
-                    let (px, pz) = (x0 + p.x as i32, z0 + p.z as i32);
+                    let (px, pz) = world_tile(square, &p);
                     if (px..px + w).contains(&tile.0) && (pz..pz + h).contains(&tile.1) {
                         out.push((square, p));
                     }
@@ -178,12 +183,12 @@ impl Editor {
         }
         self.redo.clear();
         self.dirty = true;
+        self.generation += 1;
     }
 
     /// Puts `placement` (square-local position) into `square`.
     pub fn add_placement(&mut self, square: (i32, i32), placement: Placement) {
-        if !self.square_exists(square) {
-            self.status = format!("map square {}_{} is not in the cache; only existing squares can be edited", square.0, square.1);
+        if !self.editable(square) {
             return;
         }
         self.checkpoint();
@@ -193,8 +198,7 @@ impl Editor {
     /// Puts minimap icon `area` on square-local tile (`x`, `z`) of `square`: an invisible floor
     /// decoration carrying the icon (see [`Editor::icon_object`]).
     pub fn place_icon(&mut self, square: (i32, i32), x: u8, z: u8, area: u16, catalog: &Catalog) {
-        if !self.square_exists(square) {
-            self.status = format!("map square {}_{} is not in the cache; only existing squares can be edited", square.0, square.1);
+        if !self.editable(square) {
             return;
         }
         self.checkpoint();
@@ -210,7 +214,7 @@ impl Editor {
         } else {
             edits.added.push(placement);
         }
-        self.changed(square);
+        self.rebuild();
     }
 
     /// Takes one `placement` out of `square`.
@@ -226,7 +230,7 @@ impl Editor {
         if self.selected == Some(Selected::Placement { square, placement }) {
             self.selected = None;
         }
-        self.changed(square);
+        self.rebuild();
     }
 
     pub fn add_npc(&mut self, spawn: NpcSpawnPoint) {
@@ -262,7 +266,7 @@ impl Editor {
             let now = std::mem::replace(&mut self.project, previous);
             // which cache the project plays on is not an edit
             self.project.cache = now.cache.clone();
-            self.after_jump(&now);
+            self.after_jump();
             self.redo.push(now);
             self.status = "Undone".into();
         }
@@ -272,7 +276,7 @@ impl Editor {
         if let Some(next) = self.redo.pop() {
             let now = std::mem::replace(&mut self.project, next);
             self.project.cache = now.cache.clone();
-            self.after_jump(&now);
+            self.after_jump();
             self.undo.push(now);
             self.status = "Redone".into();
         }
@@ -286,48 +290,39 @@ impl Editor {
         !self.redo.is_empty()
     }
 
-    /// After the project jumped from `before` to what it is now: every square either of them
-    /// edits may look different.
-    fn after_jump(&mut self, before: &MapProject) {
-        let squares: HashSet<(i32, i32)> = before.edited_squares().into_iter().chain(self.project.edited_squares()).collect();
-        let changed: Vec<_> = squares
-            .into_iter()
-            .filter(|&(sx, sy)| before.square(sx, sy) != self.project.square(sx, sy))
-            .collect();
+    /// After the project jumped to another version (undo, redo, another project).
+    fn after_jump(&mut self) {
         self.selected = None;
         self.dirty = true;
-        self.refresh_overlay();
-        for square in changed {
-            self.mark_stale(square);
-        }
-        self.minimap_stale = true;
+        self.generation += 1;
+        self.rebuild();
     }
 
-    fn changed(&mut self, square: (i32, i32)) {
-        self.refresh_overlay();
-        self.mark_stale(square);
-        self.minimap_stale = true;
-    }
-
-    /// A square is drawn from it and its eight neighbours (objects reach over borders, terrain
-    /// colours blend over them), so all nine are decoded again.
-    fn mark_stale(&mut self, square: (i32, i32)) {
-        for dz in -1..=1 {
-            for dx in -1..=1 {
-                self.stale.insert((square.0 + dx, square.1 + dz));
+    /// Brings the overlay up to date with the project, encoding only the squares whose edits
+    /// changed, and has those squares worked out and drawn again. A square is drawn from it and
+    /// its eight neighbours (objects reach over borders, terrain colours blend over them), so all
+    /// nine are decoded again.
+    fn rebuild(&mut self) {
+        let changed = match self.builder.sync(&self.project).and_then(|changed| Ok((changed, self.builder.containers()?))) {
+            Ok((changed, containers)) => {
+                self.overlay.set(containers);
+                changed
             }
-        }
-    }
-
-    /// Rebuilds the in-memory overlay from the project.
-    pub fn refresh_overlay(&mut self) {
-        match compile::build_with(&self.project, &self.base, Compression::None) {
-            Ok(groups) => self.overlay.set(groups),
             Err(e) => {
                 self.status = format!("could not apply the edits: {e}");
                 eprintln!("[editor] {}", self.status);
+                return;
+            }
+        };
+        for square in changed {
+            self.placements.remove(&square);
+            for dz in -1..=1 {
+                for dx in -1..=1 {
+                    self.stale.insert((square.0 + dx, square.1 + dz));
+                }
             }
         }
+        self.minimap_stale = true;
     }
 
     pub fn save(&mut self) {
@@ -342,17 +337,26 @@ impl Editor {
 
     /// Replaces the project with another (opened or new); not undoable.
     pub fn switch_project(&mut self, project: MapProject, path: PathBuf) {
-        let before = std::mem::replace(&mut self.project, project);
+        self.project = project;
         self.path = path;
         self.undo.clear();
         self.redo.clear();
-        self.after_jump(&before);
+        self.after_jump();
         self.dirty = false;
     }
 }
 
-/// The NPC a new project starts with: the man who stands in Lumbridge square in the open world
-/// when the cache carries no spawns, so a compiled cache keeps him until he is removed.
+/// The tile the game enters the world on by default (Lumbridge square), and where the editor
+/// starts looking.
+pub const LUMBRIDGE: (i32, i32) = (3222, 3218);
+
+/// The NPCs a new project starts with: the ones the open world has when the cache carries no
+/// spawns (the man in Lumbridge square), so a compiled cache keeps them until they are removed.
 pub fn default_spawns() -> Vec<NpcSpawnPoint> {
-    vec![NpcSpawnPoint { npc: "man".into(), x: 3226, z: 3215, plane: 0 }]
+    osrs_core::data::default_npc_spawns(LUMBRIDGE)
+}
+
+/// The world tile of a placement in `square` (placements are stored square-local).
+pub fn world_tile(square: (i32, i32), p: &Placement) -> (i32, i32) {
+    (square.0 * SQUARE + p.x as i32, square.1 * SQUARE + p.z as i32)
 }

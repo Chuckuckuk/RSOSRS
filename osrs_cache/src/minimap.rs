@@ -22,6 +22,7 @@
 use crate::config::{Configs, ObjectDef, Overlay, Underlay};
 use crate::locs::Placement;
 use crate::model::hsl_to_rgb;
+use crate::scene::footprint;
 use crate::terrain::REGION;
 use crate::terrain_mesh::{
     pack_hsl, rgb_to_hsl_bytes, underlay_hsl, PlacedObjects, TerrainGrid, UnderlayHsl, INVISIBLE_RGB,
@@ -139,6 +140,13 @@ pub fn map_functions(cache: &Cache) -> Result<HashMap<u32, (u32, String)>> {
 
 impl<'a> MinimapSource<'a> {
     pub fn new(cache: &'a Cache) -> Result<MinimapSource<'a>> {
+        let objects = Configs::new(cache)?.objects()?;
+        MinimapSource::with_objects(cache, objects)
+    }
+
+    /// [`MinimapSource::new`] with the object definitions already decoded (decoding them all is
+    /// most of its cost).
+    pub fn with_objects(cache: &'a Cache, objects: HashMap<u32, ObjectDef>) -> Result<MinimapSource<'a>> {
         let configs = Configs::new(cache)?;
         let areas = map_functions(cache)?;
         let sprites = cache.index(idx::SPRITES)?;
@@ -165,7 +173,7 @@ impl<'a> MinimapSource<'a> {
             cache,
             underlays: configs.underlays()?,
             overlays: configs.overlays()?,
-            objects: configs.objects()?,
+            objects,
             areas,
             scenes,
         })
@@ -356,11 +364,6 @@ pub fn is_interactive(def: &ObjectDef) -> bool {
         }
         f => f == 1,
     }
-}
-
-fn footprint(def: &ObjectDef, orientation: u8) -> (u8, u8) {
-    let (x, z) = (def.size_x.max(1), def.size_y.max(1));
-    if orientation & 1 == 1 { (z, x) } else { (x, z) }
 }
 
 fn put(img: &mut [u8], x: usize, y: usize, rgb: [u8; 3]) {

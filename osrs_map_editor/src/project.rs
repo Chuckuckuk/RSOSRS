@@ -98,10 +98,7 @@ impl MapProject {
     }
 
     pub fn load(path: &Path) -> std::io::Result<MapProject> {
-        let text = std::fs::read_to_string(path)?;
-        // a file saved by a Windows editor may start with a byte-order mark
-        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-        serde_json::from_str(text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        osrs_core::data::read_json_file(path)
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
@@ -158,11 +155,6 @@ impl MapProject {
     /// manifest has no fingerprint (built before they were kept) counts as out of date.
     pub fn is_compiled_into(&self, dir: &Path) -> bool {
         Manifest::read(dir).and_then(|m| m.fingerprint) == Some(self.fingerprint())
-    }
-
-    /// Whether the project changes nothing.
-    pub fn is_empty(&self) -> bool {
-        self.squares.values().all(SquareEdits::is_empty) && self.npc_spawns.is_empty() && self.marker_defs.is_empty()
     }
 }
 

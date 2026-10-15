@@ -133,7 +133,7 @@ fn the_preview_draws_a_square_with_its_edits_before_any_compile() {
     let overlay = Overlay::new();
     let mut loader = SquareLoader::from_cache(Cache::open(base.dir()).unwrap().with_overlay(Arc::clone(&overlay))).unwrap();
     let before = trees(&mut loader);
-    overlay.set(compile::build_with(&project, &base, Compression::None).unwrap());
+    overlay.set(compile::build_with(&project, Cache::open(base.dir()).unwrap(), Compression::None).unwrap());
     assert_eq!(trees(&mut loader), before + 1);
     // nothing was written: the base cache itself still has none
     let mut plain = SquareLoader::from_cache(Cache::open(base.dir()).unwrap()).unwrap();

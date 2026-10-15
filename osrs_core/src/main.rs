@@ -384,14 +384,22 @@ fn main() {
         }
         let mut registry = Registry::builtin();
 
-        // a cache built by the map editor says who stands where; its squares are loaded now so
-        // each NPC has ground under it, however far from the player
-        let mut npc_spawns = scenario.is_none().then(|| osrs_core::data::read_npc_spawns(source.cache().dir())).flatten();
-        if let Some(spawns) = &mut npc_spawns {
-            resolve_cache_npcs(&mut registry, &source, spawns);
+        // who stands where in the open world: what a cache built by the map editor says, else the
+        // default man. Their squares are loaded now so each NPC has ground under it, however far
+        // from the player.
+        let mut npc_spawns = Vec::new();
+        if scenario.is_none() {
+            npc_spawns = match osrs_core::data::read_npc_spawns(source.cache().dir()) {
+                Some(spawns) => {
+                    println!("[server] {} NPCs from the cache's npc_spawns.json", spawns.len());
+                    spawns
+                }
+                None => osrs_core::data::default_npc_spawns((spawn.x, spawn.z)),
+            };
+            resolve_cache_npcs(&mut registry, &source, &mut npc_spawns);
         }
         let registry = std::rc::Rc::new(registry);
-        for s in npc_spawns.iter().flatten() {
+        for s in &npc_spawns {
             let square = square_of(s.x, s.z);
             if loaded.insert(square) {
                 let (collision, locs) = square_map(&source, square);
@@ -419,30 +427,16 @@ fn main() {
                 world.set_registry(registry);
                 // enough Firemaking for the bonfire logs (level 50 is maple and below)
                 world.player.skills.set_base(osrs_core::model::Skill::Firemaking, 50);
-                match &npc_spawns {
-                    Some(spawns) => {
-                        for s in spawns {
-                            if s.plane != 0 {
-                                eprintln!("[server] {} at ({}, {}) is on plane {}; only ground-level NPCs are placed", s.npc, s.x, s.z, s.plane);
-                                continue;
-                            }
-                            let at = nearest_open_tile(&world.map, TileCoord::new(s.x, s.z));
-                            match at.map(|at| world.spawn_npc_def(&s.npc, at)) {
-                                Some(Ok(_)) => {}
-                                Some(Err(e)) => eprintln!("[server] could not place {} at ({}, {}): {e}", s.npc, s.x, s.z),
-                                None => eprintln!("[server] no open tile near ({}, {}) for {}", s.x, s.z, s.npc),
-                            }
-                        }
-                        println!("[server] {} NPCs placed from the cache's npc_spawns.json", spawns.len());
+                for s in &npc_spawns {
+                    if s.plane != 0 {
+                        eprintln!("[server] {} at ({}, {}) is on plane {}; only ground-level NPCs are placed", s.npc, s.x, s.z, s.plane);
+                        continue;
                     }
-                    None => {
-                        // a man (level 2) stands about in Lumbridge square, a few tiles from where you arrive
-                        let man_at = nearest_open_tile(&world.map, TileCoord::new(spawn.x + 4, spawn.z - 3));
-                        match man_at.map(|at| world.spawn_npc_def("man", at)) {
-                            Some(Ok(id)) => println!("[server] a man (entity {}) stands at ({}, {})", id.0, man_at.unwrap().x, man_at.unwrap().z),
-                            Some(Err(e)) => eprintln!("[server] could not place the man: {e}"),
-                            None => eprintln!("[server] no open tile near the spawn for the man"),
-                        }
+                    let at = nearest_open_tile(&world.map, TileCoord::new(s.x, s.z));
+                    match at.map(|at| (at, world.spawn_npc_def(&s.npc, at))) {
+                        Some((at, Ok(id))) => println!("[server] {} (entity {}) stands at ({}, {})", s.npc, id.0, at.x, at.z),
+                        Some((_, Err(e))) => eprintln!("[server] could not place {} at ({}, {}): {e}", s.npc, s.x, s.z),
+                        None => eprintln!("[server] no open tile near ({}, {}) for {}", s.x, s.z, s.npc),
                     }
                 }
                 // a starter kit for the mock server, so the inventory has something in it
@@ -606,44 +600,28 @@ fn start_scenario(
     }
 }
 
-/// Makes every spawn of a cache NPC (`cache:<id>`) name a definition the registry has. When
-/// `npcs.json` has the monster (drawn as that NPC, or listing it in `cache_ids`), it fights with
-/// those stats, drawn as its own model, so stats added there reach spawns already placed.
-/// Otherwise it is made from the cache's own definition, and cannot be fought.
+/// Settles the spawns of cache NPCs (`cache:<id>`) with `osrs_core::data::resolve_spawns`, which
+/// reads what the game cache says of the ones nobody has written stats for (decoded only if one is
+/// needed).
 fn resolve_cache_npcs(registry: &mut Registry, source: &MapSource, spawns: &mut [osrs_core::data::NpcSpawnPoint]) {
-    use osrs_core::data::{cache_npc_def, cache_npc_id, cache_npc_variant, DataFile};
     let mut cache_defs = None;
-    let mut made = Vec::new();
-    for s in spawns.iter_mut() {
-        let Some(id) = cache_npc_id(&s.npc) else { continue };
-        if registry.npc(&s.npc).is_some() || made.iter().any(|d: &osrs_core::data::NpcDef| d.id == s.npc) {
-            continue;
-        }
-        if let Some(curated) = registry.npc_for_cache_id(id) {
-            if curated.appearance == Some(id) {
-                s.npc = curated.id.clone();
-            } else {
-                made.push(cache_npc_variant(curated, id));
-            }
-            continue;
-        }
+    let resolved = osrs_core::data::resolve_spawns(registry, spawns, |id| {
         let defs = cache_defs.get_or_insert_with(|| {
             osrs_cache::config::Configs::new(source.cache()).and_then(|c| c.npcs()).unwrap_or_else(|e| {
                 eprintln!("[server] could not read the cache's NPC definitions: {e}");
                 Default::default()
             })
         });
-        match defs.get(&id) {
-            Some(def) => made.push(cache_npc_def(id, &def.name, def.combat_level, def.size)),
-            None => eprintln!("[server] the cache has no NPC {id}"),
-        }
-    }
-    if !made.is_empty() {
-        let plain = made.iter().filter(|d| d.attacks.is_empty()).count();
-        println!("[server] {} cache NPC kinds: {} sharing a monster's stats, {plain} without combat stats", made.len(), made.len() - plain);
-        if let Err(e) = registry.merge(DataFile { npcs: made, ..Default::default() }) {
-            eprintln!("[server] cache NPCs: {e}");
-        }
+        let def = defs.get(&id)?;
+        Some(osrs_core::data::CacheNpc { name: def.name.clone(), combat_level: def.combat_level, size: def.size })
+    });
+    if resolved.variants + resolved.plain > 0 {
+        println!(
+            "[server] {} cache NPC kinds: {} sharing a monster's stats, {} without combat stats",
+            resolved.variants + resolved.plain,
+            resolved.variants,
+            resolved.plain
+        );
     }
 }
 

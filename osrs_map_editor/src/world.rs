@@ -56,18 +56,24 @@ pub struct Pending {
     ready: VecDeque<SquareData>,
 }
 
-/// The tile the camera is looking at: where the ray through the middle of the view meets the
-/// ground, else the tile under the camera.
-pub fn focus_tile(camera: &Camera, transform: &GlobalTransform, world: &StreamedWorld, picker: &Picker) -> (i32, i32) {
+/// The tile the camera is looking at, worked out once a frame by [`stream_world`] (which streams
+/// the squares around it); the minimap and Play read it.
+#[derive(Resource, Default)]
+pub struct Focus {
+    pub tile: (i32, i32),
+}
+
+impl Focus {
+    pub fn square(&self) -> (i32, i32) {
+        square_of(self.tile.0, self.tile.1)
+    }
+}
+
+/// Where the ray through the middle of the view meets the ground, else the tile under the camera.
+fn focus_tile(camera: &Camera, transform: &GlobalTransform, world: &StreamedWorld, picker: &Picker) -> (i32, i32) {
     let middle = camera.logical_viewport_size().map(|s| s / 2.0);
     let hit = middle.and_then(|m| camera.viewport_to_world(transform, m).ok()).and_then(|ray| picker.pick_all(world, ray));
     hit.map_or_else(|| tile_under(transform.translation()), |c| c.tile)
-}
-
-/// The square of [`focus_tile`].
-pub fn focus_square(camera: &Camera, transform: &GlobalTransform, world: &StreamedWorld, picker: &Picker) -> (i32, i32) {
-    let tile = focus_tile(camera, transform, world, picker);
-    square_of(tile.0, tile.1)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -78,6 +84,7 @@ pub fn stream_world(
     mut world: ResMut<StreamedWorld>,
     mut picker: ResMut<EditorPicker>,
     mut ghost: ResMut<Ghost>,
+    mut focus_tile_now: ResMut<Focus>,
     cameras: Query<(&Camera, &GlobalTransform), With<FlyCamera>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -88,7 +95,8 @@ pub fn stream_world(
     textures: Res<Textures>,
 ) {
     let Ok((camera, transform)) = cameras.single() else { return };
-    let focus = focus_square(camera, transform, &world, &picker.0);
+    focus_tile_now.tile = focus_tile(camera, transform, &world, &picker.0);
+    let focus = focus_tile_now.square();
     let near = |s: (i32, i32), r: i32| (s.0 - focus.0).abs() <= r && (s.1 - focus.1).abs() <= r;
 
     let request = |square: (i32, i32), pending: &mut Pending| {
@@ -210,7 +218,6 @@ pub fn find_hover(
 pub struct Ghost {
     /// `(id, kind, orientation)` shown, or asked for.
     want: Option<(u32, u8, u8)>,
-    asked: Option<(u32, u8, u8)>,
     mesh: Option<osrs_cache::scene::LocMesh>,
     entity: Option<Entity>,
     /// A mesh arrived and needs spawning.
@@ -219,7 +226,7 @@ pub struct Ghost {
 
 impl Ghost {
     fn arrived(&mut self, key: (u32, u8, u8), mesh: Option<osrs_cache::scene::LocMesh>) {
-        if self.asked == Some(key) {
+        if self.want == Some(key) {
             self.mesh = mesh;
             self.fresh = true;
         }
@@ -260,7 +267,6 @@ pub fn update_ghost(
         if let Some(entity) = ghost.entity.take() {
             commands.entity(entity).despawn();
         }
-        ghost.asked = want;
         if let Some((id, kind, orientation)) = want {
             stream.request_object(id, kind, orientation);
         }

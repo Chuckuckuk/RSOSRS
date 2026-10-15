@@ -2,20 +2,21 @@
 //! the right, a status line at the bottom, and labels over NPCs and icons in the world.
 
 use crate::camera::{jump_to, FlyCamera};
-use crate::catalog::{area_label, kind_name, Catalog, KINDS};
-use crate::editor::{default_spawns, Brush, Editor, Selected, Tool};
+use crate::catalog::{area_label, kind_name, star, Catalog, Search, FACINGS, KINDS};
+use crate::editor::{default_spawns, world_tile, Brush, Editor, Selected, Tool};
 use crate::preview::{MinimapPreview, Sprites};
 use crate::tools::{remove, IconsInView};
-use crate::world::{focus_square, focus_tile, EditorPicker, Hover};
+use crate::world::{Focus, Hover};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use osrs_cache::active::{self, Selection};
-use osrs_map_editor::builds::{self, Manifest};
+use osrs_cache::squares::SQUARE;
+use osrs_map_editor::builds::{self, CacheInfo, Manifest};
 use osrs_map_editor::compile::{self, Stage};
 use osrs_map_editor::project::MapProject;
-use osrs_cache::squares::SQUARE;
 use osrs_render::streaming::{square_of, StreamedWorld};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
 
@@ -27,13 +28,16 @@ pub enum PaletteTab {
     Icons,
 }
 
+/// Where the game starts when it is played: a tile, or its usual spot.
+type Spawn = Option<(i32, i32)>;
+
 /// A compile running on its own thread.
 pub struct CompileJob {
     pub name: String,
     pub stage: Stage,
     messages: Mutex<Receiver<JobMessage>>,
-    /// Start the game on the cache once it is built: `Some(spawn)`.
-    then_play: Option<Option<(i32, i32)>>,
+    /// Start the game on the cache once it is built.
+    then_play: Option<Spawn>,
 }
 
 enum JobMessage {
@@ -41,13 +45,22 @@ enum JobMessage {
     Done(Result<Manifest, String>),
 }
 
+/// The one dialog open, if any.
+pub enum Dialog {
+    NewProject(String),
+    /// Compile into a cache of this name; with `then_play`, start the game on it once built (Play
+    /// on a project that has no cache yet).
+    Compile { name: String, then_play: Option<Spawn> },
+    /// Play on a cache older than the project's edits: rebuild it first, or play it as it is.
+    Rebuild { name: String, spawn: Spawn },
+}
+
 #[derive(Resource)]
 pub struct UiState {
     pub tab: PaletteTab,
     pub search: String,
     pub goto: String,
-    pub new_project: Option<String>,
-    pub compile_dialog: Option<String>,
+    pub dialog: Option<Dialog>,
     pub job: Option<CompileJob>,
     /// The last compile's outcome, with the cache it made.
     pub compiled: Option<Result<Manifest, String>>,
@@ -55,16 +68,20 @@ pub struct UiState {
     pub play_requested: bool,
     /// Whether the game starts where the camera is looking (else at its usual spot).
     pub play_here: bool,
-    /// The project has no cache yet: the name offered for one, and where to start playing.
-    pub play_dialog: Option<(String, Option<(i32, i32)>)>,
-    /// The project's cache is older than its edits: its name, and where to start playing.
-    pub rebuild_dialog: Option<(String, Option<(i32, i32)>)>,
     /// The NPC palette lists only the NPCs with combat stats.
     pub npcs_with_stats_only: bool,
     /// The NPC palette row whose models are being picked from.
     pub npc_picker: Option<usize>,
-    /// Counts frames (the thumbnail budget is per frame).
-    pub frame: u64,
+    /// The palette rows matching the search, for the tab, search and filter they were found for.
+    rows: Option<((PaletteTab, String, bool), Vec<usize>)>,
+    /// Counts the times the built caches or the active one changed (a compile finished, a cache
+    /// was chosen), so what is read of them from disk is read again only then.
+    builds_epoch: u32,
+    /// The built caches and the active choice, as of `builds_epoch`.
+    caches: Option<(u32, Selection, Vec<CacheInfo>)>,
+    /// The project's built cache and whether it has all the edits, as of an editor generation and
+    /// `builds_epoch`.
+    play_status: Option<((u64, u32), Option<PathBuf>, bool)>,
 }
 
 impl Default for UiState {
@@ -73,18 +90,41 @@ impl Default for UiState {
             tab: PaletteTab::Objects,
             search: String::new(),
             goto: String::new(),
-            new_project: None,
-            compile_dialog: None,
+            dialog: None,
             job: None,
             compiled: None,
             play_requested: false,
             play_here: true,
-            play_dialog: None,
-            rebuild_dialog: None,
             npcs_with_stats_only: false,
             npc_picker: None,
-            frame: 0,
+            rows: None,
+            builds_epoch: 0,
+            caches: None,
+            play_status: None,
         }
+    }
+}
+
+impl UiState {
+    /// The project's built cache, and whether it holds the project as it is now.
+    fn play_status(&mut self, editor: &Editor) -> (Option<PathBuf>, bool) {
+        let key = (editor.generation, self.builds_epoch);
+        if self.play_status.as_ref().is_none_or(|(k, _, _)| *k != key) {
+            let dir = editor.project.compiled_cache();
+            let current = dir.as_deref().is_some_and(|d| editor.project.is_compiled_into(d));
+            self.play_status = Some((key, dir, current));
+        }
+        let (_, dir, current) = self.play_status.as_ref().unwrap();
+        (dir.clone(), *current)
+    }
+
+    /// The active choice and the built caches.
+    fn caches(&mut self) -> (Selection, Vec<CacheInfo>) {
+        if self.caches.as_ref().is_none_or(|(epoch, _, _)| *epoch != self.builds_epoch) {
+            self.caches = Some((self.builds_epoch, active::selection(), builds::list_caches()));
+        }
+        let (_, selection, caches) = self.caches.as_ref().unwrap();
+        (selection.clone(), caches.clone())
     }
 }
 
@@ -92,7 +132,7 @@ impl Default for UiState {
 pub struct View<'w, 's> {
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform, &'static mut Transform, &'static mut FlyCamera)>,
     world: Res<'w, StreamedWorld>,
-    picker: Res<'w, EditorPicker>,
+    focus: Res<'w, Focus>,
     hover: Res<'w, Hover>,
     icons: Res<'w, IconsInView>,
 }
@@ -107,7 +147,6 @@ pub fn editor_ui(
     mut view: View,
 ) -> Result {
     let ctx = contexts.ctx_mut()?.clone();
-    state.frame += 1;
     poll_job(&mut state, &mut editor);
 
     let mut root = egui::Ui::new(
@@ -125,10 +164,10 @@ pub fn editor_ui(
     });
     egui::Panel::right("inspector").resizable(true).default_size(280.0).show(&mut root, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            inspector(ui, &mut editor, &catalog, &mut view);
+            inspector(ui, &mut editor, &catalog, &view);
             ui.separator();
             if minimap.open {
-                minimap_panel(ui, &ctx, &mut editor, &mut minimap, &mut sprites, &view);
+                minimap_panel(ui, &ctx, &mut editor, &catalog, &mut minimap, &mut sprites, &view);
                 ui.separator();
             }
             project_panel(ui, &mut editor, &catalog, &mut view, &mut state.goto);
@@ -139,7 +178,7 @@ pub fn editor_ui(
     let painter = root.painter_at(root.available_rect_before_wrap());
     world_labels(&ctx, &painter, &editor, &catalog, &mut sprites, &view);
     if std::mem::take(&mut state.play_requested) {
-        let spawn = state.play_here.then(|| view.cameras.single().ok().map(|(c, t, _, _)| focus_tile(c, t, &view.world, &view.picker.0))).flatten();
+        let spawn = state.play_here.then_some(view.focus.tile);
         request_play(&mut editor, &mut state, spawn);
     }
     dialogs(&ctx, &mut editor, &mut state);
@@ -147,7 +186,7 @@ pub fn editor_ui(
 }
 
 /// Plays the project: on its cache if it has one, else after asking to make one.
-fn request_play(editor: &mut Editor, state: &mut UiState, spawn: Option<(i32, i32)>) {
+fn request_play(editor: &mut Editor, state: &mut UiState, spawn: Spawn) {
     if state.job.is_some() {
         editor.status = "A compile is running; play when it is done".into();
         return;
@@ -155,29 +194,29 @@ fn request_play(editor: &mut Editor, state: &mut UiState, spawn: Option<(i32, i3
     if editor.dirty {
         editor.save();
     }
-    match editor.project.compiled_cache() {
-        Some(dir) => {
+    match state.play_status(editor) {
+        (Some(dir), current) => {
             // a project found by its manifest names its cache from now on
             let name = dir.file_name().map(|n| n.to_string_lossy().into_owned());
             if editor.project.cache != name {
                 editor.project.cache = name.clone();
                 editor.save();
             }
-            if editor.project.is_compiled_into(&dir) {
+            if current {
                 launch(editor, &dir, spawn);
             } else {
                 // edits made since it was built: offer to build it again first
-                state.rebuild_dialog = Some((name.unwrap_or_default(), spawn));
+                state.dialog = Some(Dialog::Rebuild { name: name.unwrap_or_default(), spawn });
             }
         }
-        None => {
+        (None, _) => {
             let name = editor.project.cache.clone().unwrap_or_else(|| clean_name(&editor.project.name));
-            state.play_dialog = Some((name, spawn));
+            state.dialog = Some(Dialog::Compile { name, then_play: Some(spawn) });
         }
     }
 }
 
-fn launch(editor: &mut Editor, dir: &std::path::Path, spawn: Option<(i32, i32)>) {
+fn launch(editor: &mut Editor, dir: &std::path::Path, spawn: Spawn) {
     let name = dir.file_name().unwrap_or_default().to_string_lossy();
     editor.status = match crate::play::launch(dir, spawn) {
         Ok(_) => match spawn {
@@ -192,7 +231,7 @@ fn menu_bar(ui: &mut egui::Ui, editor: &mut Editor, state: &mut UiState, minimap
     egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
             if ui.button("New project…").clicked() {
-                state.new_project = Some(String::new());
+                state.dialog = Some(Dialog::NewProject(String::new()));
                 ui.close();
             }
             ui.menu_button("Open project", |ui| {
@@ -229,33 +268,34 @@ fn menu_bar(ui: &mut egui::Ui, editor: &mut Editor, state: &mut UiState, minimap
             }
         });
         ui.menu_button("Cache", |ui| {
-            let busy = state.job.is_some();
-            if ui.add_enabled(!busy, egui::Button::new("Compile to a new cache…")).clicked() {
-                state.compile_dialog = Some(editor.project.cache.clone().unwrap_or_else(|| clean_name(&editor.project.name)));
+            if ui.add_enabled(state.job.is_none(), egui::Button::new("Compile to a new cache…")).clicked() {
+                let name = editor.project.cache.clone().unwrap_or_else(|| clean_name(&editor.project.name));
+                state.dialog = Some(Dialog::Compile { name, then_play: None });
                 ui.close();
             }
             ui.separator();
             ui.label("The game reads:");
-            let selection = active::selection();
+            let (selection, caches) = state.caches();
+            let mut chosen = None;
             let mut pick = |ui: &mut egui::Ui, label: String, choice: Selection| {
                 if ui.radio(selection == choice, label).clicked() {
-                    match active::set_active(&choice) {
-                        Ok(()) => editor.status = "The game will read that cache next time it starts".into(),
-                        Err(e) => editor.status = format!("could not choose the cache: {e}"),
-                    }
+                    chosen = Some(choice);
                 }
             };
             pick(ui, "The installed game's cache (live)".into(), Selection::Live);
-            for info in builds::list_caches() {
+            for info in caches {
                 let detail = info.manifest.as_ref().map(|m| format!(" (project {})", m.project)).unwrap_or_default();
                 pick(ui, format!("{}{detail}", info.name), Selection::Dir(info.dir.clone()));
+            }
+            if let Some(choice) = chosen {
+                set_active(editor, state, &choice, "The game will read that cache next time it starts".into());
             }
             if std::env::var(active::ENV_CACHE_DIR).is_ok() {
                 ui.colored_label(egui::Color32::YELLOW, format!("{} is set and overrides this choice", active::ENV_CACHE_DIR));
             }
         });
         ui.menu_button("Play", |ui| {
-            let cache = editor.project.compiled_cache();
+            let (cache, current) = state.play_status(editor);
             let label = match &cache {
                 Some(_) => "Play this project   F5",
                 None => "Play this project (makes its cache first)   F5",
@@ -268,11 +308,7 @@ fn menu_bar(ui: &mut egui::Ui, editor: &mut Editor, state: &mut UiState, minimap
             match &cache {
                 Some(dir) => {
                     ui.label(format!("Plays on {}", dir.display()));
-                    if editor.project.is_compiled_into(dir) {
-                        ui.label("It has all your edits.");
-                    } else {
-                        ui.label("You have edited since it was built: Play offers to rebuild it.");
-                    }
+                    ui.label(if current { "It has all your edits." } else { "You have edited since it was built: Play offers to rebuild it." });
                 }
                 None => {
                     ui.label("This project has no cache yet.");
@@ -285,7 +321,16 @@ fn menu_bar(ui: &mut egui::Ui, editor: &mut Editor, state: &mut UiState, minimap
     });
 }
 
-fn list_projects() -> Vec<(String, std::path::PathBuf)> {
+/// Makes `choice` the cache the game reads, saying `done` when it worked.
+fn set_active(editor: &mut Editor, state: &mut UiState, choice: &Selection, done: String) {
+    state.builds_epoch += 1;
+    editor.status = match active::set_active(choice) {
+        Ok(()) => done,
+        Err(e) => format!("could not choose the cache: {e}"),
+    };
+}
+
+fn list_projects() -> Vec<(String, PathBuf)> {
     let Ok(entries) = std::fs::read_dir(builds::projects_dir()) else { return Vec::new() };
     let mut out: Vec<_> = entries
         .filter_map(|e| e.ok())
@@ -325,8 +370,8 @@ fn tools_panel(ui: &mut egui::Ui, editor: &mut Editor) {
     });
     ui.horizontal(|ui| {
         ui.label("Rotation (R)");
-        for r in 0..4u8 {
-            ui.selectable_value(&mut editor.rotation, r, ["N", "E", "S", "W"][r as usize]);
+        for (r, facing) in FACINGS.iter().enumerate() {
+            ui.selectable_value(&mut editor.rotation, r as u8, *facing);
         }
     });
     let shown = editor.kind_override.map_or_else(|| "the object's own".to_string(), |k| format!("{k}: {}", kind_name(k)));
@@ -336,6 +381,30 @@ fn tools_panel(ui: &mut egui::Ui, editor: &mut Editor) {
             ui.selectable_value(&mut editor.kind_override, Some(k), format!("{k}: {name}"));
         }
     });
+}
+
+/// The rows of the Objects or NPCs tab that match the search: worked out again only when the
+/// tab, search or filter change (the lists are tens of thousands long).
+fn palette_rows<'a>(state: &'a mut UiState, catalog: &Catalog) -> &'a [usize] {
+    let key = (state.tab, state.search.clone(), state.npcs_with_stats_only);
+    if state.rows.as_ref().is_none_or(|(k, _)| *k != key) {
+        let search = Search::new(&state.search);
+        let rows = match state.tab {
+            PaletteTab::Objects => {
+                (0..catalog.objects.len()).filter(|&i| search.matches(&catalog.objects[i].name_lower, Some(catalog.objects[i].id))).collect()
+            }
+            // a group matches by its name, or by the cache id of any of its models
+            PaletteTab::Npcs => (0..catalog.npc_groups.len())
+                .filter(|&g| !state.npcs_with_stats_only || catalog.npc_groups[g].has_stats)
+                .filter(|&g| {
+                    search.matches(&catalog.npc_groups[g].name_lower, None) || catalog.group_members(g).any(|n| search.matches("", n.cache_id))
+                })
+                .collect(),
+            PaletteTab::Resources | PaletteTab::Icons => Vec::new(),
+        };
+        state.rows = Some((key, rows));
+    }
+    &state.rows.as_ref().unwrap().1
 }
 
 fn palette(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, state: &mut UiState, sprites: &mut Sprites) {
@@ -349,8 +418,7 @@ fn palette(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, state: &mu
         ui.label("Search");
         ui.text_edit_singleline(&mut state.search);
     });
-    let needle = state.search.to_lowercase();
-    let matches = |name: &str, id: &str| needle.is_empty() || name.to_lowercase().contains(&needle) || id == needle;
+    let search = Search::new(&state.search);
     let choose = |editor: &mut Editor, brush: Brush| {
         editor.brush = Some(brush);
         editor.tool = Tool::Place;
@@ -358,10 +426,11 @@ fn palette(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, state: &mu
     let row_height = ui.spacing().interact_size.y;
     match state.tab {
         PaletteTab::Objects => {
-            let rows: Vec<_> = catalog.objects.iter().filter(|o| matches(&o.name, &o.id.to_string())).collect();
+            let rows = palette_rows(state, catalog);
             ui.label(format!("{} objects", rows.len()));
             egui::ScrollArea::vertical().id_salt("objects").show_rows(ui, row_height, rows.len(), |ui, range| {
-                for o in &rows[range] {
+                for &i in &rows[range] {
+                    let o = &catalog.objects[i];
                     let chosen = editor.brush == Some(Brush::Object(o.id));
                     if ui.selectable_label(chosen, format!("{}  {}  [{}]", o.id, o.name, kind_name(o.kind))).clicked() {
                         choose(editor, Brush::Object(o.id));
@@ -374,7 +443,7 @@ fn palette(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, state: &mu
             egui::ScrollArea::vertical().id_salt("resources").show(ui, |ui| {
                 for (&id, node) in &catalog.resources {
                     let name = catalog.object_name(id);
-                    if !matches(&name, &id.to_string()) && !matches(node, "") {
+                    if !search.matches(&name.to_lowercase(), Some(id)) && !search.matches(node, None) {
                         continue;
                     }
                     let chosen = editor.brush == Some(Brush::Object(id));
@@ -386,37 +455,31 @@ fn palette(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, state: &mu
         }
         PaletteTab::Npcs => {
             ui.checkbox(&mut state.npcs_with_stats_only, "Only NPCs with combat stats (\u{2605})");
-            // a group matches by its name, or by the cache id of any of its models
-            let rows: Vec<usize> = (0..catalog.npc_groups.len())
-                .filter(|&g| !state.npcs_with_stats_only || catalog.npc_groups[g].has_stats)
-                .filter(|&g| {
-                    let group = &catalog.npc_groups[g];
-                    matches(&group.name, "")
-                        || catalog.group_members(g).any(|n| n.cache_id.is_some_and(|i| matches("", &i.to_string())) || matches("", &n.key))
-                })
-                .collect();
+            let mut open_picker = None;
+            let rows = palette_rows(state, catalog);
             ui.label(format!("{} NPCs; \u{2605} = has combat stats (data/npcs.json), others stand and cannot be fought", rows.len()));
             egui::ScrollArea::vertical().id_salt("npcs").show_rows(ui, row_height, rows.len(), |ui, range| {
                 for &g in &rows[range] {
                     let group = &catalog.npc_groups[g];
                     let chosen = matches!(&editor.brush, Some(Brush::Npc(key)) if catalog.group_members(g).any(|n| &n.key == key));
-                    let level = if group.combat_level > 0 { format!(" (level {})", group.combat_level) } else { String::new() };
                     let count = if group.members.len() > 1 { format!("  \u{00d7}{}", group.members.len()) } else { String::new() };
-                    let star = if group.has_stats { "  \u{2605}" } else { "" };
-                    if ui.selectable_label(chosen, format!("{}{level}{count}{star}", group.name)).clicked() {
+                    if ui.selectable_label(chosen, format!("{}{count}{}", group.label(), star(group.has_stats))).clicked() {
                         match &group.members[..] {
                             // one model: nothing to pick
                             [only] => choose(editor, Brush::Npc(catalog.npcs[*only].key.clone())),
-                            _ => state.npc_picker = Some(g),
+                            _ => open_picker = Some(g),
                         }
                     }
                 }
             });
+            if open_picker.is_some() {
+                state.npc_picker = open_picker;
+            }
         }
         PaletteTab::Icons => {
             ui.label("Minimap icons: placed as an invisible marker object");
             egui::ScrollArea::vertical().id_salt("icons").show(ui, |ui| {
-                for a in catalog.areas.iter().filter(|a| matches(&area_label(a), &a.id.to_string())) {
+                for a in catalog.areas.iter().filter(|a| search.matches(&area_label(a).to_lowercase(), Some(a.id as u32))) {
                     ui.horizontal(|ui| {
                         if let Some(tex) = sprites.get(ui.ctx(), a.sprite) {
                             ui.add(egui::Image::new(&tex).fit_to_exact_size(egui::vec2(15.0, 15.0)));
@@ -432,17 +495,17 @@ fn palette(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, state: &mu
     }
 }
 
-fn inspector(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view: &mut View) {
+fn inspector(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view: &View) {
     ui.heading("Selected");
     match editor.selected.clone() {
         None => {
             ui.label("Nothing. Click something with the Select tool.");
         }
         Some(Selected::Placement { square, placement: p }) => {
-            let (x, z) = (square.0 * SQUARE + p.x as i32, square.1 * SQUARE + p.z as i32);
+            let (x, z) = world_tile(square, &p);
             ui.label(format!("{} (object {})", catalog.object_name(p.id), p.id));
             ui.label(format!("tile {x}, {z}, plane {}", p.plane + 1));
-            ui.label(format!("shape {}: {}, facing {}", p.kind, kind_name(p.kind), ["N", "E", "S", "W"][p.orientation as usize & 3]));
+            ui.label(format!("shape {}: {}, facing {}", p.kind, kind_name(p.kind), FACINGS[p.orientation as usize & 3]));
             if let Some(node) = catalog.resources.get(&p.id) {
                 ui.label(format!("gathering resource: {node}"));
             }
@@ -455,8 +518,7 @@ fn inspector(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view: &m
         }
         Some(Selected::Npc(i)) => {
             if let Some(s) = editor.project.npc_spawns.get(i).cloned() {
-                let name = catalog.npc_name(&s.npc);
-                ui.label(format!("NPC {name} ({})", s.npc));
+                ui.label(format!("NPC {} ({})", catalog.npc_name(&s.npc), s.npc));
                 if !catalog.npc(&s.npc).is_some_and(|n| n.has_stats) {
                     ui.label("No combat stats yet: it stands where it is put and cannot be fought.");
                 }
@@ -475,14 +537,15 @@ fn inspector(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view: &m
     };
     let plane = editor.plane;
     let here = editor.placements_at(tile, plane, catalog);
-    if here.is_empty() && editor.npcs_at(tile).is_empty() {
+    let npcs = editor.npcs_at(tile);
+    if here.is_empty() && npcs.is_empty() {
         ui.label(format!("nothing here on plane {}", plane + 1));
     }
     for (_, p) in here.iter().take(8) {
         ui.label(format!("{} ({}) {}", catalog.object_name(p.id), p.id, kind_name(p.kind)));
     }
-    for i in editor.npcs_at(tile) {
-        ui.label(format!("NPC {}", editor.project.npc_spawns[i].npc));
+    for i in npcs {
+        ui.label(format!("NPC {}", catalog.npc_name(&editor.project.npc_spawns[i].npc)));
     }
 }
 
@@ -490,14 +553,16 @@ fn minimap_panel(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     editor: &mut Editor,
+    catalog: &Catalog,
     minimap: &mut MinimapPreview,
     sprites: &mut Sprites,
     view: &View,
 ) {
-    let Ok((camera, transform, _, _)) = view.cameras.single() else { return };
-    let square = focus_square(camera, transform, &view.world, &view.picker.0);
-    minimap.refresh(ctx, square, editor.minimap_stale, editor.project.marker_defs.len());
-    editor.minimap_stale = false;
+    let square = view.focus.square();
+    minimap.refresh(ctx, square, editor.minimap_stale, &catalog.defs, &editor.project.marker_defs);
+    if editor.minimap_stale {
+        editor.minimap_stale = false;
+    }
     ui.heading(format!("Minimap of square {}_{}", square.0, square.1));
     let Some(tex) = &minimap.texture else {
         ui.label("This square has no map.");
@@ -549,8 +614,7 @@ fn project_panel(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view
         let mut remove_at = None;
         for (i, s) in editor.project.npc_spawns.iter().enumerate() {
             ui.horizontal(|ui| {
-                let name = catalog.npc_name(&s.npc);
-                if ui.link(format!("{name} at {}, {}", s.x, s.z)).clicked() {
+                if ui.link(format!("{} at {}, {}", catalog.npc_name(&s.npc), s.x, s.z)).clicked() {
                     goto = Some((s.x, s.z));
                 }
                 if ui.small_button("✕").clicked() {
@@ -576,13 +640,40 @@ fn project_panel(ui: &mut egui::Ui, editor: &mut Editor, catalog: &Catalog, view
     }
 }
 
+/// A dialog window: `contents` draws it and says whether it is finished. Returns that.
+fn modal(ctx: &egui::Context, title: &str, contents: impl FnOnce(&mut egui::Ui) -> bool) -> bool {
+    let mut done = false;
+    egui::Window::new(title).collapsible(false).show(ctx, |ui| done = contents(ui));
+    done
+}
+
+/// A cache name field, with where that cache goes and whether one is there already. Returns the
+/// name made usable as a directory name (empty when it cannot be).
+fn cache_name_field(ui: &mut egui::Ui, name: &mut String) -> String {
+    ui.horizontal(|ui| {
+        ui.label("Cache name");
+        ui.text_edit_singleline(name);
+    });
+    let clean = clean_name(name);
+    if !clean.is_empty() {
+        let out = builds::cache_dir_of(&clean);
+        ui.label(format!("Into: {}", out.display()));
+        if out.exists() {
+            ui.colored_label(egui::Color32::YELLOW, "A cache of that name exists and will be replaced.");
+        }
+    }
+    clean
+}
+
 fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
-    if let Some(mut name) = state.new_project.take() {
-        let mut keep = true;
-        egui::Window::new("New project").collapsible(false).show(ctx, |ui| {
+    let mut dialog = state.dialog.take();
+    let done = match &mut dialog {
+        None => false,
+        Some(Dialog::NewProject(name)) => modal(ctx, "New project", |ui| {
             ui.label("Name");
-            ui.text_edit_singleline(&mut name);
-            let clean = clean_name(&name);
+            ui.text_edit_singleline(name);
+            let clean = clean_name(name);
+            let mut done = false;
             ui.horizontal(|ui| {
                 if ui.add_enabled(!clean.is_empty(), egui::Button::new("Create")).clicked() {
                     let path = MapProject::path_of(&clean);
@@ -594,104 +685,67 @@ fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
                         editor.switch_project(project, path);
                         editor.save();
                     }
-                    keep = false;
+                    done = true;
                 }
-                if ui.button("Cancel").clicked() {
-                    keep = false;
-                }
+                done |= ui.button("Cancel").clicked();
             });
-        });
-        if keep {
-            state.new_project = Some(name);
+            done
+        }),
+        Some(Dialog::Compile { name, then_play }) => {
+            let (title, about, button) = match then_play {
+                None => (
+                    "Compile to a new cache",
+                    "Builds a full copy of the base cache with this project's edits. The base cache is only read.".to_string(),
+                    "Compile",
+                ),
+                Some(_) => (
+                    "Create a cache to play on?",
+                    format!(
+                        "The project \u{201c}{}\u{201d} has no cache yet. Playing it compiles a new cache from the base cache with this project's edits (the base cache is only read), then starts the game on it.",
+                        editor.project.name
+                    ),
+                    "Create cache and play",
+                ),
+            };
+            let then_play = *then_play;
+            modal(ctx, title, |ui| {
+                ui.label(about);
+                ui.label(format!("Base: {}", editor.base().dir().display()));
+                let clean = cache_name_field(ui, name);
+                let mut done = false;
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(!clean.is_empty(), egui::Button::new(button)).clicked() {
+                        state.job = Some(start_compile(editor, clean.clone(), then_play));
+                        done = true;
+                    }
+                    done |= ui.button("Cancel").clicked();
+                });
+                done
+            })
         }
-    }
-
-    if let Some(mut name) = state.compile_dialog.take() {
-        let mut keep = true;
-        egui::Window::new("Compile to a new cache").collapsible(false).show(ctx, |ui| {
-            ui.label("Builds a full copy of the base cache with this project's edits. The base cache is only read.");
-            ui.label(format!("Base: {}", editor.base_dir.display()));
-            ui.horizontal(|ui| {
-                ui.label("Cache name");
-                ui.text_edit_singleline(&mut name);
-            });
-            let clean = clean_name(&name);
-            let out = builds::cache_dir_of(&clean);
-            if !clean.is_empty() {
-                ui.label(format!("Into: {}", out.display()));
-                if out.exists() {
-                    ui.colored_label(egui::Color32::YELLOW, "A cache of that name exists and will be replaced.");
-                }
-            }
-            ui.horizontal(|ui| {
-                if ui.add_enabled(!clean.is_empty(), egui::Button::new("Compile")).clicked() {
-                    state.job = Some(start_compile(editor, clean.clone(), None));
-                    keep = false;
-                }
-                if ui.button("Cancel").clicked() {
-                    keep = false;
-                }
-            });
-        });
-        if keep {
-            state.compile_dialog = Some(name);
+        Some(Dialog::Rebuild { name, spawn }) => {
+            let (name, spawn) = (name.clone(), *spawn);
+            modal(ctx, "Rebuild the map before playing?", |ui| {
+                ui.label(format!("You have edited \u{201c}{}\u{201d} since its cache \u{201c}{name}\u{201d} was built.", editor.project.name));
+                ui.label("Rebuilding takes a moment and puts your latest edits in the game.");
+                let mut done = false;
+                ui.horizontal(|ui| {
+                    if ui.button("Rebuild and play").clicked() {
+                        state.job = Some(start_compile(editor, name.clone(), Some(spawn)));
+                        done = true;
+                    }
+                    if ui.button("Play the last build").clicked() {
+                        launch(editor, &builds::cache_dir_of(&name), spawn);
+                        done = true;
+                    }
+                    done |= ui.button("Cancel").clicked();
+                });
+                done
+            })
         }
-    }
-
-    if let Some((mut name, spawn)) = state.play_dialog.take() {
-        let mut keep = true;
-        egui::Window::new("Create a cache to play on?").collapsible(false).show(ctx, |ui| {
-            ui.label(format!("The project \u{201c}{}\u{201d} has no cache yet.", editor.project.name));
-            ui.label("Playing it compiles a new cache from the base cache with this project's edits (the base cache is only read), then starts the game on it.");
-            ui.horizontal(|ui| {
-                ui.label("Cache name");
-                ui.text_edit_singleline(&mut name);
-            });
-            let clean = clean_name(&name);
-            let out = builds::cache_dir_of(&clean);
-            if !clean.is_empty() {
-                ui.label(format!("Into: {}", out.display()));
-                if out.exists() {
-                    ui.colored_label(egui::Color32::YELLOW, "A cache of that name exists and will be replaced.");
-                }
-            }
-            ui.horizontal(|ui| {
-                if ui.add_enabled(!clean.is_empty(), egui::Button::new("Create cache and play")).clicked() {
-                    state.job = Some(start_compile(editor, clean.clone(), Some(spawn)));
-                    keep = false;
-                }
-                if ui.button("Cancel").clicked() {
-                    keep = false;
-                }
-            });
-        });
-        if keep {
-            state.play_dialog = Some((name, spawn));
-        }
-    }
-
-    if let Some((name, spawn)) = state.rebuild_dialog.take() {
-        let mut keep = true;
-        egui::Window::new("Rebuild the map before playing?").collapsible(false).show(ctx, |ui| {
-            ui.label(format!("You have edited \u{201c}{}\u{201d} since its cache \u{201c}{name}\u{201d} was built.", editor.project.name));
-            ui.label("Rebuilding takes a moment and puts your latest edits in the game.");
-            ui.horizontal(|ui| {
-                if ui.button("Rebuild and play").clicked() {
-                    state.job = Some(start_compile(editor, name.clone(), Some(spawn)));
-                    keep = false;
-                }
-                if ui.button("Play the last build").clicked() {
-                    launch(editor, &builds::cache_dir_of(&name), spawn);
-                    keep = false;
-                }
-                if ui.button("Cancel").clicked() {
-                    keep = false;
-                }
-            });
-        });
-        if keep {
-            state.rebuild_dialog = Some((name, spawn));
-        }
+    };
+    if !done {
+        state.dialog = dialog;
     }
 
     if let Some(job) = &state.job {
@@ -712,36 +766,31 @@ fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
         });
     }
 
-    let mut close = false;
-    if let Some(result) = &state.compiled {
-        egui::Window::new("Compiled").collapsible(false).show(ctx, |ui| {
-            match result {
-                Ok(m) => {
-                    ui.label(format!("Built cache \u{201c}{}\u{201d}: {} squares, {} NPC spawns, {} new icon objects.", m.name, m.squares, m.npc_spawns, m.marker_defs));
-                    ui.label(builds::cache_dir_of(&m.name).display().to_string());
-                    ui.horizontal(|ui| {
-                        if ui.button("Play on it (set active)").clicked() {
-                            match active::set_active(&Selection::Dir(builds::cache_dir_of(&m.name))) {
-                                Ok(()) => editor.status = format!("The game will read {} next time it starts", m.name),
-                                Err(e) => editor.status = format!("could not choose the cache: {e}"),
-                            }
-                            close = true;
-                        }
-                        if ui.button("Close").clicked() {
-                            close = true;
-                        }
-                    });
+    let Some(result) = &state.compiled else { return };
+    let mut make_active = None;
+    let closed = modal(ctx, "Compiled", |ui| match result {
+        Ok(m) => {
+            ui.label(format!("Built cache \u{201c}{}\u{201d}: {} squares, {} NPC spawns, {} new icon objects.", m.name, m.squares, m.npc_spawns, m.marker_defs));
+            ui.label(builds::cache_dir_of(&m.name).display().to_string());
+            let mut done = false;
+            ui.horizontal(|ui| {
+                if ui.button("Play on it (set active)").clicked() {
+                    make_active = Some(m.name.clone());
+                    done = true;
                 }
-                Err(e) => {
-                    ui.colored_label(egui::Color32::LIGHT_RED, format!("The compile failed: {e}"));
-                    if ui.button("Close").clicked() {
-                        close = true;
-                    }
-                }
-            }
-        });
+                done |= ui.button("Close").clicked();
+            });
+            done
+        }
+        Err(e) => {
+            ui.colored_label(egui::Color32::LIGHT_RED, format!("The compile failed: {e}"));
+            ui.button("Close").clicked()
+        }
+    });
+    if let Some(name) = make_active {
+        set_active(editor, state, &Selection::Dir(builds::cache_dir_of(&name)), format!("The game will read {name} next time it starts"));
     }
-    if close {
+    if closed {
         state.compiled = None;
     }
 }
@@ -751,13 +800,13 @@ pub fn clean_name(name: &str) -> String {
     name.trim().chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect()
 }
 
-fn start_compile(editor: &mut Editor, name: String, then_play: Option<Option<(i32, i32)>>) -> CompileJob {
+fn start_compile(editor: &mut Editor, name: String, then_play: Option<Spawn>) -> CompileJob {
     if editor.dirty {
         editor.save();
     }
     let (tx, rx) = mpsc::channel();
     let project = editor.project.clone();
-    let base = editor.base_dir.clone();
+    let base = editor.base().dir().to_path_buf();
     let out = builds::cache_dir_of(&name);
     std::thread::spawn(move || {
         let progress = tx.clone();
@@ -778,6 +827,7 @@ fn poll_job(state: &mut UiState, editor: &mut Editor) {
             JobMessage::Done(result) => {
                 let then_play = job.then_play;
                 state.job = None;
+                state.builds_epoch += 1;
                 match &result {
                     Ok(m) => {
                         editor.status = format!("Compiled cache {}", m.name);
@@ -811,8 +861,7 @@ fn world_labels(ctx: &egui::Context, painter: &egui::Painter, editor: &Editor, c
     };
     for s in &editor.project.npc_spawns {
         let Some(p) = screen(s.x, s.z, 2.1) else { continue };
-        let name = catalog.npc_name(&s.npc);
-        painter.text(p, egui::Align2::CENTER_BOTTOM, name, egui::FontId::proportional(13.0), egui::Color32::from_rgb(255, 160, 40));
+        painter.text(p, egui::Align2::CENTER_BOTTOM, catalog.npc_name(&s.npc), egui::FontId::proportional(13.0), egui::Color32::from_rgb(255, 160, 40));
     }
     for &((x, z), area) in &view.icons.0 {
         let Some(p) = screen(x, z, 1.1) else { continue };

@@ -129,10 +129,9 @@ impl RefTable {
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
         let wide = self.protocol >= 7;
+        // a u16, or in protocol 7 a "big smart": 31 bits with the top bit set when it does not fit
         let wr = |out: &mut Vec<u8>, v: u32| {
-            if !wide {
-                out.extend_from_slice(&(v as u16).to_be_bytes());
-            } else if v < 0x8000 {
+            if !wide || v < 0x8000 {
                 out.extend_from_slice(&(v as u16).to_be_bytes());
             } else {
                 out.extend_from_slice(&(v | 0x8000_0000).to_be_bytes());

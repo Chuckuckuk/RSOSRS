@@ -4,7 +4,9 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
+use osrs_cache::config::ObjectDef;
 use osrs_cache::minimap::{MapIcon, MinimapSource};
+use osrs_map_editor::project::MarkerDef;
 use osrs_cache::textures::Texture;
 use osrs_cache::{idx, Cache, Index};
 use std::collections::HashMap;
@@ -13,9 +15,9 @@ use std::collections::HashMap;
 pub struct MinimapPreview {
     pub open: bool,
     cache: &'static Cache,
-    /// The definitions, and how many minted markers the project had when they were decoded (a new
-    /// one needs them decoded again to show its icon).
-    source: Option<(usize, MinimapSource<'static>)>,
+    /// The definitions, and the project's minted markers they include (a new one has to be added
+    /// for its icon to show).
+    source: Option<(Vec<MarkerDef>, MinimapSource<'static>)>,
     pub square: Option<(i32, i32)>,
     pub texture: Option<egui::TextureHandle>,
     pub icons: Vec<MapIcon>,
@@ -26,14 +28,19 @@ impl MinimapPreview {
         MinimapPreview { open: true, cache, source: None, square: None, texture: None, icons: Vec::new() }
     }
 
-    /// Draws square `square` again if it is not the one shown or `stale`.
-    pub fn refresh(&mut self, ctx: &egui::Context, square: (i32, i32), stale: bool, markers: usize) {
+    /// Draws square `square` again if it is not the one shown or `stale`. `defs` are the base's
+    /// object definitions (decoded once, by the catalog); the project's `markers` go in with them.
+    pub fn refresh(&mut self, ctx: &egui::Context, square: (i32, i32), stale: bool, defs: &HashMap<u32, ObjectDef>, markers: &[MarkerDef]) {
         if !stale && self.square == Some(square) && self.texture.is_some() {
             return;
         }
-        if self.source.as_ref().is_none_or(|(n, _)| *n != markers) {
-            match MinimapSource::new(self.cache) {
-                Ok(source) => self.source = Some((markers, source)),
+        if self.source.as_ref().is_none_or(|(m, _)| m != markers) {
+            let mut objects = defs.clone();
+            for m in markers {
+                objects.insert(m.id, ObjectDef::decode(m.id, &m.encode()));
+            }
+            match MinimapSource::with_objects(self.cache, objects) {
+                Ok(source) => self.source = Some((markers.to_vec(), source)),
                 Err(e) => {
                     eprintln!("[editor] minimap: {e}");
                     return;

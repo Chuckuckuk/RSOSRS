@@ -14,7 +14,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-const SECTOR: u64 = 520;
+const SECTOR: u64 = crate::cache::SECTOR as u64;
 
 /// Whether `name` is one of a cache's own files (the data file or an index).
 pub fn is_cache_file(name: &str) -> bool {
@@ -33,7 +33,7 @@ impl CacheWriter {
         if to.exists() {
             return fmt_err(format!("{} already exists", to.display()));
         }
-        if !from.join("main_file_cache.dat2").exists() {
+        if !crate::active::is_cache_dir(from) {
             return fmt_err(format!("{} holds no cache", from.display()));
         }
         std::fs::create_dir_all(to)?;
@@ -48,13 +48,9 @@ impl CacheWriter {
     }
 
     /// Opens an existing cache directory for writing.
-    pub fn open(dir: &Path) -> Result<CacheWriter> {
+    fn open(dir: &Path) -> Result<CacheWriter> {
         let dat = OpenOptions::new().read(true).write(true).open(dir.join("main_file_cache.dat2"))?;
         Ok(CacheWriter { dir: dir.to_path_buf(), dat })
-    }
-
-    pub fn dir(&self) -> &Path {
-        &self.dir
     }
 
     /// Stores `container` (raw, as [`crate::container::encode`] makes it) as `archive/group`.

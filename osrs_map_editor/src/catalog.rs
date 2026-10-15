@@ -4,15 +4,35 @@ use bevy::prelude::*;
 use osrs_cache::config::{Configs, ObjectDef};
 use osrs_cache::npc::NpcDef;
 use osrs_cache::Cache;
-use osrs_core::data::{cache_npc_id, cache_npc_key, Registry};
+use osrs_core::data::{cache_npc_id, Registry};
 use std::collections::{BTreeMap, HashMap};
 
 /// An object the palette can place.
 pub struct ObjectEntry {
     pub id: u32,
     pub name: String,
+    /// `name` in lower case, for searching.
+    pub name_lower: String,
     /// The shape it is placed as unless told otherwise (see [`default_kind`]).
     pub kind: u8,
+}
+
+/// What the palette's search box asks for: a name containing it (any case), or an id equal to it.
+pub struct Search {
+    lower: String,
+    id: Option<u32>,
+}
+
+impl Search {
+    pub fn new(text: &str) -> Search {
+        let text = text.trim();
+        Search { lower: text.to_lowercase(), id: text.parse().ok() }
+    }
+
+    /// Whether `name_lower` (a name already in lower case) or `id` matches.
+    pub fn matches(&self, name_lower: &str, id: Option<u32>) -> bool {
+        self.lower.is_empty() || name_lower.contains(&self.lower) || (id.is_some() && id == self.id)
+    }
 }
 
 /// An NPC the palette can place: every NPC the cache can draw, plus the curated ones in
@@ -45,8 +65,9 @@ pub struct Catalog {
     pub resources: BTreeMap<u32, String>,
     /// Every placeable NPC, one per model, by name, level and cache id.
     pub npcs: Vec<NpcEntry>,
-    /// Index into `npcs` by spawn key.
+    /// Index into `npcs` by spawn key, and by cache id.
     npc_index: HashMap<String, usize>,
+    npc_by_cache: HashMap<u32, usize>,
     /// The palette's rows: `npcs` with the same name and level together.
     pub npc_groups: Vec<NpcGroup>,
     /// The cache's definitions of the placeable NPCs, for drawing their thumbnails.
@@ -58,12 +79,37 @@ pub struct Catalog {
 /// recolours, the versions in other places).
 pub struct NpcGroup {
     pub name: String,
+    /// `name` in lower case, for searching.
+    pub name_lower: String,
     pub combat_level: i32,
     /// Indices into [`Catalog::npcs`].
     pub members: Vec<usize>,
     /// Whether any of them has combat stats.
     pub has_stats: bool,
 }
+
+impl NpcGroup {
+    /// Its name, and its combat level when it has one: "Bouncer (level 137)".
+    pub fn label(&self) -> String {
+        if self.combat_level > 0 {
+            format!("{} (level {})", self.name, self.combat_level)
+        } else {
+            self.name.clone()
+        }
+    }
+}
+
+/// The mark after an NPC with combat stats.
+pub fn star(has_stats: bool) -> &'static str {
+    if has_stats {
+        "  \u{2605}"
+    } else {
+        ""
+    }
+}
+
+/// Facing names by quarter turn.
+pub const FACINGS: [&str; 4] = ["N", "E", "S", "W"];
 
 /// The shape an object is placed as: the first model type its definition lists (walls list 0,
 /// floor decorations 22...), else 10, free-standing scenery.
@@ -74,14 +120,13 @@ pub fn default_kind(def: &ObjectDef) -> u8 {
     }
 }
 
-/// Footprint in tiles of `def` turned `orientation` quarter turns: odd turns swap its sides.
+/// Footprint in tiles of `def` turned `orientation` quarter turns (`osrs_cache::scene::footprint`),
+/// one tile when the definition is unknown.
 pub fn footprint(def: Option<&ObjectDef>, orientation: u8) -> (i32, i32) {
-    let (w, h) = def.map_or((1, 1), |d| (d.size_x.max(1) as i32, d.size_y.max(1) as i32));
-    if orientation & 1 == 1 {
-        (h, w)
-    } else {
-        (w, h)
-    }
+    def.map_or((1, 1), |d| {
+        let (w, h) = osrs_cache::scene::footprint(d, orientation);
+        (w as i32, h as i32)
+    })
 }
 
 /// What the shape numbers mean, for the shape picker.
@@ -107,11 +152,15 @@ pub fn kind_name(kind: u8) -> &'static str {
 
 impl Catalog {
     pub fn load(base: &Cache) -> osrs_cache::Result<Catalog> {
-        let defs = Configs::new(base)?.objects()?;
+        let configs = Configs::new(base)?;
+        let defs = configs.objects()?;
         let mut objects: Vec<ObjectEntry> = defs
             .values()
             .filter(|d| !d.models.is_empty())
-            .map(|d| ObjectEntry { id: d.id, name: display_name(d), kind: default_kind(d) })
+            .map(|d| {
+                let name = display_name(d);
+                ObjectEntry { id: d.id, name_lower: name.to_lowercase(), name, kind: default_kind(d) }
+            })
             .collect();
         objects.sort_by_key(|o| o.id);
 
@@ -125,18 +174,15 @@ impl Catalog {
         let mut npcs = Vec::new();
         // every NPC the cache can draw: it has models of its own (not one that turns into others
         // by game state) and a standing animation
-        let npc_defs: HashMap<u32, NpcDef> = Configs::new(base)?
+        let npc_defs: HashMap<u32, NpcDef> = configs
             .npcs()?
             .into_iter()
             .filter(|(_, d)| !d.models.is_empty() && d.stand.is_some() && !d.name.is_empty() && d.name != "null")
             .collect();
         for def in npc_defs.values() {
-            // the curated monster's own model is placed under its id; its other models (and NPCs
-            // nobody has curated) as `cache:<id>`
             let curated = registry.npc_for_cache_id(def.id);
-            let own_model = curated.is_some_and(|c| c.appearance == Some(def.id));
             npcs.push(NpcEntry {
-                key: if own_model { curated.map(|c| c.id.clone()).unwrap_or_default() } else { cache_npc_key(def.id) },
+                key: registry.spawn_key_for_cache_npc(def.id),
                 name: strip_tags(&def.name),
                 combat_level: curated.map_or(def.combat_level.map_or(0, i32::from), |c| c.combat_level),
                 cache_id: Some(def.id),
@@ -149,8 +195,12 @@ impl Catalog {
         }
         npcs.sort_by(|a, b| a.name.cmp(&b.name).then(a.combat_level.cmp(&b.combat_level)).then(a.cache_id.cmp(&b.cache_id)));
         let mut npc_index = HashMap::new();
+        let mut npc_by_cache = HashMap::new();
         for (i, n) in npcs.iter().enumerate() {
             npc_index.entry(n.key.clone()).or_insert(i);
+            if let Some(id) = n.cache_id {
+                npc_by_cache.insert(id, i);
+            }
         }
         // one palette row per name and level; the models under it are picked from a list
         let mut npc_groups: Vec<NpcGroup> = Vec::new();
@@ -160,7 +210,13 @@ impl Catalog {
                     g.members.push(i);
                     g.has_stats |= n.has_stats;
                 }
-                _ => npc_groups.push(NpcGroup { name: n.name.clone(), combat_level: n.combat_level, members: vec![i], has_stats: n.has_stats }),
+                _ => npc_groups.push(NpcGroup {
+                    name: n.name.clone(),
+                    name_lower: n.name.to_lowercase(),
+                    combat_level: n.combat_level,
+                    members: vec![i],
+                    has_stats: n.has_stats,
+                }),
             }
         }
 
@@ -169,17 +225,15 @@ impl Catalog {
             .filter_map(|(id, (sprite, name))| Some(AreaEntry { id: u16::try_from(id).ok()?, name, sprite }))
             .collect();
         areas.sort_by_key(|a| a.id);
-        Ok(Catalog { defs, objects, resources, npcs, npc_index, npc_groups, npc_defs, areas })
+        Ok(Catalog { defs, objects, resources, npcs, npc_index, npc_by_cache, npc_groups, npc_defs, areas })
     }
 
     /// The palette entry a spawn's `npc` key names.
     pub fn npc(&self, key: &str) -> Option<&NpcEntry> {
-        self.npc_index.get(key).map(|&i| &self.npcs[i]).or_else(|| {
-            // a cache NPC whose model has since become a curated monster's own is listed under
-            // the curated id
-            let id = cache_npc_id(key)?;
-            self.npcs.iter().find(|n| n.cache_id == Some(id))
-        })
+        // a cache NPC whose model has since become a curated monster's own is listed under the
+        // curated id, so it is also found by its cache id
+        let i = self.npc_index.get(key).or_else(|| self.npc_by_cache.get(&cache_npc_id(key)?))?;
+        Some(&self.npcs[*i])
     }
 
     /// The NPCs of palette row `group`.

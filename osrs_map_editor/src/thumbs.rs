@@ -25,14 +25,19 @@ pub struct NpcThumbs {
     /// The pictures uploaded to the egui context showing them; a texture belongs to one context,
     /// so these go when the picker window does.
     textures: HashMap<u32, egui::TextureHandle>,
+    /// Pictures that may still be drawn this frame.
     budget: usize,
-    frame: u64,
 }
 
 impl NpcThumbs {
     pub fn new(cache: &'static Cache) -> NpcThumbs {
         let texture_hsl = Configs::new(cache).and_then(|c| c.texture_average_hsl()).unwrap_or_default();
-        NpcThumbs { cache, texture_hsl, pictures: HashMap::new(), textures: HashMap::new(), budget: PER_FRAME, frame: 0 }
+        NpcThumbs { cache, texture_hsl, pictures: HashMap::new(), textures: HashMap::new(), budget: PER_FRAME }
+    }
+
+    /// Call once a frame, before [`NpcThumbs::get`]: a few more pictures may be drawn.
+    pub fn begin_frame(&mut self) {
+        self.budget = PER_FRAME;
     }
 
     /// Forgets the uploaded textures (their context is gone); the pictures stay.
@@ -41,12 +46,8 @@ impl NpcThumbs {
     }
 
     /// The thumbnail of `def` in `ctx`, if it is drawn; `None` while it waits its turn or when the
-    /// model cannot be built. `frame` is a number that changes every frame (it refills the budget).
-    pub fn get(&mut self, ctx: &egui::Context, def: &NpcDef, frame: u64) -> Option<egui::TextureHandle> {
-        if frame != self.frame {
-            self.frame = frame;
-            self.budget = PER_FRAME;
-        }
+    /// model cannot be built.
+    pub fn get(&mut self, ctx: &egui::Context, def: &NpcDef) -> Option<egui::TextureHandle> {
         if let Some(texture) = self.textures.get(&def.id) {
             return Some(texture.clone());
         }
@@ -69,9 +70,7 @@ impl NpcThumbs {
 
 /// Linear to sRGB, one channel, 0..=255.
 fn srgb(c: f32) -> u8 {
-    let c = c.clamp(0.0, 1.0);
-    let s = if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
-    (s * 255.0 + 0.5) as u8
+    (Srgba::gamma_function_inverse(c.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8
 }
 
 /// `mesh` drawn into a `size` x `size` RGBA picture (transparent where it is not).

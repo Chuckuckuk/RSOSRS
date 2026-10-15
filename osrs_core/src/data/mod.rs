@@ -26,10 +26,12 @@ pub use doors::{DoorDef, DoorLeafDef, DoorSwing, LeafMove};
 pub use gathering::{DepletionDef, GatheringNodeDef, NodeLocDef, PetDropDef, Requirement, ToolDef};
 pub use items::{AmmoDef, AmmoWeight, EquipSlot, ItemDef, SetDef, SpecialAttackDef, StanceDef, StanceKind, WeaponDef};
 pub use npcs::{
-    cache_npc_def, cache_npc_id, cache_npc_key, cache_npc_variant, covers_cache_npc, AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels,
-    NpcMovementDef, NpcSounds, RotationDef, SummonDef, CACHE_NPC_PREFIX,
+    cache_npc_def, cache_npc_id, cache_npc_key, cache_npc_variant, AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef,
+    NpcLevels, NpcMovementDef, NpcSounds, RotationDef, SummonDef,
 };
-pub use spawns::{read_npc_spawns, write_npc_spawns, NpcSpawnPoint, NPC_SPAWNS_FILE};
+pub use spawns::{
+    default_npc_spawns, read_json_file, read_npc_spawns, resolve_spawns, write_npc_spawns, CacheNpc, NpcSpawnPoint, ResolvedSpawns,
+};
 pub use prayers::PrayerDef;
 pub use scenario::{builtin_scenarios, load_scenario, InventoryStack, NpcSpawn, PlayerSetup, ScenarioDef, SkillLevelsDef};
 pub use spells::{LevelScaling, SpellDef};

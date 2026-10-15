@@ -1,12 +1,12 @@
 //! What clicks and keys do in the world, and the outlines drawn over it.
 
 use crate::catalog::{footprint, Catalog};
-use crate::editor::{Brush, Editor, Selected, Tool};
+use crate::editor::{world_tile, Brush, Editor, Selected, Tool};
 use crate::world::{placing_object, Hover};
 use bevy::prelude::*;
 use osrs_cache::locs::Placement;
-use osrs_core::data::NpcSpawnPoint;
 use osrs_cache::squares::SQUARE;
+use osrs_core::data::NpcSpawnPoint;
 use osrs_render::streaming::{square_of, StreamedWorld};
 
 const HOVER: Color = Color::srgb(1.0, 1.0, 1.0);
@@ -187,30 +187,35 @@ pub fn icons_in_view(editor: &mut Editor, catalog: &Catalog, world: &StreamedWor
     let mut out = Vec::new();
     let squares: Vec<(i32, i32)> = world.squares().collect();
     for square in squares {
-        for p in editor.placements(square) {
-            if p.plane != 0 {
-                continue;
-            }
+        for p in editor.placements(square).iter().filter(|p| p.plane == 0) {
             let icon = catalog
                 .defs
                 .get(&p.id)
                 .and_then(|d| d.map_icon)
                 .or_else(|| editor.project.marker_defs.iter().find(|m| m.id == p.id).map(|m| m.map_icon));
             if let Some(area) = icon.filter(|&a| a != 0xFFFF) {
-                out.push(((square.0 * SQUARE + p.x as i32, square.1 * SQUARE + p.z as i32), area));
+                out.push((world_tile(square, p), area));
             }
         }
     }
     out
 }
 
-/// Icons of the loaded squares, recomputed when the world or the project changes.
+/// Icons of the loaded squares, recomputed when the squares loaded or the project change.
 #[derive(Resource, Default)]
 pub struct IconsInView(pub Vec<((i32, i32), u16)>);
 
-pub fn track_icons(mut editor: ResMut<Editor>, catalog: Res<Catalog>, world: Res<StreamedWorld>, mut icons: ResMut<IconsInView>) {
-    if world.is_changed() || editor.is_changed() {
-        icons.0 = icons_in_view(&mut editor, &catalog, &world);
+pub fn track_icons(
+    mut editor: ResMut<Editor>,
+    catalog: Res<Catalog>,
+    world: Res<StreamedWorld>,
+    mut icons: ResMut<IconsInView>,
+    mut seen: Local<Option<u64>>,
+) {
+    if world.is_changed() || *seen != Some(editor.generation) {
+        *seen = Some(editor.generation);
+        // (working out placements fills the editor's cache of them; that is not an edit)
+        icons.0 = icons_in_view(editor.bypass_change_detection(), &catalog, &world);
     }
 }
 
@@ -224,7 +229,8 @@ pub fn draw_marks(mut gizmos: Gizmos, editor: Res<Editor>, catalog: Res<Catalog>
     match &editor.selected {
         Some(Selected::Placement { square, placement }) => {
             let (w, h) = footprint(catalog.defs.get(&placement.id), placement.orientation);
-            outline(&mut gizmos, &world, square.0 * SQUARE + placement.x as i32, square.1 * SQUARE + placement.z as i32, w, h, SELECTED);
+            let (x, z) = world_tile(*square, placement);
+            outline(&mut gizmos, &world, x, z, w, h, SELECTED);
         }
         Some(Selected::Npc(i)) => {
             if let Some(s) = editor.project.npc_spawns.get(*i) {

@@ -6,7 +6,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-const SECTOR: usize = 520;
+/// Bytes in a data-file sector (header and data).
+pub(crate) const SECTOR: usize = 520;
 
 pub struct Cache {
     dir: PathBuf,

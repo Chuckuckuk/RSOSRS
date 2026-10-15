@@ -44,9 +44,8 @@ use std::path::PathBuf;
 struct Args {
     project: String,
     base: Option<PathBuf>,
-    at: (i32, i32),
-    /// Whether `--at` was given (rather than the default).
-    at_given: bool,
+    /// The tile to start at (`--at`); the default is Lumbridge.
+    at: Option<(i32, i32)>,
     compile: Option<String>,
     activate: bool,
     play: bool,
@@ -54,7 +53,7 @@ struct Args {
 
 fn args() -> Args {
     let mut out =
-        Args { project: "default".into(), base: None, at: (3222, 3218), at_given: false, compile: None, activate: false, play: false };
+        Args { project: "default".into(), base: None, at: None, compile: None, activate: false, play: false };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -64,10 +63,9 @@ fn args() -> Args {
                 let v = it.next().unwrap_or_else(|| usage("--at needs x,z"));
                 let p: Vec<i32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
                 match p[..] {
-                    [x, z] => out.at = (x, z),
+                    [x, z] => out.at = Some((x, z)),
                     _ => usage("--at needs x,z"),
                 }
-                out.at_given = true;
             }
             "--compile" => out.compile = Some(it.next().unwrap_or_else(|| usage("--compile needs a cache name"))),
             "--activate" => out.activate = true,
@@ -151,7 +149,7 @@ fn main() {
             println!("[editor] the game now reads {}", dir.display());
         }
         if args.play {
-            let how = play::launch(&dir, args.at_given.then_some(args.at)).unwrap_or_else(|e| fail("could not play", e));
+            let how = play::launch(&dir, args.at).unwrap_or_else(|e| fail("could not play", e));
             println!("[editor] started the game on {} ({how})", dir.display());
         }
         return;
@@ -165,7 +163,7 @@ fn main() {
     let catalog = catalog::Catalog::load(&base).unwrap_or_else(|e| fail("could not read the cache's definitions", e));
     let textures = osrs_cache::textures::load_textures(&base).unwrap_or_else(|e| fail("could not read the cache's textures", e));
     let picker = world::EditorPicker::new(&catalog);
-    let mut editor = editor::Editor::new(project, path, base, base_dir.clone(), Arc::clone(&overlay));
+    let mut editor = editor::Editor::new(project, path, base, Arc::clone(&overlay));
     editor.status = format!("{} objects, {} NPCs, {} icons", catalog.objects.len(), catalog.npcs.len(), catalog.areas.len());
     let shared: &'static Cache = Box::leak(Box::new(open().with_overlay(Arc::clone(&overlay))));
     let stream = SquareStream::spawn_with_cache(open().with_overlay(overlay));
@@ -194,7 +192,8 @@ fn main() {
     .insert_resource(ui_state)
     // OSRS_ROOFS=0 starts with the planes above the edited one hidden (T toggles)
     .insert_resource(camera::ViewState { roofs: std::env::var("OSRS_ROOFS").map_or(true, |v| v != "0") })
-    .insert_resource(StartAt(args.at))
+    .insert_resource(StartAt(args.at.unwrap_or(editor::LUMBRIDGE)))
+    .init_resource::<world::Focus>()
     .init_resource::<StreamedWorld>()
     .init_resource::<MaterialCache>()
     .init_resource::<world::Hover>()
@@ -233,11 +232,12 @@ fn setup(mut commands: Commands, at: Res<StartAt>) {
 }
 
 /// `OSRS_SCREENSHOT=<path.png>`: save a screenshot after `OSRS_SCREENSHOT_DELAY` seconds (default
-/// 10) and exit, as `osrs_viewer` does.
+/// 10) and exit, as `osrs_viewer` does. Any other window open (the model picker) is saved too, as
+/// `<path>-2.png` and on.
 fn screenshot_and_exit(
     mut commands: Commands,
     time: Res<Time>,
-    picker: Res<picker::PickerWindow>,
+    others: Query<Entity, (With<Window>, Without<bevy::window::PrimaryWindow>)>,
     mut taken: Local<bool>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -247,10 +247,9 @@ fn screenshot_and_exit(
     let t = time.elapsed_secs();
     if !*taken && t > delay {
         *taken = true;
-        // the model picker's own window too, as <path>-picker.png
-        if let Some(window) = picker.window() {
-            let picker_path = path.strip_suffix(".png").map_or_else(|| format!("{path}-picker.png"), |p| format!("{p}-picker.png"));
-            commands.spawn(Screenshot::window(window)).observe(save_to_disk(picker_path));
+        let stem = path.strip_suffix(".png").unwrap_or(&path);
+        for (i, window) in others.iter().enumerate() {
+            commands.spawn(Screenshot::window(window)).observe(save_to_disk(format!("{stem}-{}.png", i + 2)));
         }
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
     }
