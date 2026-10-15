@@ -66,8 +66,14 @@ pub struct SquareLoader {
 }
 
 impl SquareLoader {
+    /// A loader reading the active cache (`Cache::open_default`).
     pub fn open() -> osrs_cache::Result<SquareLoader> {
-        let source = MapSource::open()?;
+        SquareLoader::from_cache(osrs_cache::Cache::open_default()?)
+    }
+
+    /// A loader reading `cache` (one with an overlay, say: the map editor's uncompiled edits).
+    pub fn from_cache(cache: osrs_cache::Cache) -> osrs_cache::Result<SquareLoader> {
+        let source = MapSource::from_cache(cache)?;
         let texture_hsl = Configs::new(source.cache())?.texture_average_hsl()?;
         Ok(SquareLoader { source, texture_hsl, models: HashMap::new(), items: None })
     }
@@ -195,11 +201,23 @@ pub struct SquareStream {
 }
 
 impl SquareStream {
+    /// A loading thread reading the active cache.
     pub fn spawn() -> SquareStream {
+        SquareStream::spawn_with(SquareLoader::open)
+    }
+
+    /// A loading thread reading `cache`.
+    pub fn spawn_with_cache(cache: osrs_cache::Cache) -> SquareStream {
+        SquareStream::spawn_with(move || SquareLoader::from_cache(cache))
+    }
+
+    /// A loading thread whose loader `make` builds (on that thread: a loader cannot move between
+    /// threads).
+    fn spawn_with(make: impl FnOnce() -> osrs_cache::Result<SquareLoader> + Send + 'static) -> SquareStream {
         let (request_tx, request_rx) = mpsc::channel::<Request>();
         let (result_tx, result_rx) = mpsc::channel();
         thread::spawn(move || {
-            let mut loader = match SquareLoader::open() {
+            let mut loader = match make() {
                 Ok(loader) => loader,
                 Err(e) => {
                     // nothing can be loaded; report every request as failed
@@ -352,6 +370,20 @@ impl StreamedWorld {
         let heights = if resident.bridges[lx * SQUARE as usize + lz] { &resident.deck_heights } else { &resident.heights };
         let at = |dx: usize, dz: usize| heights[(lx + dx) * CORNERS + lz + dz];
         Some([at(0, 0), at(1, 0), at(0, 1), at(1, 1)])
+    }
+
+    /// The four outer corners (south-west, south-east, north-east, north-west, so they draw as a
+    /// loop) in render space of the `w` x `h` block of tiles whose south-west tile is (`x`, `z`),
+    /// raised `lift` tiles off the ground, if its squares are loaded. A tile outline is a 1 x 1
+    /// block.
+    pub fn block_corners(&self, x: i32, z: i32, w: i32, h: i32, lift: f32) -> Option<[Vec3; 4]> {
+        let y = |tx: i32, tz: i32, corner: usize| self.tile_corners(tx, tz).map(|c| -(c[corner] as f32) / 128.0 + lift);
+        Some([
+            Vec3::new(x as f32, y(x, z, 0)?, -(z as f32)),
+            Vec3::new((x + w) as f32, y(x + w - 1, z, 1)?, -(z as f32)),
+            Vec3::new((x + w) as f32, y(x + w - 1, z + h - 1, 3)?, -((z + h) as f32)),
+            Vec3::new(x as f32, y(x, z + h - 1, 2)?, -((z + h) as f32)),
+        ])
     }
 
     /// Where an object `w` x `h` tiles placed with its south-west tile at (`x`, `z`) stands: the

@@ -6,7 +6,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-const SECTOR: usize = 520;
+/// Bytes in a data-file sector (header and data).
+pub(crate) const SECTOR: usize = 520;
 
 pub struct Cache {
     dir: PathBuf,
@@ -14,6 +15,8 @@ pub struct Cache {
     dat: Option<Mutex<File>>,
     idx: Mutex<HashMap<u8, Vec<(u32, u32)>>>,
     bundle: Option<std::sync::Arc<crate::bundle::Bundle>>,
+    /// Groups replaced in memory, answered before the files (see [`Cache::with_overlay`]).
+    overlay: Option<std::sync::Arc<crate::overlay::Overlay>>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +43,10 @@ pub struct Index {
 }
 
 impl Index {
+    pub(crate) fn new(archive: u8, revision: u32, groups: BTreeMap<u32, Group>, by_name: HashMap<i32, u32>) -> Index {
+        Index { archive, revision, groups, by_name }
+    }
+
     pub fn group_by_name(&self, name: &str) -> Option<&Group> {
         self.by_name.get(&name_hash(name)).and_then(|id| self.groups.get(id))
     }
@@ -49,28 +56,41 @@ impl Cache {
     pub fn open(dir: impl AsRef<Path>) -> Result<Cache> {
         let dir = dir.as_ref().to_path_buf();
         let dat = File::open(dir.join("main_file_cache.dat2"))?;
-        Ok(Cache { dir, dat: Some(Mutex::new(dat)), idx: Mutex::new(HashMap::new()), bundle: None })
+        Ok(Cache { dir, dat: Some(Mutex::new(dat)), idx: Mutex::new(HashMap::new()), bundle: None, overlay: None })
     }
 
     /// A cache that reads from `bundle` only.
     pub fn from_bundle(bundle: std::sync::Arc<crate::bundle::Bundle>) -> Cache {
-        Cache { dir: PathBuf::new(), dat: None, idx: Mutex::new(HashMap::new()), bundle: Some(bundle) }
+        Cache { dir: PathBuf::new(), dat: None, idx: Mutex::new(HashMap::new()), bundle: Some(bundle), overlay: None }
     }
 
-    /// `%USERPROFILE%\.runelite\jagexcache\oldschool\LIVE`, falling back to `~/jagexcache`.
+    /// This cache, answering reads of the groups `overlay` holds from it rather than from its
+    /// files (the map editor's uncompiled edits).
+    pub fn with_overlay(mut self, overlay: std::sync::Arc<crate::overlay::Overlay>) -> Cache {
+        self.overlay = Some(overlay);
+        self
+    }
+
+    /// The active cache (see [`crate::active`]): `OSRS_CACHE_DIR`, else the one chosen in
+    /// `~/.rsosrs/active_cache` (a map editor build), else the installed game's.
     pub fn open_default() -> Result<Cache> {
         // a program carrying its own cache (see `bundle`) reads that, not the installed game
         if let Some(bundle) = crate::bundle::installed() {
             return Ok(Cache::from_bundle(bundle));
         }
-        let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
-        for rel in [".runelite/jagexcache/oldschool/LIVE", "jagexcache/oldschool/LIVE"] {
-            let p = Path::new(&home).join(rel);
-            if p.join("main_file_cache.dat2").exists() {
-                return Cache::open(p);
-            }
+        match crate::active::active_dir() {
+            Some(dir) => Cache::open(dir),
+            None => Err(Error::Missing("no OSRS cache found under the home directory".into())),
         }
-        Err(Error::Missing("no OSRS cache found under the home directory".into()))
+    }
+
+    /// The installed game's cache, `%USERPROFILE%\.runelite\jagexcache\oldschool\LIVE` (falling
+    /// back to `~/jagexcache`), whichever cache is active.
+    pub fn open_live() -> Result<Cache> {
+        match crate::active::live_dir() {
+            Some(dir) => Cache::open(dir),
+            None => Err(Error::Missing("no OSRS cache found under the home directory".into())),
+        }
     }
 
     pub fn dir(&self) -> &Path {
@@ -99,10 +119,26 @@ impl Cache {
 
     /// Raw (still compressed/encrypted) container bytes of `index/group`.
     pub fn read_raw(&self, index: u8, group: u32) -> Result<Vec<u8>> {
+        self.with_raw(index, group, <[u8]>::to_vec)
+    }
+
+    /// `f` of the raw container of `index/group`. A container held in memory (an overlay's, a
+    /// bundle's) is lent to `f` as it is, not copied: the object definitions group alone is
+    /// several megabytes.
+    fn with_raw<R>(&self, index: u8, group: u32, f: impl FnOnce(&[u8]) -> R) -> Result<R> {
         crate::bundle::record(index, group);
-        if let Some(bundle) = &self.bundle {
-            return bundle.get(index, group).map(<[u8]>::to_vec).ok_or_else(|| crate::bundle::missing(index, group));
+        // groups replaced in memory (the map editor's uncompiled edits)
+        if let Some(raw) = self.overlay.as_ref().and_then(|o| o.get(index, group)) {
+            return Ok(f(&raw));
         }
+        if let Some(bundle) = &self.bundle {
+            return bundle.get(index, group).map(f).ok_or_else(|| crate::bundle::missing(index, group));
+        }
+        Ok(f(&self.read_sectors(index, group)?))
+    }
+
+    /// The container of `index/group` as the data file stores it, its sector chain followed.
+    fn read_sectors(&self, index: u8, group: u32) -> Result<Vec<u8>> {
         let (len, mut sector) = self.idx_entry(index, group)?;
         let len = len as usize;
         let mut out = Vec::with_capacity(len);
@@ -135,11 +171,11 @@ impl Cache {
 
     /// Decoded container bytes of `index/group`.
     pub fn read_group(&self, index: u8, group: u32) -> Result<Vec<u8>> {
-        container::decode(&self.read_raw(index, group)?, None)
+        self.read_group_keyed(index, group, None)
     }
 
     pub fn read_group_keyed(&self, index: u8, group: u32, key: Option<&xtea::Key>) -> Result<Vec<u8>> {
-        container::decode(&self.read_raw(index, group)?, key)
+        self.with_raw(index, group, |raw| container::decode(raw, key))?
     }
 
     /// Split a multi-file group into its files.
@@ -202,73 +238,40 @@ fn split_files(data: &[u8], files: &[FileEntry]) -> Result<Vec<(u32, Vec<u8>)>> 
 }
 
 fn parse_reference_table(archive: u8, data: &[u8]) -> Result<Index> {
-    let mut b = Buf::new(data);
-    let protocol = b.u8();
-    if !(5..=7).contains(&protocol) {
-        return fmt_err(format!("reference table protocol {protocol}"));
+    Ok(crate::reftable::RefTable::decode(data)?.to_index(archive))
+}
+
+/// Packs files into one group's data, the inverse of `split_files`: the files back to back (in the
+/// order the reference table lists them) and a one-chunk trailer of their sizes. A group of one
+/// file is just that file.
+pub fn join_files(files: &[&[u8]]) -> Vec<u8> {
+    if files.len() == 1 {
+        return files[0].to_vec();
     }
-    let revision = if protocol >= 6 { b.u32() } else { 0 };
-    let flags = b.u8();
-    let wide = protocol >= 7;
-    let rd = |b: &mut Buf| -> u32 {
-        if wide {
-            b.big_smart() as u32
-        } else {
-            b.u16() as u32
-        }
-    };
-    let count = rd(&mut b) as usize;
-    let mut groups: Vec<Group> = Vec::with_capacity(count);
-    let mut last = 0u32;
-    for _ in 0..count {
-        last = last.wrapping_add(rd(&mut b));
-        groups.push(Group { id: last, name_hash: 0, crc: 0, revision: 0, files: Vec::new() });
+    let mut out: Vec<u8> = files.iter().flat_map(|f| f.iter().copied()).collect();
+    if files.is_empty() {
+        return out;
     }
-    if flags & 1 != 0 {
-        for g in &mut groups {
-            g.name_hash = b.i32();
-        }
+    let mut prev = 0i32;
+    for f in files {
+        let size = f.len() as i32;
+        out.extend_from_slice(&size.wrapping_sub(prev).to_be_bytes());
+        prev = size;
     }
-    for g in &mut groups {
-        g.crc = b.u32();
+    out.push(1);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn joined_files_split_back_apart() {
+        let files: [&[u8]; 3] = [b"terrain", b"", b"locs!"];
+        let entries: Vec<FileEntry> = (0..3).map(|id| FileEntry { id, name_hash: 0 }).collect();
+        let back = split_files(&join_files(&files), &entries).unwrap();
+        assert_eq!(back.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>(), files);
+        assert_eq!(join_files(&[b"one"]), b"one");
     }
-    if flags & 8 != 0 {
-        b.pos += 4 * count;
-    }
-    if flags & 2 != 0 {
-        b.pos += 64 * count;
-    }
-    if flags & 4 != 0 {
-        b.pos += 8 * count;
-    }
-    for g in &mut groups {
-        g.revision = b.u32();
-    }
-    let mut counts = Vec::with_capacity(count);
-    for _ in 0..count {
-        counts.push(rd(&mut b) as usize);
-    }
-    for (g, &n) in groups.iter_mut().zip(&counts) {
-        let mut last = 0u32;
-        for _ in 0..n {
-            last = last.wrapping_add(rd(&mut b));
-            g.files.push(FileEntry { id: last, name_hash: 0 });
-        }
-    }
-    if flags & 1 != 0 {
-        for g in &mut groups {
-            for f in &mut g.files {
-                f.name_hash = b.i32();
-            }
-        }
-    }
-    let mut by_name = HashMap::new();
-    let mut map = BTreeMap::new();
-    for g in groups {
-        if flags & 1 != 0 {
-            by_name.insert(g.name_hash, g.id);
-        }
-        map.insert(g.id, g);
-    }
-    Ok(Index { archive, revision, groups: map, by_name })
 }

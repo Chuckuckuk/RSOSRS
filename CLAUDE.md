@@ -2,6 +2,24 @@
 
 Guidance for Claude Code in this repository. The codebase itself is documented in [`docs/`](docs/README.md).
 
+## Development principles
+
+- **Put code in the crate that owns the idea.**
+  - `osrs_cache` is the cache format only.
+  - `osrs_core::data` holds game data the server reads (NPCs, spawns).
+  - Tools (`osrs_map_editor`) hold their own concepts.
+  - A binary's `main.rs` wires things together; rules belong in a library.
+- **One rule, one place.** Before writing a helper, search for an existing one (`squares`, `scene`, `streaming`, `active`, `data`). When two crates need the same rule, move it down to the crate they share rather than copying it.
+- **No global state.** Pass what code depends on (a cache opened `with_overlay`, a stream given its cache) instead of process-wide statics or environment-variable overrides.
+- **Fix the mechanism, not the symptom.** Avoid frame-count timers, magic retries and special cases on shared code. Find the real trigger (a window resized, an edit made) and act on that.
+- **Do work when something changes, not every frame.** Keep the expensive result and redo it when a change counter says so (an edit generation, a list of changed squares). Don't re-read files, re-parse or re-filter inside per-frame UI or systems.
+- **Incremental over rebuild.** Read unchanging data (the base cache, definitions) once, and redo only what an edit touched.
+- **Keep state minimal.** Don't store what can be derived (a path the cache already knows). Remove dead code and public items nothing uses.
+- **Check facts against the source.**
+  - Game data comes from the OSRS wiki (infobox `?action=raw`) and the cache. Animation names come from RuneLite's `gameval`.
+  - Record where each value came from in `notes`.
+  - Test encoders and decoders against the real cache.
+
 ## Working with GitHub issues
 
 Issues live at <https://github.com/Chuckuckuk/RSOSRS/issues>. Use `gh` with `-R Chuckuckuk/RSOSRS`.

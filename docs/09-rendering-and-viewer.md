@@ -136,7 +136,8 @@ The client does not load a fixed block. It loads squares as the player walks.
 
 `StreamedWorld` methods: `spawn_square`, `attach(square, entity)` (despawn this with the square),
 `remove(square)` (returns the entities to despawn), `contains`, `squares`, and the ground queries
-`tile_corners(x, z)`, `ground_at(x, z)` and `surface_y(plane, x, z)`.
+`tile_corners(x, z)`, `block_corners(x, z, w, h, lift)` (the outline of a block of tiles, as the
+client's and the map editor's tile marks draw it), `ground_at(x, z)` and `surface_y(plane, x, z)`.
 
 `square_of(x, z)` is floor division by 64; `square_offset(square)` is a square's south-west corner
 in render space. Since render space is world tile space (with z flipped), squares are spawned at
@@ -219,5 +220,6 @@ cargo run -p osrs_viewer --release -- 49 49 3 3     # 3x3 squares (default)
 Environment: `OSRS_PLANE`, `OSRS_ROOFS=0|1`, `OSRS_LOOK=x,z,dist` (aim at a tile),
 `OSRS_SCREENSHOT=path.png` and `OSRS_SCREENSHOT_DELAY`.
 
-Its systems are `setup` (spawn the world and a `FlyCamera`), `fly_camera`, `view_controls`
+Its systems are `setup` (spawn the world and a `FlyCamera`), `fly_camera` (on
+[`osrs_render::fly`](../osrs_render/src/fly.rs), which the map editor flies with too), `view_controls`
 (planes and roofs, by toggling `Visibility` on `OnPlane` entities) and `screenshot_and_exit`.

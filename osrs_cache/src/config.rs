@@ -356,6 +356,19 @@ impl ObjectDef {
     }
 }
 
+/// The bytes of an object definition that is only a minimap icon: named `name` (opcode 2), blocks
+/// nothing (17, 18), carries map icon `map_icon` (82, an area id of config group 35), and has no
+/// model. [`ObjectDef::decode`] reads it back.
+pub fn encode_icon_marker(name: &str, map_icon: u16) -> Vec<u8> {
+    let mut out = vec![2];
+    out.extend_from_slice(name.as_bytes());
+    out.push(0);
+    out.extend_from_slice(&[17, 18, 82]);
+    out.extend_from_slice(&map_icon.to_be_bytes());
+    out.push(0);
+    out
+}
+
 /// Lazily loaded config tables.
 pub struct Configs<'a> {
     cache: &'a Cache,
@@ -416,5 +429,20 @@ impl<'a> Configs<'a> {
             .into_iter()
             .map(|(id, d)| (id, ObjectDef::decode(id, &d)))
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_icon_marker_is_an_invisible_non_blocking_icon() {
+        let (def, clean) = ObjectDef::decode_with(60_000, &encode_icon_marker("Map icon", 13), &[]);
+        assert!(clean, "consumed exactly");
+        assert_eq!((def.name.as_str(), def.map_icon), ("Map icon", Some(13)));
+        assert!(def.models.is_empty());
+        assert_eq!(def.interact_type, 0);
+        assert!(!def.solid);
     }
 }

@@ -9,6 +9,7 @@ mod doors;
 mod gathering;
 mod items;
 mod npcs;
+mod spawns;
 mod prayers;
 mod scenario;
 mod spells;
@@ -24,7 +25,13 @@ pub use firemaking::LogDef;
 pub use doors::{DoorDef, DoorLeafDef, DoorSwing, LeafMove};
 pub use gathering::{DepletionDef, GatheringNodeDef, NodeLocDef, PetDropDef, Requirement, ToolDef};
 pub use items::{AmmoDef, AmmoWeight, EquipSlot, ItemDef, SetDef, SpecialAttackDef, StanceDef, StanceKind, WeaponDef};
-pub use npcs::{AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels, NpcMovementDef, NpcSounds, RotationDef, SummonDef};
+pub use npcs::{
+    cache_npc_def, cache_npc_id, cache_npc_key, cache_npc_variant, AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef,
+    NpcLevels, NpcMovementDef, NpcSounds, RotationDef, SummonDef,
+};
+pub use spawns::{
+    default_npc_spawns, read_json_file, read_npc_spawns, resolve_spawns, write_npc_spawns, CacheNpc, NpcSpawnPoint, ResolvedSpawns,
+};
 pub use prayers::PrayerDef;
 pub use scenario::{builtin_scenarios, load_scenario, InventoryStack, NpcSpawn, PlayerSetup, ScenarioDef, SkillLevelsDef};
 pub use spells::{LevelScaling, SpellDef};
@@ -242,6 +249,12 @@ impl Registry {
         self.npcs.get(id)
     }
 
+    /// The curated monster that cache NPC `id` is (drawn as it, or listing it in `cache_ids`), if
+    /// `npcs.json` has one: a spawn of `cache:<id>` fights with its stats.
+    pub fn npc_for_cache_id(&self, id: u32) -> Option<&NpcDef> {
+        self.npcs.values().find(|d| npcs::covers_cache_npc(d, id))
+    }
+
     /// Replaces (or adds) a monster definition: tests tweak a bundled one this way.
     #[cfg(test)]
     pub(crate) fn insert_npc_for_test(&mut self, def: NpcDef) {
@@ -358,6 +371,18 @@ impl Registry {
     /// a data author fixes a file in one pass.
     pub fn validate(&self) -> Result<(), DataError> {
         let mut problems = Vec::new();
+
+        // a cache NPC is one monster at most, or its spawns' stats would depend on lookup order
+        let mut claimed: BTreeMap<u32, &str> = BTreeMap::new();
+        for npc in self.npcs.values() {
+            for id in npc.appearance.iter().chain(&npc.cache_ids) {
+                if let Some(other) = claimed.insert(*id, &npc.id) {
+                    if other != npc.id {
+                        problems.push(format!("npc '{}': cache NPC {id} is also '{other}'", npc.id));
+                    }
+                }
+            }
+        }
 
         for item in self.items.values() {
             let who = format!("item '{}'", item.id);

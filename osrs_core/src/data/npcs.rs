@@ -215,6 +215,10 @@ pub struct NpcDef {
     pub blocks_movement: bool,
     /// The game cache's NPC definition a client draws it from (models, animations), if it has one.
     pub appearance: Option<u32>,
+    /// Other cache NPCs that are this monster (the wiki's further NPC ids: versions in other
+    /// places, recoloured models). A spawn of `cache:<id>` for any of them fights with these stats
+    /// but is drawn as its own model.
+    pub cache_ids: Vec<u32>,
     /// The cache sequences it plays when it attacks, blocks and dies.
     pub animations: Option<CombatAnimations>,
     /// What "Examine" says about it (a plain description from its name when absent).
@@ -232,6 +236,49 @@ pub struct NpcDef {
     pub sounds: NpcSounds,
     /// Free-form provenance (wiki page, whether the numbers are verified).
     pub notes: String,
+}
+
+/// How a spawn names an NPC straight from the game cache, by its cache id: `cache:415`. Every NPC
+/// the cache has can be placed this way, curated in `npcs.json` or not (see [`cache_npc_def`]).
+pub const CACHE_NPC_PREFIX: &str = "cache:";
+
+/// The spawn id of cache NPC `id`.
+pub fn cache_npc_key(id: u32) -> String {
+    format!("{CACHE_NPC_PREFIX}{id}")
+}
+
+/// The cache id a spawn id like `cache:415` names, if it is one.
+pub fn cache_npc_id(key: &str) -> Option<u32> {
+    key.strip_prefix(CACHE_NPC_PREFIX)?.parse().ok()
+}
+
+/// The definition a spawn of cache NPC `id` uses when `curated` covers it (its `appearance` or
+/// one of its `cache_ids`): the curated stats, drawn as cache NPC `id`, under the spawn id
+/// `cache:<id>`.
+pub fn cache_npc_variant(curated: &NpcDef, id: u32) -> NpcDef {
+    NpcDef { id: cache_npc_key(id), appearance: Some(id), cache_ids: Vec::new(), ..curated.clone() }
+}
+
+/// Whether `def` covers cache NPC `id`: it is drawn as it, or lists it among its variants.
+pub fn covers_cache_npc(def: &NpcDef, id: u32) -> bool {
+    def.appearance == Some(id) || def.cache_ids.contains(&id)
+}
+
+/// A definition for cache NPC `id` that nobody has written stats for: it looks and is named as
+/// the cache says, stands where it is put, and cannot be fought (its combat stats live on the
+/// wiki, and are added to `npcs.json` when an NPC needs them; a curated entry covering `id`, see
+/// [`covers_cache_npc`], then takes its place).
+pub fn cache_npc_def(id: u32, name: &str, combat_level: Option<u16>, size: u8) -> NpcDef {
+    NpcDef {
+        id: cache_npc_key(id),
+        name: name.to_owned(),
+        combat_level: combat_level.map_or(0, i32::from),
+        size: i32::from(size.max(1)),
+        appearance: Some(id),
+        attackable_if: Condition::Not(Box::new(Condition::Always)),
+        notes: "From the game cache only: no combat stats yet.".into(),
+        ..NpcDef::default()
+    }
 }
 
 impl Default for NpcDef {
@@ -252,6 +299,7 @@ impl Default for NpcDef {
             wander_radius: 0,
             blocks_movement: false,
             appearance: None,
+            cache_ids: Vec::new(),
             examine: None,
             animations: None,
             attackable_if: Condition::Always,
@@ -273,6 +321,41 @@ impl NpcDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cache_npc_key_round_trips_and_its_def_cannot_be_fought() {
+        assert_eq!(cache_npc_key(3105), "cache:3105");
+        assert_eq!(cache_npc_id("cache:3105"), Some(3105));
+        assert_eq!(cache_npc_id("man"), None);
+        assert_eq!(cache_npc_id("cache:x"), None);
+
+        let def = cache_npc_def(3105, "Hans", None, 0);
+        assert_eq!((def.id.as_str(), def.name.as_str(), def.appearance), ("cache:3105", "Hans", Some(3105)));
+        assert_eq!((def.combat_level, def.size), (0, 1));
+        assert!(def.attacks.is_empty() && !def.aggression.aggressive);
+        let ctx = crate::model::ConditionContext {
+            style: AttackStyle::Melee,
+            damage_type: DamageType::Slash,
+            target_attributes: AttributeSet::default(),
+            flags: &[],
+        };
+        assert!(!def.attackable_if.holds(&ctx));
+    }
+
+    #[test]
+    fn a_curated_monster_covers_its_model_and_its_variants() {
+        let registry = crate::data::Registry::builtin();
+        for id in [415, 416, 7241, 11239] {
+            assert_eq!(registry.npc_for_cache_id(id).map(|d| d.id.as_str()), Some("abyssal_demon"), "cache NPC {id}");
+        }
+        assert!(registry.npc_for_cache_id(3105).is_none());
+
+        // a variant fights with the monster's stats and is drawn as its own model
+        let demon = registry.npc("abyssal_demon").unwrap();
+        let variant = cache_npc_variant(demon, 7241);
+        assert_eq!((variant.id.as_str(), variant.appearance), ("cache:7241", Some(7241)));
+        assert_eq!((variant.hitpoints, &variant.attacks, variant.animations), (demon.hitpoints, &demon.attacks, demon.animations));
+    }
 
     #[test]
     fn a_monster_parses_with_sparse_json() {

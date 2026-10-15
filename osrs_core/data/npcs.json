@@ -45,10 +45,13 @@
       "levels": { "attack": 97, "strength": 67, "defence": 135, "ranged": 1, "magic": 1 },
       "bonuses": { "defence": { "stab": 20, "slash": 20, "crush": 20, "ranged": 20 } },
       "attributes": ["demon"],
-      "attacks": [ { "name": "Claw", "max_hit": 8, "speed": 4, "damage_type": "slash" } ],
-      "aggression": { "aggressive": true },
+      "attacks": [ { "name": "Claw", "max_hit": 8, "speed": 4, "damage_type": "stab" } ],
+      "aggression": { "aggressive": false },
+      "appearance": 415,
+      "cache_ids": [416, 7241, 11239],
+      "animations": { "attack": 1537, "defend": 1536, "death": 1538 },
       "sounds": { "attack": 276, "hit": 278, "death": 277 },
-      "notes": "Stats approximate; the point is the Demon tag (Arclight)."
+      "notes": "Combat level, hitpoints, levels, max hit, speed, stab style, defence bonuses, the Demon attribute and 'not aggressive' from the wiki's infobox. Appearance 415 is the wiki's first NPC id; its other ids (416, Catacombs of Kourend 7241, Wilderness Slayer Cave 11239) share these stats as cache_ids. Animations are the cache's ABYSSAL_ATTACK 1537 and ABYSSAL_DEATH 1538 (RuneLite's gameval names); the game has no abyssal demon block animation, so blocking shows its standing one, ABYSSAL_READY 1536."
     },
     {
       "id": "gargoyle", "name": "Gargoyle", "combat_level": 111, "hitpoints": 105,
