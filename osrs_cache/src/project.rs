@@ -22,6 +22,10 @@ pub struct MapProject {
     /// Invisible objects minted to carry a minimap icon where the cache has none for that icon.
     #[serde(default)]
     pub marker_defs: Vec<MarkerDef>,
+    /// The compiled cache this project plays on (a name under `~/.rsosrs/caches`), once one has
+    /// been made for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache: Option<String>,
 }
 
 /// One map square's changes to its placements. Positions are square-local, as the map file
@@ -136,6 +140,22 @@ impl MapProject {
     /// Every edited square, as coordinates.
     pub fn edited_squares(&self) -> Vec<(i32, i32)> {
         self.squares.iter().filter(|(_, e)| !e.is_empty()).filter_map(|(k, _)| parse_square_key(k)).collect()
+    }
+
+    /// The directory of the compiled cache this project plays on, if it has one that still
+    /// exists: the one it names, else (for a project from before it named one) a compiled cache
+    /// whose manifest says it was built from a project of this name.
+    pub fn compiled_cache(&self) -> Option<PathBuf> {
+        if let Some(name) = &self.cache {
+            let dir = crate::active::cache_dir_of(name);
+            if crate::active::is_cache_dir(&dir) {
+                return Some(dir);
+            }
+        }
+        crate::active::list_caches()
+            .into_iter()
+            .find(|c| c.manifest.as_ref().is_some_and(|m| m.project == self.name))
+            .map(|c| c.dir)
     }
 
     /// Whether the project changes nothing.

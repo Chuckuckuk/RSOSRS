@@ -56,12 +56,17 @@ pub struct Pending {
     ready: VecDeque<SquareData>,
 }
 
-/// The square the camera is looking at: where the ray through the middle of the view meets the
-/// ground, else the square under the camera.
-pub fn focus_square(camera: &Camera, transform: &GlobalTransform, world: &StreamedWorld, picker: &Picker) -> (i32, i32) {
+/// The tile the camera is looking at: where the ray through the middle of the view meets the
+/// ground, else the tile under the camera.
+pub fn focus_tile(camera: &Camera, transform: &GlobalTransform, world: &StreamedWorld, picker: &Picker) -> (i32, i32) {
     let middle = camera.logical_viewport_size().map(|s| s / 2.0);
     let hit = middle.and_then(|m| camera.viewport_to_world(transform, m).ok()).and_then(|ray| picker.pick_all(world, ray));
-    let tile = hit.map_or_else(|| tile_under(transform.translation()), |c| c.tile);
+    hit.map_or_else(|| tile_under(transform.translation()), |c| c.tile)
+}
+
+/// The square of [`focus_tile`].
+pub fn focus_square(camera: &Camera, transform: &GlobalTransform, world: &StreamedWorld, picker: &Picker) -> (i32, i32) {
+    let tile = focus_tile(camera, transform, world, picker);
     square_of(tile.0, tile.1)
 }
 

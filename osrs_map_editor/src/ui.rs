@@ -6,7 +6,7 @@ use crate::catalog::{area_label, kind_name, Catalog, KINDS};
 use crate::editor::{default_spawns, Brush, Editor, Selected, Tool};
 use crate::preview::{MinimapPreview, Sprites};
 use crate::tools::{remove, IconsInView};
-use crate::world::{focus_square, EditorPicker, Hover};
+use crate::world::{focus_square, focus_tile, EditorPicker, Hover};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -31,6 +31,8 @@ pub struct CompileJob {
     pub name: String,
     pub stage: Stage,
     messages: Mutex<Receiver<JobMessage>>,
+    /// Start the game on the cache once it is built: `Some(spawn)`.
+    then_play: Option<Option<(i32, i32)>>,
 }
 
 enum JobMessage {
@@ -48,6 +50,12 @@ pub struct UiState {
     pub job: Option<CompileJob>,
     /// The last compile's outcome, with the cache it made.
     pub compiled: Option<Result<Manifest, String>>,
+    /// Play was asked for (menu or F5); handled once the camera is at hand.
+    pub play_requested: bool,
+    /// Whether the game starts where the camera is looking (else at its usual spot).
+    pub play_here: bool,
+    /// The project has no cache yet: the name offered for one, and where to start playing.
+    pub play_dialog: Option<(String, Option<(i32, i32)>)>,
 }
 
 impl Default for UiState {
@@ -60,6 +68,9 @@ impl Default for UiState {
             compile_dialog: None,
             job: None,
             compiled: None,
+            play_requested: false,
+            play_here: true,
+            play_dialog: None,
         }
     }
 }
@@ -113,8 +124,49 @@ pub fn editor_ui(
     // what the panels leave is the world: labels are drawn there only
     let painter = root.painter_at(root.available_rect_before_wrap());
     world_labels(&ctx, &painter, &editor, &catalog, &mut sprites, &view);
+    if std::mem::take(&mut state.play_requested) {
+        let spawn = state.play_here.then(|| view.cameras.single().ok().map(|(c, t, _, _)| focus_tile(c, t, &view.world, &view.picker.0))).flatten();
+        request_play(&mut editor, &mut state, spawn);
+    }
     dialogs(&ctx, &mut editor, &mut state);
     Ok(())
+}
+
+/// Plays the project: on its cache if it has one, else after asking to make one.
+fn request_play(editor: &mut Editor, state: &mut UiState, spawn: Option<(i32, i32)>) {
+    if state.job.is_some() {
+        editor.status = "A compile is running; play when it is done".into();
+        return;
+    }
+    if editor.dirty {
+        editor.save();
+    }
+    match editor.project.compiled_cache() {
+        Some(dir) => {
+            // a project found by its manifest names its cache from now on
+            let name = dir.file_name().map(|n| n.to_string_lossy().into_owned());
+            if editor.project.cache != name {
+                editor.project.cache = name;
+                editor.save();
+            }
+            launch(editor, &dir, spawn);
+        }
+        None => {
+            let name = editor.project.cache.clone().unwrap_or_else(|| clean_name(&editor.project.name));
+            state.play_dialog = Some((name, spawn));
+        }
+    }
+}
+
+fn launch(editor: &mut Editor, dir: &std::path::Path, spawn: Option<(i32, i32)>) {
+    let name = dir.file_name().unwrap_or_default().to_string_lossy();
+    editor.status = match crate::play::launch(dir, spawn) {
+        Ok(_) => match spawn {
+            Some((x, z)) => format!("Starting the game on cache {name} at {x}, {z}"),
+            None => format!("Starting the game on cache {name}"),
+        },
+        Err(e) => e,
+    };
 }
 
 fn menu_bar(ui: &mut egui::Ui, editor: &mut Editor, state: &mut UiState, minimap: &mut MinimapPreview) {
@@ -160,7 +212,7 @@ fn menu_bar(ui: &mut egui::Ui, editor: &mut Editor, state: &mut UiState, minimap
         ui.menu_button("Cache", |ui| {
             let busy = state.job.is_some();
             if ui.add_enabled(!busy, egui::Button::new("Compile to a new cache…")).clicked() {
-                state.compile_dialog = Some(editor.project.name.clone());
+                state.compile_dialog = Some(editor.project.cache.clone().unwrap_or_else(|| clean_name(&editor.project.name)));
                 ui.close();
             }
             ui.separator();
@@ -181,6 +233,27 @@ fn menu_bar(ui: &mut egui::Ui, editor: &mut Editor, state: &mut UiState, minimap
             }
             if std::env::var(active::ENV_CACHE_DIR).is_ok() {
                 ui.colored_label(egui::Color32::YELLOW, format!("{} is set and overrides this choice", active::ENV_CACHE_DIR));
+            }
+        });
+        ui.menu_button("Play", |ui| {
+            let cache = editor.project.compiled_cache();
+            let label = match &cache {
+                Some(_) => "Play this project   F5",
+                None => "Play this project (makes its cache first)   F5",
+            };
+            if ui.add_enabled(state.job.is_none(), egui::Button::new(label)).clicked() {
+                state.play_requested = true;
+                ui.close();
+            }
+            ui.checkbox(&mut state.play_here, "Start where the camera is looking");
+            match &cache {
+                Some(dir) => {
+                    ui.label(format!("Plays on {}", dir.display()));
+                    ui.label("Recompile it from the Cache menu to play newer edits.");
+                }
+                None => {
+                    ui.label("This project has no cache yet.");
+                }
             }
         });
         ui.menu_button("View", |ui| {
@@ -508,7 +581,7 @@ fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
             }
             ui.horizontal(|ui| {
                 if ui.add_enabled(!clean.is_empty(), egui::Button::new("Compile")).clicked() {
-                    state.job = Some(start_compile(editor, clean.clone()));
+                    state.job = Some(start_compile(editor, clean.clone(), None));
                     keep = false;
                 }
                 if ui.button("Cancel").clicked() {
@@ -518,6 +591,38 @@ fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
         });
         if keep {
             state.compile_dialog = Some(name);
+        }
+    }
+
+    if let Some((mut name, spawn)) = state.play_dialog.take() {
+        let mut keep = true;
+        egui::Window::new("Create a cache to play on?").collapsible(false).show(ctx, |ui| {
+            ui.label(format!("The project \u{201c}{}\u{201d} has no cache yet.", editor.project.name));
+            ui.label("Playing it compiles a new cache from the base cache with this project's edits (the base cache is only read), then starts the game on it.");
+            ui.horizontal(|ui| {
+                ui.label("Cache name");
+                ui.text_edit_singleline(&mut name);
+            });
+            let clean = clean_name(&name);
+            let out = active::cache_dir_of(&clean);
+            if !clean.is_empty() {
+                ui.label(format!("Into: {}", out.display()));
+                if out.exists() {
+                    ui.colored_label(egui::Color32::YELLOW, "A cache of that name exists and will be replaced.");
+                }
+            }
+            ui.horizontal(|ui| {
+                if ui.add_enabled(!clean.is_empty(), egui::Button::new("Create cache and play")).clicked() {
+                    state.job = Some(start_compile(editor, clean.clone(), Some(spawn)));
+                    keep = false;
+                }
+                if ui.button("Cancel").clicked() {
+                    keep = false;
+                }
+            });
+        });
+        if keep {
+            state.play_dialog = Some((name, spawn));
         }
     }
 
@@ -574,11 +679,11 @@ fn dialogs(ctx: &egui::Context, editor: &mut Editor, state: &mut UiState) {
 }
 
 /// A name usable as a file or directory name: letters, digits, `-` and `_`.
-fn clean_name(name: &str) -> String {
+pub fn clean_name(name: &str) -> String {
     name.trim().chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect()
 }
 
-fn start_compile(editor: &mut Editor, name: String) -> CompileJob {
+fn start_compile(editor: &mut Editor, name: String, then_play: Option<Option<(i32, i32)>>) -> CompileJob {
     if editor.dirty {
         editor.save();
     }
@@ -593,7 +698,7 @@ fn start_compile(editor: &mut Editor, name: String) -> CompileJob {
         });
         let _ = tx.send(JobMessage::Done(result.map_err(|e| e.to_string())));
     });
-    CompileJob { name, stage: Stage::Building, messages: Mutex::new(rx) }
+    CompileJob { name, stage: Stage::Building, messages: Mutex::new(rx), then_play }
 }
 
 fn poll_job(state: &mut UiState, editor: &mut Editor) {
@@ -603,12 +708,22 @@ fn poll_job(state: &mut UiState, editor: &mut Editor) {
         match message {
             JobMessage::Stage(stage) => job.stage = stage,
             JobMessage::Done(result) => {
-                editor.status = match &result {
-                    Ok(m) => format!("Compiled cache {}", m.name),
-                    Err(e) => format!("compile failed: {e}"),
-                };
-                state.compiled = Some(result);
+                let then_play = job.then_play;
                 state.job = None;
+                match &result {
+                    Ok(m) => {
+                        editor.status = format!("Compiled cache {}", m.name);
+                        // the cache this project plays on from now on
+                        editor.project.cache = Some(m.name.clone());
+                        editor.save();
+                        if let Some(spawn) = then_play {
+                            launch(editor, &active::cache_dir_of(&m.name), spawn);
+                            return;
+                        }
+                    }
+                    Err(e) => editor.status = format!("compile failed: {e}"),
+                }
+                state.compiled = Some(result);
                 return;
             }
         }

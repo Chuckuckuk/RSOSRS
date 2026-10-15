@@ -252,6 +252,8 @@ impl Editor {
     pub fn undo(&mut self) {
         if let Some(previous) = self.undo.pop() {
             let now = std::mem::replace(&mut self.project, previous);
+            // which cache the project plays on is not an edit
+            self.project.cache = now.cache.clone();
             self.after_jump(&now);
             self.redo.push(now);
             self.status = "Undone".into();
@@ -261,6 +263,7 @@ impl Editor {
     pub fn redo(&mut self) {
         if let Some(next) = self.redo.pop() {
             let now = std::mem::replace(&mut self.project, next);
+            self.project.cache = now.cache.clone();
             self.after_jump(&now);
             self.undo.push(now);
             self.status = "Redone".into();

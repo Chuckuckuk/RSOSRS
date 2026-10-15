@@ -102,10 +102,14 @@ pub fn shortcuts(
     catalog: Res<Catalog>,
     mut editor: ResMut<Editor>,
     mut view: ResMut<crate::camera::ViewState>,
+    mut ui: ResMut<crate::ui::UiState>,
     mut contexts: bevy_egui::EguiContexts,
 ) {
     if contexts.ctx_mut().is_ok_and(|ctx| ctx.egui_wants_keyboard_input()) {
         return;
+    }
+    if keys.just_pressed(KeyCode::F5) && ui.job.is_none() {
+        ui.play_requested = true;
     }
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);

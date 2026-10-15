@@ -3,21 +3,25 @@
 //! cache is never written to (see `osrs_cache::compile` and `osrs_cache::active`).
 //!
 //! usage: osrs_map_editor [--project <name>] [--base <cache dir>] [--at <x>,<z>]
-//!                        [--compile <cache name> [--activate]]
+//!                        [--compile <cache name>] [--activate] [--play]
 //!   --project  the project to open, `~/.rsosrs/projects/<name>.json` (default: "default"; made
 //!              if it does not exist)
 //!   --base     the cache the edits are made on (default: the installed game's)
-//!   --at       the tile to start at (default: Lumbridge)
-//!   --compile  no window: compile the project into `~/.rsosrs/caches/<cache name>` and exit;
-//!              with --activate, also make it the cache the game reads
+//!   --at       the tile to start at (default: Lumbridge); with --play, where the game starts
+//!   --compile  no window: compile the project into `~/.rsosrs/caches/<cache name>` (it becomes
+//!              the project's cache) and exit
+//!   --activate no window: make the project's cache the one the game reads
+//!   --play     no window: start the game on the project's cache, compiling one first (named
+//!              after the project) if it has none
 //!
 //! controls: WASD move, Q/E down/up, hold right mouse to look, Shift = fast, wheel = speed;
 //!           V/B/X select, place, erase; R rotate; 1-4 plane; T roofs; Delete removes the
-//!           selection; Ctrl+Z / Ctrl+Y undo / redo; Ctrl+S save.
+//!           selection; Ctrl+Z / Ctrl+Y undo / redo; Ctrl+S save; F5 play.
 
 mod camera;
 mod catalog;
 mod editor;
+mod play;
 mod preview;
 mod tools;
 mod ui;
@@ -36,12 +40,16 @@ struct Args {
     project: String,
     base: Option<PathBuf>,
     at: (i32, i32),
+    /// Whether `--at` was given (rather than the default).
+    at_given: bool,
     compile: Option<String>,
     activate: bool,
+    play: bool,
 }
 
 fn args() -> Args {
-    let mut out = Args { project: "default".into(), base: None, at: (3222, 3218), compile: None, activate: false };
+    let mut out =
+        Args { project: "default".into(), base: None, at: (3222, 3218), at_given: false, compile: None, activate: false, play: false };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -54,9 +62,11 @@ fn args() -> Args {
                     [x, z] => out.at = (x, z),
                     _ => usage("--at needs x,z"),
                 }
+                out.at_given = true;
             }
             "--compile" => out.compile = Some(it.next().unwrap_or_else(|| usage("--compile needs a cache name"))),
             "--activate" => out.activate = true,
+            "--play" => out.play = true,
             "-h" | "--help" => usage(""),
             other => usage(&format!("unknown argument {other}")),
         }
@@ -68,7 +78,7 @@ fn usage(why: &str) -> ! {
     if !why.is_empty() {
         eprintln!("{why}");
     }
-    eprintln!("usage: osrs_map_editor [--project <name>] [--base <cache dir>] [--at <x>,<z>] [--compile <cache name> [--activate]]");
+    eprintln!("usage: osrs_map_editor [--project <name>] [--base <cache dir>] [--at <x>,<z>] [--compile <cache name>] [--activate] [--play]");
     std::process::exit(2);
 }
 
@@ -101,23 +111,41 @@ fn main() {
     };
     println!("[editor] project {} ({})", project.name, path.display());
 
-    if let Some(name) = &args.compile {
-        let out = osrs_cache::active::cache_dir_of(name);
-        let started = std::time::Instant::now();
-        let manifest = osrs_cache::compile::compile(&project, &base_dir, &out, |stage| println!("[editor] {stage:?}"))
-            .unwrap_or_else(|e| fail("the compile failed", e));
-        println!(
-            "[editor] compiled {} in {:.1?}: {} squares, {} NPC spawns, {} icon objects",
-            out.display(),
-            started.elapsed(),
-            manifest.squares,
-            manifest.npc_spawns,
-            manifest.marker_defs
-        );
+    if args.compile.is_some() || args.play || args.activate {
+        let mut project = project;
+        // a project that has a cache is played (or activated) as it is; --compile, or a project
+        // without one, compiles first
+        let existing = if args.compile.is_none() { project.compiled_cache() } else { None };
+        let dir = match existing {
+            Some(dir) => dir,
+            None => {
+                let name = args.compile.clone().unwrap_or_else(|| ui::clean_name(&project.name));
+                let out = osrs_cache::active::cache_dir_of(&name);
+                let started = std::time::Instant::now();
+                let manifest = osrs_cache::compile::compile(&project, &base_dir, &out, |stage| println!("[editor] {stage:?}"))
+                    .unwrap_or_else(|e| fail("the compile failed", e));
+                println!(
+                    "[editor] compiled {} in {:.1?}: {} squares, {} NPC spawns, {} icon objects",
+                    out.display(),
+                    started.elapsed(),
+                    manifest.squares,
+                    manifest.npc_spawns,
+                    manifest.marker_defs
+                );
+                // the cache this project plays on from now on
+                project.cache = Some(name);
+                project.save(&path).unwrap_or_else(|e| fail("could not save the project", e));
+                out
+            }
+        };
         if args.activate {
-            osrs_cache::active::set_active(&osrs_cache::active::Selection::Dir(out))
+            osrs_cache::active::set_active(&osrs_cache::active::Selection::Dir(dir.clone()))
                 .unwrap_or_else(|e| fail("could not make it the active cache", e));
-            println!("[editor] the game now reads it");
+            println!("[editor] the game now reads {}", dir.display());
+        }
+        if args.play {
+            let how = play::launch(&dir, args.at_given.then_some(args.at)).unwrap_or_else(|e| fail("could not play", e));
+            println!("[editor] started the game on {} ({how})", dir.display());
         }
         return;
     }

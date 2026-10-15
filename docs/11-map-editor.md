@@ -38,8 +38,9 @@ cargo run -p osrs_map_editor --release -- --project castle --compile castle --ac
 | `--project <name>` | open `~/.rsosrs/projects/<name>.json`, or start it if it does not exist |
 | `--base <dir>` | the cache to edit on (default: the installed game's) |
 | `--at x,z` | the tile the camera starts over |
-| `--compile <cache>` | no window: compile the project into `~/.rsosrs/caches/<cache>` and exit |
-| `--activate` | with `--compile`, make the result the cache the game reads |
+| `--compile <cache>` | no window: compile the project into `~/.rsosrs/caches/<cache>` (it becomes the project's cache) and exit |
+| `--activate` | no window: make the project's cache the one the game reads |
+| `--play` | no window: start the game on the project's cache, compiling one first (named after the project) if it has none; with `--at`, the game starts on that tile |
 
 | Input | Effect |
 |---|---|
@@ -52,6 +53,7 @@ cargo run -p osrs_map_editor --release -- --project castle --compile castle --ac
 | T | roofs (all planes) on or off |
 | Delete | remove the selection, or what is under the mouse |
 | Ctrl+Z, Ctrl+Y, Ctrl+S | undo, redo, save |
+| F5 | play the project (see below) |
 
 The **left panel** holds the tools and the palette, which has four tabs:
 
@@ -76,6 +78,22 @@ The **Cache** menu does two things:
   well under a second.
 * It chooses the cache the game reads: the installed one ("live"), or any compiled one.
 
+The **Play** menu (F5) starts the game on the project's own cache:
+- **The project has a cache:** the game starts on it as it is. Recompile from the Cache menu to
+  play newer edits.
+- **It has none:** the editor asks to create one (named after the project by default), compiles
+  it, then starts the game.
+- **Where the game starts:** by default you enter the world on the tile the camera is looking at
+  ("Start where the camera is looking"); untick it to start at the usual spot.
+- **The active cache is not changed:** the game runs as its own process with `OSRS_CACHE_DIR` set
+  to the project's cache. It is started with `cargo run -p osrs_core --release` from the workspace
+  the editor was built in, so it is built from current source. Without that workspace, the
+  `osrs_core` executable beside the editor's is used.
+
+A project's cache is recorded in the project file (`cache`), and every compile of the project
+updates it. An older project that names none is matched to a compiled cache by the project name in
+the cache's manifest.
+
 Closing the window saves the project.
 
 ---
@@ -88,6 +106,7 @@ MapProject {
     squares: { "sx_sy": SquareEdits { removed: [Placement], added: [Placement] } },
     npc_spawns: [NpcSpawn { npc: "man", x, z, plane }],
     marker_defs: [MarkerDef { id, map_icon }],
+    cache: Some("castle"),           // the compiled cache it plays on, once made
 }
 ```
 
@@ -210,7 +229,8 @@ therefore reads the base plus the overlay, whatever cache the game has been swit
 | `editor.rs` | the `Editor` resource: project, tool settings, the undo stack, every edit, rebuilding the overlay |
 | `world.rs` | streaming squares around the camera (`SquareStream`, `StreamedWorld`), reloading changed squares, hover picking (a `Picker` in which every object takes clicks), the placement ghost |
 | `tools.rs` | clicks and shortcuts, finding the placement under the mouse, gizmo outlines and posts for NPCs and icons |
-| `ui.rs` | the egui panels, dialogs, compile job, labels over NPCs and icon sprites in the world |
+| `ui.rs` | the egui panels, dialogs, compile job, the Play menu, labels over NPCs and icon sprites in the world |
+| `play.rs` | starting the game on a cache |
 | `preview.rs` | the minimap preview (`MinimapSource` through the overlay) and sprite textures |
 | `camera.rs` | the fly camera |
 
