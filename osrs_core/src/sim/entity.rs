@@ -18,6 +18,8 @@ use crate::tiles::TileCoord;
 pub struct NpcState {
     pub targets_player: bool,
     pub attack: Rc<AttackDefinition>,
+    /// The NPC's own attack range, which its attack inherits (a plain NPC is a melee fighter).
+    pub attack_range: i32,
     pub combat_state: NpcCombatState,
     /// This NPC has no Phase of its own (it never swaps movesets), so its movement policy is a
     /// direct field, defaulting to chase-then-hold-at-adjacency.
@@ -139,7 +141,7 @@ impl Entity {
     pub fn new_npc(id: EntityId, name: &str, start: TileCoord, config: &NpcConfig, map: &mut CollisionMap) -> Self {
         let actor = Actor::new(ActorKind::Npc, start, config.footprint_size, config.max_health, config.levels.to_stats());
         let mover = Mover::new(actor, map);
-        let attack = AttackDefinition::targeted("Melee", 0, config.melee_telegraph_ticks, AttackStyle::Melee)
+        let attack = AttackDefinition::targeted("Melee", None, config.melee_telegraph_ticks, AttackStyle::Melee)
             .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Melee))
             .shared();
         // Only one attack exists, so a one-entry FixedRotationPattern is just "always this attack".
@@ -147,6 +149,7 @@ impl Entity {
         let state = NpcState {
             targets_player: config.targets_player,
             attack,
+            attack_range: 1,
             combat_state,
             movement_policy: Rc::new(crate::actors::ChaseToMeleeRangeMovementPolicy),
         };

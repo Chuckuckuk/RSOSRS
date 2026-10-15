@@ -37,8 +37,9 @@ pub struct NpcAttackDef {
     /// Ticks between this attack resolving and the monster's next attack, for an attack that
     /// differs from the monster's own `attack_speed`; absent uses that.
     pub speed: Option<i32>,
-    /// Tiles; ignored for melee, which needs adjacency.
-    pub range: i32,
+    /// Tiles away it can be used from, for an attack that differs from the monster's own
+    /// `attack_range`; absent uses that. A melee-style attack of range 1 needs adjacency.
+    pub range: Option<i32>,
     /// Ticks of visible wind-up before the roll (the Jad-style archetype); 0 for traditional. An
     /// attack is either telegraphed or has an `impact_delay_ticks`, not both.
     pub telegraph_ticks: i32,
@@ -86,7 +87,7 @@ impl Default for NpcAttackDef {
             damage_type: None,
             max_hit: 1,
             speed: None,
-            range: 1,
+            range: None,
             telegraph_ticks: 0,
             impact_delay_ticks: 0,
             projectile_speed: None,
@@ -213,6 +214,9 @@ pub struct NpcDef {
     /// Ticks between one of its attacks resolving and the next (OSRS attack speed): the rate of
     /// the monster itself. An attack may carry its own `speed` instead.
     pub attack_speed: i32,
+    /// Tiles away it can attack from (OSRS attack range): the reach of the monster itself, which
+    /// each attack inherits unless it names its own `range`. 1 is a melee fighter.
+    pub attack_range: i32,
     pub rotation: RotationDef,
     pub movement: NpcMovementDef,
     pub aggression: AggressionDef,
@@ -255,6 +259,7 @@ impl Default for NpcDef {
             attributes: AttributeSet::default(),
             attacks: Vec::new(),
             attack_speed: 4,
+            attack_range: 1,
             rotation: RotationDef::Fixed,
             movement: NpcMovementDef::Chase,
             aggression: AggressionDef::default(),

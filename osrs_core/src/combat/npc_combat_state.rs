@@ -279,7 +279,7 @@ mod tests {
         // an on-contact ("Doom-style") attack has no telegraph, and its delay is no longer this
         // type's concern - honoring it is entirely the caller's job, read off current_attack. This
         // state machine resolves it like any attack with no wind-up, whether the delay is 1 or 50.
-        let attack = AttackDefinition::on_contact("Test Doom-style", 10, 5, AttackStyle::Magic).shared();
+        let attack = AttackDefinition::on_contact("Test Doom-style", Some(10), 5, AttackStyle::Magic).shared();
         let mut state = state_with(vec![attack]);
 
         assert!(advance(&mut state, true)); // resolves at once - no travel phase, ever

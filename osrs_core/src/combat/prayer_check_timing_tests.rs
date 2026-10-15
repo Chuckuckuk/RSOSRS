@@ -29,9 +29,9 @@ fn tile() -> TileCoord {
 fn make_melee_attack(telegraph_ticks: i32, impact_delay_ticks: i32) -> Rc<AttackDefinition> {
     let attack = if impact_delay_ticks > 0 {
         assert_eq!(telegraph_ticks, 0, "an on-contact attack has no wind-up");
-        AttackDefinition::on_contact("Test Melee", 0, impact_delay_ticks, AttackStyle::Melee)
+        AttackDefinition::on_contact("Test Melee", None, impact_delay_ticks, AttackStyle::Melee)
     } else {
-        AttackDefinition::targeted("Test Melee", 0, telegraph_ticks, AttackStyle::Melee)
+        AttackDefinition::targeted("Test Melee", None, telegraph_ticks, AttackStyle::Melee)
     };
     attack
         .with_prayer_penetration(0.0)

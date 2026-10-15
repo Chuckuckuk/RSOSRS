@@ -75,7 +75,8 @@
       "id": "aviansie", "name": "Aviansie", "combat_level": 69, "hitpoints": 80,
       "levels": { "attack": 1, "strength": 1, "defence": 1, "ranged": 70, "magic": 1 },
       "attributes": ["flying"],
-      "attacks": [ { "name": "Arrow", "style": "ranged", "max_hit": 9, "range": 7 } ],
+      "attack_range": 7,
+      "attacks": [ { "name": "Arrow", "style": "ranged", "max_hit": 9 } ],
       "movement": { "maintain_distance": { "distance": 5 } },
       "attackable_if": { "any": [ { "not": { "style": "melee" } }, { "flag": "weapon_category:halberd" } ] },
       "notes": "Stats approximate. Flying monsters cannot be meleed except with a halberd."
@@ -85,10 +86,11 @@
       "levels": { "attack": 640, "strength": 960, "defence": 480, "ranged": 960, "magic": 480 },
       "bonuses": { "attack": { "magic": 60 } },
       "attack_speed": 8,
+      "attack_range": 15,
       "attacks": [
-        { "name": "Melee", "style": "melee", "damage_type": "crush", "max_hit": 97, "animation": 2655, "sound": 408 },
-        { "name": "Ranged", "style": "ranged", "max_hit": 97, "range": 15, "telegraph_ticks": 3, "animation": 2652, "target_graphic": 451, "resolve_sound": 163 },
-        { "name": "Magic", "style": "magic", "max_hit": 95, "range": 15, "telegraph_ticks": 3, "animation": 2656, "projectile": 448, "impact_graphic": 157, "sound": 159 }
+        { "name": "Melee", "range": 1, "style": "melee", "damage_type": "crush", "max_hit": 97, "animation": 2655, "sound": 408 },
+        { "name": "Ranged", "style": "ranged", "max_hit": 97, "telegraph_ticks": 3, "animation": 2652, "target_graphic": 451, "resolve_sound": 163 },
+        { "name": "Magic", "style": "magic", "max_hit": 95, "telegraph_ticks": 3, "animation": 2656, "projectile": 448, "impact_graphic": 157, "sound": 159 }
       ],
       "rotation": "weighted",
       "aggression": { "aggressive": true, "range": 15, "ignores_tolerance": true, "ignores_combat_level": true },

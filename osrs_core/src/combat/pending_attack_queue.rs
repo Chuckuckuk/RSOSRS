@@ -134,7 +134,7 @@ mod tests {
     const ATTACKER_TILE: TileCoord = TileCoord { x: 5, z: 5, plane: 0 };
 
     fn make_attack(reaction: ReactionRequirement) -> Rc<AttackDefinition> {
-        AttackDefinition::on_contact("Test Doom-style", 10, 1, AttackStyle::Magic).with_reaction(reaction).shared()
+        AttackDefinition::on_contact("Test Doom-style", Some(10), 1, AttackStyle::Magic).with_reaction(reaction).shared()
     }
 
     fn attacker_stats() -> CombatStats {

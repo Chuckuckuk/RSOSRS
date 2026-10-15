@@ -43,7 +43,7 @@ melee swing does not carry a telegraph length it never uses.
 | Field | Meaning |
 |---|---|
 | `name` | for logs |
-| `range` | a melee-style targeted attack with `range` 1 or less must be orthogonally adjacent to the attacker's footprint; anything else is within Chebyshev `range` (a halberd is melee style with range 2) |
+| `range` | optional override of the attacker's own attack range for this attack (below); `None` uses the attacker's |
 | `attack_speed` | optional override of the attacker's own attack speed for this attack (below) |
 | `on_hit_status_effect` | poison, freeze, burn... applied when it lands |
 | `animation`, `projectile`, `target_graphic`, `impact_graphic`, `sound`, `hit_sound` | presentation only |
@@ -86,7 +86,8 @@ ranged and magic weapons override the default with the game's own flight formula
 
 Constructors: `AttackDefinition::instant(name, range, style)`, `telegraphed(name, range,
 telegraph_ticks, style)`, `on_contact(name, range, impact_delay_ticks, style)` and `ground(name,
-range, telegraph_ticks, target, damage)`. `targeted(name, range, telegraph_ticks, style)` picks
+range, telegraph_ticks, target, damage)`, where `range` is an `Option` (`None` inherits the
+attacker's). `targeted(name, range, telegraph_ticks, style)` picks
 `Instant` or `Telegraphed` from the number, for data. The `with_*` methods set the rest (primer 1.4).
 They validate their input and panic on nonsense, including a builder for a field the attack's kind
 does not have (`with_always_hits` on a ground attack, `with_projectile_speed` on an `OnContact`
@@ -100,6 +101,22 @@ one), because a bad attack is a bug in data or code, not something a player can 
 | `Fixed(n)` | a monster's listed max hit |
 | `Spell { base }` | a spell's fixed base, scaled only by Magic Damage % |
 | `PoweredStaff { divisor, offset, gear_bonus_scale }` | `floor(magic / divisor) + offset`, then Magic Damage % (the gear part multiplied by `gear_bonus_scale`, capped at +100 %) |
+
+### Attack range: a stat of the attacker
+
+How far an attacker can strike from is a stat of the attacker too (`NpcDef::attack_range`, the
+weapon's range for the player), and an attack may name its own `range` to replace it. The reach an
+attack is measured by is `attack.range` if it has one, else the attacker's:
+
+* a **melee-style** attack whose reach is 1 or less must be orthogonally adjacent to the
+  attacker's footprint;
+* anything else (a ranged or magic attack, a melee attack with a longer reach such as a halberd's
+  2, and every ground attack) is within that many tiles.
+
+So an archer with `attack_range: 7` has attacks that inherit 7, while Jad (`attack_range: 15`)
+gives his melee swing `range: 1`, which keeps it needing adjacency.
+`AttackDefinition::build_range_check(tile, footprint, attacker_range)` is the one place that
+answers.
 
 ### Attack speed: a stat of the attacker
 

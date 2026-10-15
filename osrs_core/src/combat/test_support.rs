@@ -31,5 +31,5 @@ impl FakeCombatTarget {
 
 /// A plain melee attack with the given telegraph, for tests that only care about identity/timing.
 pub(crate) fn melee_attack(name: &str, telegraph_ticks: i32) -> Rc<AttackDefinition> {
-    AttackDefinition::targeted(name, 0, telegraph_ticks, AttackStyle::Melee).shared()
+    AttackDefinition::targeted(name, None, telegraph_ticks, AttackStyle::Melee).shared()
 }

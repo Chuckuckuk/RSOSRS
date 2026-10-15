@@ -75,7 +75,7 @@ pub fn pattern_from_def(def: &NpcDef) -> RangeAwarePattern {
         RotationDef::Fixed => RotationMode::Fixed,
         RotationDef::Weighted => RotationMode::Weighted,
     };
-    RangeAwarePattern::new(attacks, mode, def.size)
+    RangeAwarePattern::new(attacks, mode, def.size, def.attack_range)
 }
 
 /// A monster's combat stats: its levels, its attack/defence bonuses and its attribute tags. A
@@ -113,6 +113,24 @@ mod tests {
         // the rate is Jad's own, not repeated on each attack
         assert_eq!(jad.attack_speed, 8);
         assert_eq!(magic.attack_speed, None);
+    }
+
+    #[test]
+    fn an_attack_reaches_as_far_as_its_monsters_attack_range_unless_it_names_its_own() {
+        let registry = Registry::builtin();
+
+        // the aviansie's one attack names no range, so it uses the monster's own 7
+        let aviansie = registry.npc("aviansie").unwrap();
+        assert_eq!(aviansie.attack_range, 7);
+        assert_eq!(attack_from_def(&aviansie.attacks[0]).range, None);
+        assert_eq!(attack_from_def(&aviansie.attacks[0]).reach(aviansie.attack_range), 7);
+
+        // Jad is a 15 tile monster whose melee swing says it needs adjacency
+        let jad = registry.npc("tztok_jad").unwrap();
+        assert_eq!(jad.attack_range, 15);
+        let melee = attack_from_def(&jad.attacks[0]);
+        assert!(melee.is_melee_reach(jad.attack_range));
+        assert!(!attack_from_def(&jad.attacks[2]).is_melee_reach(jad.attack_range));
     }
 
     #[test]

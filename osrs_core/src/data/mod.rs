@@ -440,7 +440,13 @@ impl Registry {
             if npc.attack_speed < 1 {
                 problems.push(format!("{who}: attack_speed must be at least 1"));
             }
+            if npc.attack_range < 1 {
+                problems.push(format!("{who}: attack_range must be at least 1"));
+            }
             for attack in &npc.attacks {
+                if attack.range.is_some_and(|range| range < 1) {
+                    problems.push(format!("{who}: attack '{}' range must be at least 1", attack.name));
+                }
                 if attack.speed.is_some_and(|speed| speed < 1) {
                     problems.push(format!("{who}: attack '{}' speed must be at least 1", attack.name));
                 }

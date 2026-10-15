@@ -302,7 +302,7 @@ mod tests {
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig::default());
 
-        let slam = AttackDefinition::targeted("Slam", 15, 2, AttackStyle::Ranged)
+        let slam = AttackDefinition::targeted("Slam", Some(15), 2, AttackStyle::Ranged)
             .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Ranged))
             .shared();
         let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![slam]));
@@ -358,7 +358,7 @@ mod tests {
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
         let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![AttackDefinition::targeted(
             "Slam",
-            15,
+            Some(15),
             2,
             AttackStyle::Ranged,
         )
@@ -376,7 +376,7 @@ mod tests {
     /// A boss at (0, 8), fighting a player at (0, 0), whose only attack is a ground-targeted rock
     /// fall that lands when its 3-tick telegraph ends. The boss has 10 hitpoints so a test can kill it.
     fn rock_fall_world(target: GroundTarget) -> (World, EntityId) {
-        rock_world_with(AttackDefinition::ground("Rock", 15, 3, target, GroundDamage::Fixed(30)))
+        rock_world_with(AttackDefinition::ground("Rock", Some(15), 3, target, GroundDamage::Fixed(30)))
     }
 
     fn rock_world_with(rock: AttackDefinition) -> (World, EntityId) {
@@ -453,7 +453,7 @@ mod tests {
     fn the_one_reducing_prayer_cuts_a_ground_attack_without_negating_it() {
         let target = || GroundTarget::square(HazardAnchor::Target, 0);
         let reducible = || {
-            AttackDefinition::ground("Rock", 15, 3, target(), GroundDamage::Fixed(30))
+            AttackDefinition::ground("Rock", Some(15), 3, target(), GroundDamage::Fixed(30))
                 .with_prayer_reduction(ProtectionPrayer::Melee, 0.5)
         };
         let lost = |prayer: Option<ProtectionPrayer>| {
