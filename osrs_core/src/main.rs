@@ -335,6 +335,13 @@ fn main() {
         osrs_cache::bundle::start_recording();
     }
     let launch = launch(bundled);
+    if !bundled {
+        // which world this is: the installed game's, or a map editor build (see osrs_cache::active)
+        match osrs_cache::active::active_dir() {
+            Some(dir) => println!("[cache] reading {}", dir.display()),
+            None => eprintln!("[cache] no game cache found"),
+        }
+    }
     let radius = launch.stream_radius();
     // the tile grid is for the open world; a fight shows only the floor (G still toggles it, and
     // OSRS_GRID=1 starts with it on)
@@ -377,6 +384,20 @@ fn main() {
         }
         let registry = std::rc::Rc::new(Registry::builtin());
 
+        // a cache built by the map editor says who stands where; its squares are loaded now so
+        // each NPC has ground under it, however far from the player
+        let npc_spawns = scenario.is_none().then(|| osrs_cache::active::npc_spawns(source.cache().dir())).flatten();
+        for s in npc_spawns.iter().flatten() {
+            let square = square_of(s.x, s.z);
+            if loaded.insert(square) {
+                let (collision, locs) = square_map(&source, square);
+                first_locs.extend(locs);
+                if let Err(e) = map.merge(collision) {
+                    eprintln!("[server] map square ({}, {}) rejected: {e}", square.0, square.1);
+                }
+            }
+        }
+
         let mut server = match &scenario {
             Some(scenario) => {
                 let world = build_scenario_on(registry, scenario, map).unwrap_or_else(|e| {
@@ -394,12 +415,31 @@ fn main() {
                 world.set_registry(registry);
                 // enough Firemaking for the bonfire logs (level 50 is maple and below)
                 world.player.skills.set_base(osrs_core::model::Skill::Firemaking, 50);
-                // a man (level 2) stands about in Lumbridge square, a few tiles from where you arrive
-                let man_at = nearest_open_tile(&world.map, TileCoord::new(spawn.x + 4, spawn.z - 3));
-                match man_at.map(|at| world.spawn_npc_def("man", at)) {
-                    Some(Ok(id)) => println!("[server] a man (entity {}) stands at ({}, {})", id.0, man_at.unwrap().x, man_at.unwrap().z),
-                    Some(Err(e)) => eprintln!("[server] could not place the man: {e}"),
-                    None => eprintln!("[server] no open tile near the spawn for the man"),
+                match &npc_spawns {
+                    Some(spawns) => {
+                        for s in spawns {
+                            if s.plane != 0 {
+                                eprintln!("[server] {} at ({}, {}) is on plane {}; only ground-level NPCs are placed", s.npc, s.x, s.z, s.plane);
+                                continue;
+                            }
+                            let at = nearest_open_tile(&world.map, TileCoord::new(s.x, s.z));
+                            match at.map(|at| world.spawn_npc_def(&s.npc, at)) {
+                                Some(Ok(_)) => {}
+                                Some(Err(e)) => eprintln!("[server] could not place {} at ({}, {}): {e}", s.npc, s.x, s.z),
+                                None => eprintln!("[server] no open tile near ({}, {}) for {}", s.x, s.z, s.npc),
+                            }
+                        }
+                        println!("[server] {} NPCs placed from the cache's npc_spawns.json", spawns.len());
+                    }
+                    None => {
+                        // a man (level 2) stands about in Lumbridge square, a few tiles from where you arrive
+                        let man_at = nearest_open_tile(&world.map, TileCoord::new(spawn.x + 4, spawn.z - 3));
+                        match man_at.map(|at| world.spawn_npc_def("man", at)) {
+                            Some(Ok(id)) => println!("[server] a man (entity {}) stands at ({}, {})", id.0, man_at.unwrap().x, man_at.unwrap().z),
+                            Some(Err(e)) => eprintln!("[server] could not place the man: {e}"),
+                            None => eprintln!("[server] no open tile near the spawn for the man"),
+                        }
+                    }
                 }
                 // a starter kit for the mock server, so the inventory has something in it
                 for (item, quantity) in [
