@@ -18,8 +18,9 @@ pub enum WorldEvent {
     /// `attacker` threw an attack at `target`: its attack animation plays now. `animation` is the
     /// cache sequence of this particular attack when it has its own (else the attacker's usual
     /// attack animation). An attack with a telegraph is reported as its telegraph begins, so the
-    /// animation is the warning; one without is reported as it resolves.
-    Attack { attacker: Combatant, target: Combatant, animation: Option<u32> },
+    /// animation is the warning; one without is reported as it resolves. `windup_ticks` is how
+    /// long until it resolves (0 for one reported as it does).
+    Attack { attacker: Combatant, target: Combatant, animation: Option<u32>, windup_ticks: i32 },
     /// `from` loosed a projectile (the cache graphic `graphic`) at `to`; it arrives in `ticks`.
     /// `draw` is the graphic shown on the shooter as it nocks and draws (an arrow in the bow).
     /// `released` says the shooter's wind-up has already played (a telegraphed attack, announced

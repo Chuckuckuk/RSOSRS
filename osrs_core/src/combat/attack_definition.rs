@@ -42,6 +42,9 @@ pub struct AttackDefinition {
     /// The cache sequence the attacker plays for this attack, if it has its own (presentation
     /// only: the rules never read it).
     pub animation: Option<u32>,
+    /// How many ticks into `animation` the attack lets go, when that is not its telegraph (a
+    /// short wind-up that reuses a longer animation); clients hold the pose there as it repeats.
+    pub animation_release_ticks: Option<i32>,
     /// Graphics (cache spot animations) for the client: one flying from attacker to target, one
     /// on the target as the attack is released, one on it as the hit lands. Presentation only.
     pub projectile: Option<u32>,
@@ -152,6 +155,7 @@ impl AttackDefinition {
             attack_speed: None,
             on_hit_status_effect: None,
             animation: None,
+            animation_release_ticks: None,
             projectile: None,
             target_graphic: None,
             impact_graphic: None,
@@ -280,6 +284,11 @@ impl AttackDefinition {
 
     pub fn with_on_hit_status_effect(mut self, effect: StatusEffectDefinition) -> Self {
         self.on_hit_status_effect = Some(effect);
+        self
+    }
+
+    pub fn with_animation_release(mut self, ticks: Option<i32>) -> Self {
+        self.animation_release_ticks = ticks;
         self
     }
 

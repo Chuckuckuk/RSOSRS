@@ -68,6 +68,8 @@ pub struct NpcAttackDef {
     /// `animations.attack` (Jad rears up for magic and stomps for ranged). An attack with a
     /// telegraph starts it as the telegraph begins, so the player can read it and react.
     pub animation: Option<u32>,
+    /// Ticks into `animation` at which the attack lets go, when that is not its telegraph.
+    pub animation_release_ticks: Option<i32>,
     /// A graphic (cache spot animation) that flies from the monster to the target, arriving as the
     /// hit lands (Jad's fireball).
     pub projectile: Option<u32>,
@@ -110,6 +112,7 @@ impl Default for NpcAttackDef {
             modifiers: Vec::new(),
             on_hit: None,
             animation: None,
+            animation_release_ticks: None,
             projectile: None,
             target_graphic: None,
             impact_graphic: None,

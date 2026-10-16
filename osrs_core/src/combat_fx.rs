@@ -21,12 +21,17 @@ const BAR_SECONDS: f32 = 6.0;
 const BAR_SCALE: f32 = 2.0;
 
 /// A one-shot animation a fighter is playing instead of walking or standing.
+#[derive(Default)]
 pub struct Action {
     pub clip: usize,
     /// When it is over (seconds of app time).
     pub until: f32,
     /// Whether the model has been told to play it yet.
     pub started: bool,
+    /// How long into the clip (client ticks) its attack lets go.
+    pub resolve_ticks: f32,
+    /// Whether the clip hangs about that point, as the attacker repeats the attack.
+    pub hover: bool,
 }
 
 /// A fighter's combat state, kept up to date from the server's events.
@@ -43,13 +48,18 @@ pub struct Fighter {
 }
 
 impl Fighter {
+    /// Where in its clip the fighter should hang, client ticks, if it is hanging.
+    pub fn hover_at(&self) -> Option<f32> {
+        self.action.as_ref().filter(|action| action.hover).map(|action| action.resolve_ticks)
+    }
+
     /// The one-shot clip this fighter should be playing at `now`, if its fight state says so: the
     /// death (held for good) or an attack/block that has not finished. Returns (clip, first time it
     /// is asked for, is the death); `None` when the fighter is free to walk or stand.
     pub fn clip(&mut self, now: f32, death: usize) -> Option<(usize, bool, bool)> {
         if self.dead {
             let first = self.action.as_ref().is_none_or(|a| a.clip != death || !a.started);
-            self.action = Some(Action { clip: death, until: f32::MAX, started: true });
+            self.action = Some(Action { clip: death, until: f32::MAX, started: true, ..Default::default() });
             return Some((death, first, true));
         }
         match &mut self.action {
@@ -272,7 +282,7 @@ fn apply_events(
             }
         }
         match event {
-            WorldEvent::Attack { attacker, target, animation } => {
+            WorldEvent::Attack { attacker, target, animation, windup_ticks } => {
                 let (Some(a), Some(t)) = (entity_of(attacker), entity_of(target)) else { continue };
                 // an attack with an animation of its own (Jad's stomp, his rearing up) plays that,
                 // when the model has it baked; anything else plays the fighter's usual attack
@@ -289,11 +299,13 @@ fn apply_events(
                     if !fighter.dead {
                         // a monster that repeats an attack of its own animation while it is still
                         // playing (a volley) lingers in it: the pose is held, not started over
-                        let lingers = animation.is_some()
-                            && matches!(attacker, Combatant::Npc(_))
-                            && fighter.action.as_ref().is_some_and(|action| action.clip == attack && action.started && now < action.until);
-                        let started = lingers;
-                        fighter.action = Some(Action { clip: attack, until: now + length, started });
+                        let playing = fighter.action.as_ref().filter(|action| action.clip == attack && action.started && now < action.until);
+                        let lingers = animation.is_some() && matches!(attacker, Combatant::Npc(_)) && playing.is_some();
+                        // (it keeps hanging where the first attack of the run lets go)
+                        let resolve_ticks =
+                            playing.filter(|_| lingers).map_or(windup_ticks as f32 * TICK_SECONDS * 50.0, |action| action.resolve_ticks);
+                        fighter.action =
+                            Some(Action { clip: attack, until: now + length, started: lingers, resolve_ticks, hover: lingers });
                         fighter.face = toward;
                         fighter.bar_until = now + BAR_SECONDS;
                     }
@@ -356,7 +368,7 @@ fn apply_events(
                     // being hit while swinging does not interrupt the swing
                     let swinging = fighter.action.as_ref().is_some_and(|a| now < a.until);
                     if !fighter.dead && !swinging {
-                        fighter.action = Some(Action { clip: block, until: now + length, started: false });
+                        fighter.action = Some(Action { clip: block, until: now + length, started: false, ..Default::default() });
                     }
                 }
                 spawn_splat(&mut commands, &mut splat_images, &mut images, t, damage, now);
@@ -380,7 +392,7 @@ fn apply_events(
                 let length = length_of(h, motion);
                 if let Ok(mut fighter) = fighters.get_mut(h) {
                     if !fighter.dead {
-                        fighter.action = Some(Action { clip: motion, until: now + length, started: false });
+                        fighter.action = Some(Action { clip: motion, until: now + length, started: false, ..Default::default() });
                         fighter.face = toward;
                     }
                 }
@@ -618,7 +630,7 @@ mod tests {
     #[test]
     fn a_fighter_plays_its_action_once_then_hands_back() {
         let mut fighter = Fighter::default();
-        fighter.action = Some(Action { clip: 7, until: 2.0, started: false });
+        fighter.action = Some(Action { clip: 7, until: 2.0, started: false, ..Default::default() });
 
         assert_eq!(fighter.clip(1.0, 9), Some((7, true, false)), "first ask starts it");
         assert_eq!(fighter.clip(1.5, 9), Some((7, false, false)), "then it just carries on");
@@ -629,7 +641,7 @@ mod tests {
     #[test]
     fn death_is_started_once_and_held() {
         let mut fighter = Fighter { dead: true, ..Default::default() };
-        fighter.action = Some(Action { clip: 7, until: f32::MAX, started: true });
+        fighter.action = Some(Action { clip: 7, until: f32::MAX, started: true, ..Default::default() });
 
         assert_eq!(fighter.clip(1.0, 9), Some((9, true, true)));
         assert_eq!(fighter.clip(50.0, 9), Some((9, false, true)));

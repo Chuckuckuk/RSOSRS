@@ -1054,7 +1054,7 @@ impl World {
         let swing = attack.expect_targeted();
         // ranged and magic hits land after their projectile's flight; melee has none
         let flight = attack.flight_ticks(distance);
-        self.events.push(WorldEvent::Attack { attacker: Combatant::Player, target: Combatant::Npc(target_id), animation: None });
+        self.events.push(WorldEvent::Attack { attacker: Combatant::Player, target: Combatant::Npc(target_id), animation: None, windup_ticks: 0 });
         self.play_sound(attack.sound, Combatant::Player, 0);
         if ranged {
             // the ammunition flies (a thrown weapon would be its own graphic; none is drawn yet)
@@ -1393,6 +1393,7 @@ impl World {
                 attacker: Combatant::Npc(attacker),
                 target: Combatant::Player,
                 animation: attack.animation,
+                windup_ticks: 0,
             });
             self.play_sound(attack.sound, Combatant::Npc(attacker), 0);
         }
@@ -1495,6 +1496,7 @@ impl World {
                 attacker: Combatant::Npc(attacker),
                 target: Combatant::Player,
                 animation: attack.animation,
+                windup_ticks: attack.animation_release_ticks.unwrap_or(attack.telegraph_ticks()),
             });
             self.play_sound(attack.sound, Combatant::Npc(attacker), 0);
         }

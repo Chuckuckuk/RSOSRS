@@ -953,7 +953,7 @@ mod tests {
         }
 
         let npc = Combatant::Npc(man);
-        assert!(events.contains(&WorldEvent::Attack { attacker: Combatant::Player, target: npc, animation: None }));
+        assert!(events.contains(&WorldEvent::Attack { attacker: Combatant::Player, target: npc, animation: None, windup_ticks: 0 }));
         assert!(events.iter().any(|e| matches!(e, WorldEvent::Attack { attacker, target: Combatant::Player, .. } if *attacker == npc)));
         let hits_on_man: Vec<i32> = events
             .iter()
@@ -1106,7 +1106,7 @@ mod tests {
         let mut previous = server.snapshot().player.tile;
         for _ in 0..6 {
             let Some(snapshot) = server.advance(0.6) else { continue };
-            let swung = snapshot.events.contains(&WorldEvent::Attack { attacker: Combatant::Player, target: Combatant::Npc(dummy), animation: None });
+            let swung = snapshot.events.contains(&WorldEvent::Attack { attacker: Combatant::Player, target: Combatant::Npc(dummy), animation: None, windup_ticks: 0 });
             if swung {
                 assert_eq!(previous, TileCoord::new(2, 0), "it was still a step short at the start of the tick");
                 assert_eq!(snapshot.player.tile, TileCoord::new(3, 0), "and the step took it into range");

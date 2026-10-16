@@ -89,6 +89,7 @@ fn attack_sounding(def: &NpcAttackDef, fallback_sound: Option<u32>, hazards: &[H
         }
     }
     .with_animation(def.animation)
+    .with_animation_release(def.animation_release_ticks)
     .with_graphics(def.projectile, def.target_graphic, def.impact_graphic)
     .with_sounds(def.sound.or(fallback_sound), def.resolve_sound);
     if let Some(speed) = def.speed {

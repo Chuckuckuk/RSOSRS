@@ -239,7 +239,8 @@
               "blocked_sound": 4031
             }
           },
-          "animation": 2656
+          "animation": 2656,
+          "animation_release_ticks": 3
         }
       ],
       "rotation": "weighted",
