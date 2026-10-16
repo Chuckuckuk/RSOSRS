@@ -49,17 +49,22 @@ melee swing does not carry a telegraph length it never uses.
 | `animation`, `projectile`, `target_graphic`, `impact_graphic`, `sound`, `hit_sound` | presentation only |
 | `kind` | when and how it resolves, below |
 
-**`AttackKind`**: each timing archetype is its own kind, and carries only its own numbers.
+**`AttackKind`**: an attack is either *standard* or a *special*. A standard attack is one of three
+timing archetypes, each carrying only its own numbers, and is answered by nothing but the overhead
+protection prayer. Anything that does not fit those, or that must check anything else, is a special.
 
 | Kind | Resolves | Own fields |
 |---|---|---|
 | `Instant` | the tick it is chosen (the "traditional" archetype: most melee) | `projectile_speed` (override) |
 | `Telegraphed` | when a visible wind-up ends (Jad) | `telegraph_ticks`, `projectile_speed` (override) |
 | `OnContact` | the roll waits until it lands, `impact_delay_ticks` after release (Doom-style) | `impact_delay_ticks` |
-| `Ground` | on the tiles it covers, when its telegraph ends (4.10) | `telegraph_ticks`, tiles, damage |
-| `Special` | a catch-all for attacks that fit none of these (unused) | none |
+| `Special` | resolves itself, by the `SpecialAttack` it carries (below) | its own |
 
-The first three wrap a **`TargetedAttack`**, which is what is rolled against a defender:
+A `SpecialAttack` is the extension point for everything that is not a plain roll against one
+defender. The only one so far is `Ground`: on the tiles it covers, when its telegraph ends (4.10),
+with `telegraph_ticks`, tiles and damage.
+
+The three standard kinds wrap a **`TargetedAttack`**, which is what is rolled against a defender:
 
 | Field | Meaning |
 |---|---|
@@ -350,17 +355,16 @@ Files: [`mitigation.rs`](../osrs_core/src/combat/mitigation.rs),
 [`player_reaction_state.rs`](../osrs_core/src/combat/player_reaction_state.rs),
 [`protection_prayer.rs`](../osrs_core/src/combat/protection_prayer.rs).
 
-Three things avoid damage, one per kind of attack:
+Two things avoid damage, one per kind of attack:
 
 * **A targeted attack checks the protection prayer for its style.** Melee, ranged and magic attacks
   are all answered by the matching prayer without saying so (`ProtectionPrayer::against(style)`);
   nothing has to be declared.
 * **An area attack is avoided by where the defender stands.** A `GroundAttack` has no mitigation: it
   resolves against whoever is on its tiles when it lands (4.10).
-* **Any targeted attack may name another condition instead.** `Mitigation::When(DefenderCondition)`
-  is met by a state of the defender other than the matching prayer (`NoProtectionPrayer` for a
-  screech that only lands on someone with prayer down), and `Mitigation::Unmitigable` is a typeless
-  attack nothing changes.
+* **Anything else is a special.** A standard attack checks only the overhead protection prayer
+  (`Mitigation::Unmitigable` for a typeless one that nothing changes). An attack that must check
+  another state of the defender is a `SpecialAttack`, which carries its own check.
 
 When the mitigation is met, `prayer_penetration` of the damage still gets through (0 blocks it, 1
 means the prayer does nothing); otherwise the damage is whole.
@@ -458,7 +462,7 @@ that reject non-positive numbers. Kinds:
 Files: [`ground_attack.rs`](../osrs_core/src/combat/ground_attack.rs),
 [`ground_target.rs`](../osrs_core/src/combat/ground_target.rs).
 
-An attack of kind `Ground` is aimed at the ground, not at the player: it covers a set of tiles and,
+A `Special` attack of kind `Ground` is aimed at the ground, not at the player: it covers a set of tiles and,
 when its own telegraph ends, deals its damage to **whoever is standing on them then**, and is
 gone. Falling rocks, grasping claws and rock falls are all this. It telegraphs, is chosen by
 patterns, and has graphics and sounds like any other attack, but it never rolls accuracy and has

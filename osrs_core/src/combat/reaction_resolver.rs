@@ -19,7 +19,7 @@ pub fn get_damage_multiplier(attack: &TargetedAttack, reaction_state: Option<&Pl
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::{AttackStyle, DefenderCondition, Mitigation, ProtectionPrayer};
+    use crate::combat::{AttackStyle, Mitigation, ProtectionPrayer};
 
     fn make_attack(mitigation: Mitigation, prayer_penetration: f32) -> TargetedAttack {
         TargetedAttack::new(AttackStyle::Melee)
@@ -71,14 +71,5 @@ mod tests {
         let attack = TargetedAttack::new(AttackStyle::Magic).with_prayer_penetration(1.0);
 
         assert_eq!(get_damage_multiplier(&attack, Some(&state(ProtectionPrayer::Magic))), 1.0);
-    }
-
-    #[test]
-    fn a_condition_mitigation_is_met_when_the_condition_holds() {
-        // a screech that only lands on a defender with no protection prayer up
-        let attack = make_attack(Mitigation::When(DefenderCondition::NoProtectionPrayer), 0.0);
-
-        assert_eq!(get_damage_multiplier(&attack, Some(&state(ProtectionPrayer::None))), 0.0);
-        assert_eq!(get_damage_multiplier(&attack, Some(&state(ProtectionPrayer::Melee))), 1.0);
     }
 }

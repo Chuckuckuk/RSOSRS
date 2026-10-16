@@ -6,6 +6,7 @@ use super::ground_target::GroundTarget;
 use super::max_hit_source::MaxHitSource;
 use super::projectile_speed::ProjectileSpeed;
 use super::protection_prayer::ProtectionPrayer;
+use super::special_attack::SpecialAttack;
 use super::mitigation::Mitigation;
 use super::status_effect::StatusEffectDefinition;
 use super::targeted_attack::TargetedAttack;
@@ -65,10 +66,9 @@ pub enum AttackKind {
     /// Rolls only once it makes contact, `impact_delay_ticks` after it is released, so the
     /// defender's state at that moment is what counts (Doom of Mokhaiotl's "Doom-style").
     OnContact(OnContactAttack),
-    /// Aimed at tiles; never rolls accuracy.
-    Ground(GroundAttack),
-    // Catch-all for attacks that do not neatly match either of the above. The OSRS combat system has a few of these, but they are not used in this project.
-    Special,
+    /// Anything that is not one of the three above, or that checks more than the overhead
+    /// protection prayer (an attack aimed at tiles, for one): it carries its own resolution.
+    Special(SpecialAttack),
 }
 
 /// A targeted attack that rolls as soon as it is chosen. If it flies, the damage lands after the
@@ -152,7 +152,7 @@ impl AttackDefinition {
         target: GroundTarget,
         damage: GroundDamage,
     ) -> Self {
-        Self::with_kind(name.into(), range, AttackKind::Ground(GroundAttack::new(telegraph_ticks, target, damage)))
+        Self::with_kind(name.into(), range, AttackKind::Special(SpecialAttack::Ground(GroundAttack::new(telegraph_ticks, target, damage))))
     }
 
     fn with_kind(name: String, range: Option<i32>, kind: AttackKind) -> Self {
@@ -181,7 +181,7 @@ impl AttackDefinition {
             AttackKind::Instant(attack) => Some(&attack.payload),
             AttackKind::Telegraphed(attack) => Some(&attack.payload),
             AttackKind::OnContact(attack) => Some(&attack.payload),
-            AttackKind::Ground(_) | AttackKind::Special => None,
+            AttackKind::Special(_) => None,
         }
     }
 
@@ -190,13 +190,13 @@ impl AttackDefinition {
             AttackKind::Instant(attack) => Some(&mut attack.payload),
             AttackKind::Telegraphed(attack) => Some(&mut attack.payload),
             AttackKind::OnContact(attack) => Some(&mut attack.payload),
-            AttackKind::Ground(_) | AttackKind::Special => None,
+            AttackKind::Special(_) => None,
         }
     }
 
     pub fn ground_part(&self) -> Option<&GroundAttack> {
         match &self.kind {
-            AttackKind::Ground(ground) => Some(ground),
+            AttackKind::Special(SpecialAttack::Ground(ground)) => Some(ground),
             _ => None,
         }
     }
@@ -211,8 +211,7 @@ impl AttackDefinition {
     /// not apply to it.
     fn untargeted_label(&self) -> &'static str {
         match self.kind {
-            AttackKind::Ground(_) => "a ground attack",
-            AttackKind::Special => "a special attack",
+            AttackKind::Special(_) => "a special attack",
             _ => "a targeted attack",
         }
     }
@@ -224,8 +223,8 @@ impl AttackDefinition {
     pub fn telegraph_ticks(&self) -> i32 {
         match &self.kind {
             AttackKind::Telegraphed(attack) => attack.telegraph_ticks,
-            AttackKind::Ground(ground) => ground.telegraph_ticks,
-            AttackKind::Instant(_) | AttackKind::OnContact(_) | AttackKind::Special => 0,
+            AttackKind::Special(special) => special.telegraph_ticks(),
+            AttackKind::Instant(_) | AttackKind::OnContact(_) => 0,
         }
     }
 
@@ -245,7 +244,7 @@ impl AttackDefinition {
         let (payload, speed) = match &self.kind {
             AttackKind::Instant(attack) => (&attack.payload, attack.projectile_speed),
             AttackKind::Telegraphed(attack) => (&attack.payload, attack.projectile_speed),
-            AttackKind::OnContact(_) | AttackKind::Ground(_) | AttackKind::Special => return 0,
+            AttackKind::OnContact(_) | AttackKind::Special(_) => return 0,
         };
         if payload.style == AttackStyle::Melee {
             return 0;
@@ -341,7 +340,7 @@ impl AttackDefinition {
         match &mut self.kind {
             AttackKind::Instant(attack) => attack.projectile_speed = Some(speed),
             AttackKind::Telegraphed(attack) => attack.projectile_speed = Some(speed),
-            AttackKind::OnContact(_) | AttackKind::Ground(_) | AttackKind::Special => {
+            AttackKind::OnContact(_) | AttackKind::Special(_) => {
                 panic!("`with_projectile_speed` only applies to an attack that rolls before it lands, and '{}' does not", self.name)
             }
         }
@@ -356,7 +355,7 @@ impl AttackDefinition {
         assert!(prayer != ProtectionPrayer::None, "a prayer reduction needs a prayer");
         assert!((0.0..=1.0).contains(&penetration), "penetration must be within [0, 1]");
         match &mut self.kind {
-            AttackKind::Ground(ground) => ground.prayer_reduction = Some(PrayerReduction { prayer, penetration }),
+            AttackKind::Special(SpecialAttack::Ground(ground)) => ground.prayer_reduction = Some(PrayerReduction { prayer, penetration }),
             _ => panic!("`with_prayer_reduction` only applies to a ground attack, and '{}' is not one", self.name),
         }
         self
@@ -468,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "ground attack")]
+    #[should_panic(expected = "special attack")]
     fn an_accuracy_builder_on_a_ground_attack_panics() {
         boulder().with_always_hits(true);
     }
@@ -582,13 +581,12 @@ mod tests {
     }
 
     #[test]
-    fn any_kind_of_attack_can_require_a_range_check() {
+    fn a_special_attack_can_require_a_range_check() {
         let from = TileCoord::new(0, 0);
         let ground = AttackDefinition::ground("Rockfall", Some(6), 2, GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(10))
             .with_min_range(2);
-        let special = AttackDefinition::with_kind("Special".into(), Some(6), AttackKind::Special).with_min_range(2);
 
-        for attack in [ground, special] {
+        for attack in [ground] {
             assert!(!attack.is_in_reach(from, 1, 1, TileCoord::new(1, 0)), "{} too close", attack.name);
             assert!(attack.is_in_reach(from, 1, 1, TileCoord::new(4, 0)), "{} in band", attack.name);
             assert!(!attack.is_in_reach(from, 1, 1, TileCoord::new(7, 0)), "{} too far", attack.name);
