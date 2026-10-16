@@ -96,10 +96,7 @@ pub struct World {
     /// Items lying on the ground.
     pub(super) ground_items: super::ground_items::GroundItems,
     /// The pet following the player.
-    pub(super) follower: Option<super::followers::Follower>,
-    /// Ground-targeted attacks released and waiting out their delay. They belong to the world, not
-    /// to whoever released them, so they still land if it dies.
-    ground_strikes: Vec<PendingGroundStrike>,
+    pub(super) follower: Option<super::followers::Follower>
 }
 
 fn slot_index(id: EntityId) -> Option<usize> {
@@ -206,7 +203,6 @@ impl World {
             scenery_state: SceneryState::new(),
             ground_items: Default::default(),
             follower: None,
-            ground_strikes: Vec::new(),
         }
     }
 
