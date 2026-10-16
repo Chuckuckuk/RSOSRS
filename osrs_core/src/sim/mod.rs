@@ -39,7 +39,7 @@ pub use scenery::{Loc, LocChange, LocKey, SceneryIndex, SpawnedLoc};
 pub use inventory::{Inventory, ItemStack, INVENTORY_SIZE};
 pub use entity::{Behavior, BossState, Entity, HealerState, NpcState};
 pub use loadout::Loadout;
-pub use npc_factory::{attack_from_def, pattern_from_def};
+pub use npc_factory::{attack_from_def, pattern_from_def, phases_from_def};
 pub use player::Player;
 pub use player_runtime::{AttackPlan, Dps, UNARMED_SPEED_FALLBACK};
 pub use skills::Skills;

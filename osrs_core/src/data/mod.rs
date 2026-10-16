@@ -11,6 +11,7 @@ mod items;
 mod npcs;
 mod prayers;
 mod scenario;
+mod specials;
 mod spells;
 
 use std::collections::BTreeMap;
@@ -27,6 +28,10 @@ pub use items::{AmmoDef, AmmoWeight, EquipSlot, ItemDef, SetDef, SpecialAttackDe
 pub use npcs::{AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels, NpcMovementDef, NpcSounds, RotationDef, SummonDef};
 pub use prayers::PrayerDef;
 pub use scenario::{builtin_scenarios, load_scenario, InventoryStack, NpcSpawn, PlayerSetup, ScenarioDef, SkillLevelsDef};
+pub use specials::{
+    AnchorData, DamageData, HazardData, LandingHazardsData, LeavesData, ObstructedShotData, PeriodicData, PhaseAttackData, PhaseData,
+    PlacementData, PositionData, PrayerData, PrayerReductionData, ScatterData, SpecialData, TilesData,
+};
 pub use spells::{LevelScaling, SpellDef};
 
 use crate::combat::StatusEffectDefinition;
@@ -487,6 +492,7 @@ impl Registry {
                     }
                 }
             }
+            check_specials(npc, &who, &mut problems);
             if npc.rotation == RotationDef::Weighted && npc.attacks.iter().all(|a| a.weight <= 0.0) && !npc.attacks.is_empty() {
                 problems.push(format!("{who}: a weighted rotation needs at least one positive weight"));
             }
@@ -629,6 +635,119 @@ impl Registry {
     }
 }
 
+/// What a monster's hazards, specials, riders and phases ask for that the rules cannot give.
+fn check_specials(npc: &NpcDef, who: &str, problems: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    for hazard in &npc.hazards {
+        if hazard.id.is_empty() || !seen.insert(hazard.id.as_str()) {
+            problems.push(format!("{who}: hazard ids must be present and unique ('{}')", hazard.id));
+        }
+        if hazard.damage_per_tick < 0 || hazard.lifetime_ticks.is_some_and(|ticks| ticks < 1) {
+            problems.push(format!("{who}: hazard '{}' needs a non-negative damage and a lifetime of at least 1", hazard.id));
+        }
+    }
+    let has_hazard = |id: &str| npc.hazards.iter().any(|h| h.id == id);
+
+    for attack in &npc.attacks {
+        let label = format!("{who}: attack '{}'", attack.name);
+        match &attack.special {
+            Some(SpecialData::Position(position)) => check_position(position, &label, &has_hazard, problems),
+            Some(SpecialData::ObstructedShot(shot)) => {
+                if attack.style == crate::combat::AttackStyle::Melee {
+                    problems.push(format!("{label}: an obstructed shot is ranged or magic"));
+                }
+                if let Some(landing) = &shot.landing_hazards {
+                    if !has_hazard(&landing.hazard) {
+                        problems.push(format!("{label}: leaves unknown hazard '{}'", landing.hazard));
+                    }
+                    if landing.radius < 0 || landing.min < 1 || landing.max < landing.min {
+                        problems.push(format!("{label}: landing hazards need a radius and a count range of at least 1"));
+                    }
+                }
+                match &shot.on_blocked {
+                    Some(position) => check_position(position, &label, &has_hazard, problems),
+                    None => problems.push(format!("{label}: an obstructed shot needs an on_blocked effect")),
+                }
+            }
+            None => {}
+        }
+        if attack.special.is_some() && attack.impact_delay_ticks > 0 {
+            problems.push(format!("{label}: a special has a telegraph, not an impact delay"));
+        }
+        for rider in &attack.riders {
+            check_position(rider, &label, &has_hazard, problems);
+        }
+    }
+
+    if npc.phases.is_empty() {
+        return;
+    }
+    let mut names = std::collections::HashSet::new();
+    let mut previous = 1.0f32;
+    for (index, phase) in npc.phases.iter().enumerate() {
+        let label = format!("{who}: phase '{}'", phase.name);
+        if phase.name.is_empty() || !names.insert(phase.name.as_str()) {
+            problems.push(format!("{who}: phase names must be present and unique ('{}')", phase.name));
+        }
+        match (index, phase.when_hp_below) {
+            (0, Some(_)) => problems.push(format!("{label}: the first phase is the start of the fight and has no when_hp_below")),
+            (0, None) => {}
+            (_, None) => problems.push(format!("{label}: a later phase needs a when_hp_below")),
+            (_, Some(fraction)) => {
+                if !(fraction > 0.0 && fraction < previous) {
+                    problems.push(format!("{label}: when_hp_below must fall below the phase before it (and above 0)"));
+                } else {
+                    previous = fraction;
+                }
+            }
+        }
+        if phase.attacks.is_empty() {
+            problems.push(format!("{label}: a phase needs at least one attack"));
+        }
+        for use_ in &phase.attacks {
+            if !npc.attacks.iter().any(|a| a.name == use_.attack) {
+                problems.push(format!("{label}: uses unknown attack '{}'", use_.attack));
+            }
+            if use_.speed.is_some_and(|speed| speed < 1) {
+                problems.push(format!("{label}: a speed must be at least 1"));
+            }
+        }
+        for periodic in &phase.periodic {
+            if periodic.every_ticks < 1 {
+                problems.push(format!("{label}: a periodic special needs a period of at least 1 tick"));
+            }
+            check_position(&periodic.special, &label, &has_hazard, problems);
+        }
+    }
+}
+
+fn check_position(position: &PositionData, label: &str, has_hazard: &dyn Fn(&str) -> bool, problems: &mut Vec<String>) {
+    let tiles = &position.tiles;
+    match (tiles.square, &tiles.offsets, &tiles.scatter) {
+        (Some(radius), None, None) if radius >= 0 => {}
+        (None, Some(offsets), None) if !offsets.is_empty() => {}
+        (None, None, Some(scatter)) if scatter.radius >= 0 && scatter.min >= 1 && scatter.max >= scatter.min => {}
+        _ => problems.push(format!("{label}: tiles need exactly one valid square, offsets or scatter")),
+    }
+    let negative = match position.damage {
+        DamageData::Fixed(amount) => amount < 0,
+        DamageData::Uniform { max } => max < 0,
+    };
+    if negative {
+        problems.push(format!("{label}: area damage must not be negative"));
+    }
+    if let Some(reduction) = position.prayer_reduction {
+        if !(0.0..=1.0).contains(&reduction.penetration) {
+            problems.push(format!("{label}: a prayer reduction's penetration must be within 0..=1"));
+        }
+    }
+    if let Some(leaves) = &position.leaves {
+        if !has_hazard(&leaves.hazard) {
+            problems.push(format!("{label}: leaves unknown hazard '{}'", leaves.hazard));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -661,6 +780,40 @@ mod tests {
         assert!(problems.iter().any(|p| p.contains("unknown item 'ghost'")));
         assert!(problems.iter().any(|p| p.contains("hitpoints")));
         assert!(problems.iter().any(|p| p.contains("speed")));
+    }
+
+    #[test]
+    fn specials_and_phases_that_name_things_that_do_not_exist_are_rejected() {
+        let mut registry = Registry::new();
+        registry
+            .merge_json(
+                "bad",
+                r#"{
+                    "npcs":[{
+                        "id":"n","hitpoints":10,
+                        "attacks":[
+                            {"name":"Rocks","riders":[{"tiles":{"square":1},"damage":{"fixed":5},"leaves":{"hazard":"ghost"}}]},
+                            {"name":"Shot","style":"magic","special":{"obstructed_shot":{}}}
+                        ],
+                        "phases":[
+                            {"name":"start","attacks":[{"attack":"Rocks"}]},
+                            {"name":"a","when_hp_below":0.5,"attacks":[{"attack":"Rocks"}]},
+                            {"name":"b","when_hp_below":0.7,"attacks":[{"attack":"Missing"}]},
+                            {"name":"c","attacks":[]}
+                        ]
+                    }]
+                }"#,
+            )
+            .unwrap();
+
+        let DataError::Invalid(problems) = registry.validate().unwrap_err() else { panic!("expected Invalid") };
+
+        assert!(problems.iter().any(|p| p.contains("unknown hazard 'ghost'")), "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("needs an on_blocked effect")), "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("a later phase needs a when_hp_below")), "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("must fall below the phase before it")), "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("unknown attack 'Missing'")), "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("needs at least one attack")), "{problems:?}");
     }
 
     #[test]

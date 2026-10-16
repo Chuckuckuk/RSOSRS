@@ -154,7 +154,7 @@ mod tests {
     };
     use crate::encounters::{Phase, PhaseTrigger, TriggerAction, TriggerBinding};
     use crate::sim::config::{BossConfig, HealerConfig, NpcConfig, PassiveConfig};
-    use crate::sim::entity::Entity;
+    use crate::sim::entity::{Behavior, Entity};
     use crate::pathfinding::TargetSpec;
     use crate::sim::world::{SpawnBlueprint, PLAYER_ID};
     use crate::sim::{sounds, Combatant, WorldEvent};
@@ -1111,44 +1111,125 @@ mod tests {
         assert!(cleared, "the boss walked over it and destroyed it");
     }
 
-    #[test]
-    fn a_shot_stopped_by_a_boulder_blows_it_up_instead_of_hitting_the_player() {
-        let blast = PositionResolver::new(GroundTarget::square(HazardAnchor::SelfTile, 1), GroundDamage::Fixed(100));
+    /// A boss firing an obstructed shot at the player from (0, 8), with `boulders` standing between.
+    fn world_with_obstructed_shot(boulders: bool) -> World {
+        let blast = PositionResolver::new(GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(100));
         let hit = crate::combat::TargetedAttack::new(AttackStyle::Magic)
             .with_always_hits(true)
             .with_max_hit(crate::combat::MaxHitSource::Fixed(40));
         let magic = AttackDefinition::special("Magic", Some(15), 1, ObstructedShot::new(hit, ProjectileSpeed::tiles_per_tick(3.0), blast));
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
-        let boulders = rock_leaving(boulder(), HazardPlacement::EveryCoveredTile, GroundTarget::offsets(HazardAnchor::Target, vec![(0, 4)]));
         let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![magic.shared()]));
-        // the boulder is the boss's own, so it does not block the boss's sight: only another owner's would.
-        let phase = Phase::new("Main", pattern, None);
+        let mut phase = Phase::new("Main", pattern, None);
+        if boulders {
+            let boulder_between = rock_leaving(
+                boulder(),
+                HazardPlacement::EveryCoveredTile,
+                GroundTarget::offsets(HazardAnchor::Target, vec![(0, 4)]),
+            );
+            phase = phase.with_periodic(1, boulder_between.shared());
+        }
         world.configure_boss(boss, vec![phase.clone()], phase, vec![]);
-        let _ = boulders;
-
-        run_ticks(&mut world, 8);
-
-        // with nothing in the way the shot hits the player, bound until it lands
-        assert!(world.log().iter().any(|l| l.starts_with("Boss uses Magic on the player")), "{:?}", world.log());
+        world
     }
 
     #[test]
-    fn a_rider_goes_off_with_its_attack_and_leaves_a_boulder_where_the_player_stands() {
-        let rocks = PositionResolver::new(
-            GroundTarget::scatter_between(HazardAnchor::Target, 1, 3, 6).including_anchor(),
-            GroundDamage::Fixed(0),
-        )
-        .leaving(boulder(), HazardPlacement::AnchorTile);
-        let ranged = AttackDefinition::telegraphed("Ranged", Some(15), 1, AttackStyle::Ranged)
-            .with_rider(crate::combat::SpecialAttack::new(0, rocks));
-        let (mut world, _) = rock_world_with(ranged);
+    fn a_shot_with_a_clear_line_hits_the_player() {
+        let mut world = world_with_obstructed_shot(false);
+        let before = world.player.mover.actor.health().current();
 
-        run_ticks(&mut world, 4);
+        run_ticks(&mut world, 12);
 
-        assert!(world.log().iter().any(|l| l.starts_with("Boss uses Ranged on the player")), "{:?}", world.log());
-        let boulders: Vec<TileCoord> = world.hazards().map(|(_, tile, _)| tile).collect();
-        assert!(!boulders.is_empty());
-        assert!(boulders.iter().all(|tile| *tile == tc(0, 0)), "the one that stays is where the player stood: {boulders:?}");
+        assert!(world.player.mover.actor.health().current() < before, "{:?}", world.log());
+    }
+
+    #[test]
+    fn a_shot_stopped_by_its_owners_own_boulder_blows_it_up_instead_of_hitting_the_player() {
+        let mut world = world_with_obstructed_shot(true);
+        let before = world.player.mover.actor.health().current();
+
+        run_ticks(&mut world, 12);
+
+        // the blast is centred on the boulder, four tiles away: the player at the origin is outside it
+        assert_eq!(world.player.mover.actor.health().current(), before, "{:?}", world.log());
+        assert!(world.log().iter().all(|l| !l.contains("uses Magic on the player for")), "nothing hit the player");
+    }
+
+    // ---- GigaJad, a boss made of the generic parts ----
+
+    fn gigajad_world() -> (World, EntityId) {
+        let mut world = data_arena();
+        let boss = world.spawn_npc_def("gigajad", tc(0, 10)).unwrap();
+        world.set_hostile(boss, true);
+        (world, boss)
+    }
+
+    fn phase_of(world: &World, boss: EntityId) -> String {
+        match &world.entity(boss).unwrap().behavior {
+            Behavior::Boss(state) => state.current_phase_name().unwrap_or("").to_owned(),
+            _ => panic!("not a boss"),
+        }
+    }
+
+    /// Takes the boss down to `fraction` of its health and lets a tick pass.
+    fn hurt_to(world: &mut World, boss: EntityId, fraction: f32) {
+        let entity = world.entity_mut(boss).unwrap();
+        let max = entity.health().max();
+        let current = entity.health().current();
+        let target = (max as f32 * fraction) as i32;
+        entity.mover.actor.health_mut().damage(current - target);
+        run_ticks(world, 1);
+    }
+
+    #[test]
+    fn gigajad_moves_through_its_phases_as_its_health_falls() {
+        let (mut world, boss) = gigajad_world();
+        run_ticks(&mut world, 2);
+        assert_eq!(phase_of(&world, boss), "opening");
+
+        hurt_to(&mut world, boss, 0.55);
+        assert_eq!(phase_of(&world, boss), "barrage");
+        hurt_to(&mut world, boss, 0.35);
+        assert_eq!(phase_of(&world, boss), "advance");
+        hurt_to(&mut world, boss, 0.15);
+        assert_eq!(phase_of(&world, boss), "last stand");
+    }
+
+    #[test]
+    fn gigajads_last_stand_drops_a_boulder_every_three_ticks() {
+        let (mut world, boss) = gigajad_world();
+        hurt_to(&mut world, boss, 0.15);
+        run_ticks(&mut world, 12);
+
+        // one falls every 3 ticks (his own volley may blow some up on the way, so count the falls)
+        let falls = world.log().iter().filter(|l| l.contains("lands Falling boulder")).count();
+        assert_eq!(falls, 4, "a boulder every 3 ticks over 12: {falls}");
+        for (_, tile, owner) in world.hazards() {
+            assert_eq!(owner, boss);
+            assert!(tile.chebyshev_distance_to(tc(0, 0)) <= 4, "within 4 tiles of the player: {tile:?}");
+        }
+    }
+
+    #[test]
+    fn gigajad_advances_on_the_player_in_its_advance_phase_but_not_before() {
+        let (mut world, boss) = gigajad_world();
+        run_ticks(&mut world, 6);
+        assert_eq!(world.entity(boss).unwrap().tile(), tc(0, 10), "he holds still while he can hit the player");
+
+        hurt_to(&mut world, boss, 0.35);
+        run_ticks(&mut world, 6);
+
+        assert!(world.entity(boss).unwrap().tile().z < 10, "he walks on the player: {:?}", world.entity(boss).unwrap().tile());
+    }
+
+    #[test]
+    fn gigajads_opening_ranged_attack_drops_rocks_and_leaves_a_blocking_boulder_where_the_player_stood() {
+        let (mut world, _) = gigajad_world();
+
+        run_ticks(&mut world, 200);
+
+        let boulders: Vec<TileCoord> = world.hazards().filter(|(name, _, _)| *name == "Boulder").map(|(_, tile, _)| tile).collect();
+        assert!(!boulders.is_empty(), "his ranged attack left a boulder in 200 ticks: {:?}", world.log().iter().rev().take(5).collect::<Vec<_>>());
     }
 }

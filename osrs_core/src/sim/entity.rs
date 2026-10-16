@@ -129,14 +129,20 @@ impl Entity {
         let behavior = if def.attacks.is_empty() {
             Behavior::Passive
         } else {
-            let pattern = Rc::new(npc_factory::pattern_from_def(def));
-            let phase = Phase::new("default", pattern, Some(npc_factory::movement_policy_from_def(def.movement)));
-            let mut phases_by_name = HashMap::new();
-            phases_by_name.insert(phase.name.clone(), phase.clone());
+            // a monster with stages fights as its phases say; one without has the one phase
+            let (phases, triggers) = if def.phases.is_empty() {
+                let pattern = Rc::new(npc_factory::pattern_from_def(def));
+                let phase = Phase::new("default", pattern, Some(npc_factory::movement_policy_from_def(def.movement)));
+                (vec![phase], Vec::new())
+            } else {
+                npc_factory::phases_from_def(def)
+            };
+            let phase = phases[0].clone();
+            let phases_by_name = phases.into_iter().map(|p| (p.name.clone(), p)).collect();
             Behavior::Boss(BossState {
                 targets_player: false,
                 phases_by_name,
-                triggers: Vec::new(),
+                triggers,
                 combat_state: Some(NpcCombatState::new(Rc::clone(&phase.attack_pattern)).with_attack_speed(def.attack_speed)),
                 current_phase: Some(phase),
             })
