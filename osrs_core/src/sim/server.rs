@@ -169,8 +169,10 @@ pub struct HazardView {
     /// Names it while it lies there.
     pub id: u32,
     pub tile: TileCoord,
-    /// The game cache's object it is drawn as.
-    pub object: u32,
+    /// The game cache's object it is drawn as, if it is drawn as one.
+    pub object: Option<u32>,
+    /// The game cache's graphic it is played as on its tile; it wins over the object.
+    pub graphic: Option<u32>,
 }
 
 /// An item lying on the ground.
@@ -527,7 +529,7 @@ impl Server {
                 .world
                 .drawn_hazards()
                 .into_iter()
-                .map(|(id, tile, object)| HazardView { id: id.0, tile, object })
+                .map(|(id, tile, object, graphic)| HazardView { id: id.0, tile, object, graphic })
                 .collect(),
             ground_items: self
                 .world

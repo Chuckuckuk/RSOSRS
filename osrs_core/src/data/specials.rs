@@ -21,8 +21,11 @@ pub struct HazardData {
     pub lifetime_ticks: Option<i32>,
     /// The monster that left it destroys it by walking over it.
     pub cleared_by_owner_walking: bool,
-    /// The game cache's object a client draws it as (a boulder, a patch of lava).
+    /// The game cache's object a client draws it as (a boulder).
     pub object: Option<u32>,
+    /// The game cache's graphic (spot animation) a client plays on its tile instead (a lava pool);
+    /// it wins over `object`.
+    pub graphic: Option<u32>,
 }
 
 impl Default for HazardData {
@@ -36,6 +39,7 @@ impl Default for HazardData {
             lifetime_ticks: None,
             cleared_by_owner_walking: false,
             object: None,
+            graphic: None,
         }
     }
 }

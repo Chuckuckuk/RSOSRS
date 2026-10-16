@@ -1270,7 +1270,10 @@ mod tests {
         let rock = rock_leaving(drawn, HazardPlacement::AnchorTile, GroundTarget::square(HazardAnchor::Target, 0));
         let (mut world, _) = world_with_periodic(rock, 1);
         run_ticks(&mut world, 1);
-        assert_eq!(world.drawn_hazards().iter().map(|(_, tile, object)| (*tile, *object)).collect::<Vec<_>>(), vec![(tc(0, 0), 6950)]);
+        assert_eq!(
+            world.drawn_hazards().iter().map(|(_, tile, object, graphic)| (*tile, *object, *graphic)).collect::<Vec<_>>(),
+            vec![(tc(0, 0), Some(6950), None)]
+        );
 
         let invisible = rock_leaving(lava(), HazardPlacement::AnchorTile, GroundTarget::square(HazardAnchor::Target, 0));
         let (mut world, _) = world_with_periodic(invisible, 1);

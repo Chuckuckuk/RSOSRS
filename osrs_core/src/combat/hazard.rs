@@ -19,6 +19,8 @@ pub struct HazardDef {
     pub cleared_by_owner_walking: bool,
     /// The cache object a client draws it as, if it is drawn at all.
     pub object: Option<u32>,
+    /// The cache graphic (spot animation) a client draws it as instead, played on its tile.
+    pub graphic: Option<u32>,
 }
 
 impl HazardDef {
@@ -31,6 +33,7 @@ impl HazardDef {
             lifetime_ticks: None,
             cleared_by_owner_walking: false,
             object: None,
+            graphic: None,
         }
     }
 
@@ -59,6 +62,12 @@ impl HazardDef {
     /// Drawn by clients as the cache object `object`.
     pub fn drawn_as(mut self, object: u32) -> Self {
         self.object = Some(object);
+        self
+    }
+
+    /// Drawn by clients as the cache graphic `graphic`, on its tile.
+    pub fn drawn_as_graphic(mut self, graphic: u32) -> Self {
+        self.graphic = Some(graphic);
         self
     }
 

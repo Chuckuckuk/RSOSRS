@@ -78,7 +78,7 @@ pub struct Arrivals(pub HashMap<Entity, f32>);
 struct Until(f32);
 
 /// The graphics' definitions and the models built from them so far.
-struct ProjectileArt {
+pub(crate) struct ProjectileArt {
     cache: Cache,
     defs: HashMap<u32, SpotAnim>,
     texture_hsl: HashMap<u32, u16>,
@@ -121,6 +121,15 @@ impl ProjectileArt {
             self.animated.insert(graphic, built);
         }
         self.animated.get(&graphic).and_then(Option::as_ref)
+    }
+
+    /// A graphic as something to put in the scene: its model and, if it has an animation, the
+    /// clip to loop on it.
+    pub(crate) fn drawable(&mut self, graphic: u32) -> Option<(LocMesh, Option<Clip>)> {
+        if let Some(drawn) = self.animated(graphic).cloned() {
+            return Some((drawn.mesh, Some(drawn.clip)));
+        }
+        self.mesh(graphic).cloned().map(|mesh| (mesh, None))
     }
 
     fn mesh(&mut self, graphic: u32) -> Option<&LocMesh> {

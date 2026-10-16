@@ -436,12 +436,14 @@ impl World {
         })
     }
 
-    /// The hazards a client should draw: each one's entity id, tile and the cache object it is
-    /// drawn as. Hazards with no object are not drawn.
-    pub fn drawn_hazards(&self) -> Vec<(EntityId, TileCoord, u32)> {
+    /// The hazards a client should draw: each one's entity id, tile, and the cache object and
+    /// graphic it is drawn as. Hazards with neither are not drawn.
+    pub fn drawn_hazards(&self) -> Vec<(EntityId, TileCoord, Option<u32>, Option<u32>)> {
         self.entities()
             .filter_map(|entity| match &entity.behavior {
-                Behavior::Hazard(state) if !state.gone => state.def.object.map(|object| (entity.id, entity.tile(), object)),
+                Behavior::Hazard(state) if !state.gone && (state.def.object.is_some() || state.def.graphic.is_some()) => {
+                    Some((entity.id, entity.tile(), state.def.object, state.def.graphic))
+                }
                 _ => None,
             })
             .collect()

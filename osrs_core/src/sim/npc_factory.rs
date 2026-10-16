@@ -121,6 +121,9 @@ fn hazard_named(hazards: &[HazardData], id: &str) -> Rc<HazardDef> {
     if let Some(object) = data.object {
         def = def.drawn_as(object);
     }
+    if let Some(graphic) = data.graphic {
+        def = def.drawn_as_graphic(graphic);
+    }
     Rc::new(def)
 }
 

@@ -135,7 +135,7 @@
           "name": "Lava",
           "damage_per_tick": 6,
           "cleared_by_owner_walking": true,
-          "object": 17334
+          "graphic": 1246
         }
       ],
       "attacks": [
