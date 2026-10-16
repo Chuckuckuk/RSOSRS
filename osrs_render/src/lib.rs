@@ -155,6 +155,9 @@ pub struct AnimatedModel {
     shown: Option<(usize, usize)>,
     /// Whether the active clip loops; a one-shot clip holds its last frame once it has played.
     looping: bool,
+    /// Where (client ticks into a one-shot clip) it hangs, swaying a few frames either side,
+    /// instead of playing on: the moment an attack lets go, held while the attacker repeats it.
+    hover: Option<f32>,
     /// The height above the feet (tiles) of the highest vertex of every frame of every clip.
     tops: Vec<Vec<f32>>,
 }
@@ -179,6 +182,7 @@ impl AnimatedModel {
             self.active = index;
             self.ticks = 0.0;
             self.looping = true;
+            self.hover = None;
             self.shown = None;
         }
     }
@@ -190,8 +194,15 @@ impl AnimatedModel {
             self.active = index;
             self.ticks = 0.0;
             self.looping = false;
+            self.hover = None;
             self.shown = None;
         }
+    }
+
+    /// Makes the one-shot clip being played hang around `at` client ticks into it once it gets
+    /// there (`None`: play on and hold the last frame). Has no effect on a looping clip.
+    pub fn set_hover(&mut self, at: Option<f32>) {
+        self.hover = at;
     }
 
     /// How long clip `index` lasts, in seconds.
@@ -263,7 +274,7 @@ pub fn spawn_animated(
     assert!(!clips.is_empty(), "an animated model needs at least one clip");
     let (parent, parts) = spawn_parts(commands, meshes, materials, images, textures, loc, transform);
     let tops = frame_tops(&clips);
-    commands.entity(parent).insert(AnimatedModel { parts, clips, active: 0, ticks: 0.0, shown: None, looping: true, tops });
+    commands.entity(parent).insert(AnimatedModel { parts, clips, active: 0, ticks: 0.0, shown: None, looping: true, hover: None, tops });
     parent
 }
 
@@ -300,6 +311,11 @@ impl Plugin for ModelAnimationPlugin {
     }
 }
 
+/// How far (client ticks) a hovering clip sways either side of its hover point, and how long one
+/// sway takes.
+const HOVER_SPAN: f32 = 10.0;
+const HOVER_PERIOD: f32 = 60.0;
+
 /// One client tick is 20 ms.
 const TICKS_PER_SECOND: f32 = 50.0;
 
@@ -310,8 +326,15 @@ fn play_animations(time: Res<Time>, mut models: Query<&mut AnimatedModel>, mut m
         let ticks = if model.looping {
             model.ticks
         } else {
-            // a one-shot clip stops on its last frame
-            model.ticks.min(model.clips[active].duration().saturating_sub(1) as f32)
+            // a one-shot clip stops on its last frame, or hangs about its hover point
+            let last = model.clips[active].duration().saturating_sub(1) as f32;
+            match model.hover {
+                Some(at) if model.ticks > at => {
+                    let sway = HOVER_SPAN * ((model.ticks - at) * std::f32::consts::TAU / HOVER_PERIOD).sin();
+                    (at + sway).clamp(0.0, last)
+                }
+                _ => model.ticks.min(last),
+            }
         };
         let frame = model.clips[active].frame_at(ticks);
         if model.shown == Some((active, frame)) {

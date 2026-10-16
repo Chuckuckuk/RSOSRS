@@ -4,6 +4,7 @@
 
 use crate::actors::EntityId;
 use crate::model::Skill;
+use crate::tiles::TileCoord;
 
 /// A fighter: the player or one of the world's NPCs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -17,8 +18,9 @@ pub enum WorldEvent {
     /// `attacker` threw an attack at `target`: its attack animation plays now. `animation` is the
     /// cache sequence of this particular attack when it has its own (else the attacker's usual
     /// attack animation). An attack with a telegraph is reported as its telegraph begins, so the
-    /// animation is the warning; one without is reported as it resolves.
-    Attack { attacker: Combatant, target: Combatant, animation: Option<u32> },
+    /// animation is the warning; one without is reported as it resolves. `windup_ticks` is how
+    /// long until it resolves (0 for one reported as it does).
+    Attack { attacker: Combatant, target: Combatant, animation: Option<u32>, windup_ticks: i32 },
     /// `from` loosed a projectile (the cache graphic `graphic`) at `to`; it arrives in `ticks`.
     /// `draw` is the graphic shown on the shooter as it nocks and draws (an arrow in the bow).
     /// `released` says the shooter's wind-up has already played (a telegraphed attack, announced
@@ -27,6 +29,13 @@ pub enum WorldEvent {
     /// The cache graphic `graphic` plays on `on`, starting in `delay_ticks` (0 = now): the rocks of
     /// Jad's stomp, a spell's splash as it lands.
     Graphic { on: Combatant, graphic: u32, delay_ticks: i32 },
+    /// The cache graphic `graphic` plays on the ground at `tile`, starting in `delay_ticks`: a rock
+    /// falling, a spell going off where it struck.
+    TileGraphic { tile: TileCoord, graphic: u32, delay_ticks: i32 },
+    /// `from` loosed a projectile at the ground at `tile`; it arrives in `ticks`. As `Projectile`.
+    TileProjectile { from: Combatant, tile: TileCoord, graphic: u32, ticks: i32, released: bool },
+    /// The cache sound effect `sound` is heard from `tile`, starting in `delay_ticks`.
+    TileSound { sound: u32, tile: TileCoord, delay_ticks: i32 },
     /// `healer` restored `amount` hitpoints to `target`, playing the cache sequence `animation`.
     Heal { healer: Combatant, target: Combatant, amount: i32, animation: Option<u32> },
     /// A hit landed on `target`; 0 is a block.

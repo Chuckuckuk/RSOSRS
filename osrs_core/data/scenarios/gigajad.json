@@ -1,0 +1,89 @@
+{
+  "name": "GigaJad in the Fight Cave",
+  "seed": 63,
+  "half_extent": 20,
+  "location": [
+    2400,
+    5080
+  ],
+  "player": {
+    "levels": {
+      "attack": 75,
+      "strength": 80,
+      "defence": 75,
+      "ranged": 90,
+      "magic": 80,
+      "prayer": 70,
+      "hitpoints": 85,
+      "agility": 70
+    },
+    "equipment": [
+      "armadyl_helmet",
+      "avas_assembler",
+      "necklace_of_anguish",
+      "dragon_arrow",
+      "twisted_bow",
+      "armadyl_chestplate",
+      "armadyl_chainskirt",
+      "barrows_gloves",
+      "pegasian_boots",
+      "archers_ring_i"
+    ],
+    "prayers": [
+      "protect_from_magic"
+    ],
+    "inventory": [
+      {
+        "item": "ranging_potion_4"
+      },
+      {
+        "item": "prayer_potion_4"
+      },
+      {
+        "item": "prayer_potion_4"
+      },
+      {
+        "item": "prayer_potion_4"
+      },
+      {
+        "item": "prayer_potion_4"
+      },
+      {
+        "item": "super_restore_4"
+      },
+      {
+        "item": "super_restore_4"
+      },
+      {
+        "item": "saradomin_brew_4"
+      },
+      {
+        "item": "saradomin_brew_4"
+      },
+      {
+        "item": "shark",
+        "quantity": 6
+      },
+      {
+        "item": "cooked_karambwan",
+        "quantity": 4
+      }
+    ],
+    "start": [
+      0,
+      0
+    ],
+    "attack": 0
+  },
+  "npcs": [
+    {
+      "npc": "gigajad",
+      "at": [
+        -2,
+        8
+      ],
+      "hostile": true
+    }
+  ],
+  "notes": "A made-up boss built from the generic engine parts (hazards, line of sight, obstructed shots, riders, phases). Switch protection prayers as with Jad. Boulders block your path but not your sight, and his magic hits a boulder in its way instead of you. Below 60% he fires a three-shot magic volley, below 40% he walks at you, below 20% his healers come and a boulder falls near you every 3 ticks. Headless: `cargo run -p osrs_core --bin simulate -- gigajad --ticks 300`."
+}

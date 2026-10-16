@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::specials::{HazardData, PhaseData, RiderData, SpecialData};
 use super::OnHitDef;
 use crate::combat::AttackStyle;
 use crate::model::{AttributeSet, Condition, DamageType, EquipmentBonuses, Modifier};
@@ -67,6 +68,8 @@ pub struct NpcAttackDef {
     /// `animations.attack` (Jad rears up for magic and stomps for ranged). An attack with a
     /// telegraph starts it as the telegraph begins, so the player can read it and react.
     pub animation: Option<u32>,
+    /// Ticks into `animation` at which the attack lets go, when that is not its telegraph.
+    pub animation_release_ticks: Option<i32>,
     /// A graphic (cache spot animation) that flies from the monster to the target, arriving as the
     /// hit lands (Jad's fireball).
     pub projectile: Option<u32>,
@@ -80,6 +83,13 @@ pub struct NpcAttackDef {
     /// A cache sound effect heard as the attack resolves (the roll), not as it starts: Jad's
     /// ranged stomp. Only Jad's data uses it.
     pub resolve_sound: Option<u32>,
+    /// Makes this attack a special, decided by its resolver instead of a plain rolled hit. It keeps
+    /// the attack's own range, telegraph, speed, graphics and sounds; an obstructed shot also makes
+    /// its hit from the attack's style, max hit and prayer penetration.
+    pub special: Option<SpecialData>,
+    /// Area specials that go off with this attack, the tick it resolves (the rocks that fall as
+    /// Jad fires).
+    pub riders: Vec<RiderData>,
 }
 
 impl Default for NpcAttackDef {
@@ -102,11 +112,14 @@ impl Default for NpcAttackDef {
             modifiers: Vec::new(),
             on_hit: None,
             animation: None,
+            animation_release_ticks: None,
             projectile: None,
             target_graphic: None,
             impact_graphic: None,
             sound: None,
             resolve_sound: None,
+            special: None,
+            riders: Vec::new(),
         }
     }
 }
@@ -130,6 +143,8 @@ pub enum NpcMovementDef {
     MaintainDistance { distance: i32 },
     /// Chases a melee-fighting target, kites anything else.
     StyleReactive { kite_distance: i32 },
+    /// Walks on its target even while an attack could already reach it.
+    Advance,
 }
 
 /// The cache sequences an NPC plays in a fight.
@@ -215,6 +230,11 @@ pub struct NpcDef {
     pub bonuses: EquipmentBonuses,
     pub attributes: AttributeSet,
     pub attacks: Vec<NpcAttackDef>,
+    /// Hazards its attacks can leave in the world, named by `id`.
+    pub hazards: Vec<HazardData>,
+    /// Stages of the fight, if it has more than one. The first begins it; each later one begins
+    /// when its health falls to `when_hp_below` of its maximum and replaces the attacks it uses.
+    pub phases: Vec<PhaseData>,
     /// Ticks between one of its attacks resolving and the next (OSRS attack speed): the rate of
     /// the monster itself. An attack may carry its own `speed` instead.
     pub attack_speed: i32,
@@ -253,6 +273,8 @@ pub struct NpcDef {
 impl Default for NpcDef {
     fn default() -> Self {
         Self {
+            hazards: Vec::new(),
+            phases: Vec::new(),
             id: String::new(),
             name: String::new(),
             combat_level: 1,

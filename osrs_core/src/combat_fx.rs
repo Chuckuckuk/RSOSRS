@@ -21,12 +21,17 @@ const BAR_SECONDS: f32 = 6.0;
 const BAR_SCALE: f32 = 2.0;
 
 /// A one-shot animation a fighter is playing instead of walking or standing.
+#[derive(Default)]
 pub struct Action {
     pub clip: usize,
     /// When it is over (seconds of app time).
     pub until: f32,
     /// Whether the model has been told to play it yet.
     pub started: bool,
+    /// How long into the clip (client ticks) its attack lets go.
+    pub resolve_ticks: f32,
+    /// Whether the clip hangs about that point, as the attacker repeats the attack.
+    pub hover: bool,
 }
 
 /// A fighter's combat state, kept up to date from the server's events.
@@ -43,13 +48,18 @@ pub struct Fighter {
 }
 
 impl Fighter {
+    /// Where in its clip the fighter should hang, client ticks, if it is hanging.
+    pub fn hover_at(&self) -> Option<f32> {
+        self.action.as_ref().filter(|action| action.hover).map(|action| action.resolve_ticks)
+    }
+
     /// The one-shot clip this fighter should be playing at `now`, if its fight state says so: the
     /// death (held for good) or an attack/block that has not finished. Returns (clip, first time it
     /// is asked for, is the death); `None` when the fighter is free to walk or stand.
     pub fn clip(&mut self, now: f32, death: usize) -> Option<(usize, bool, bool)> {
         if self.dead {
             let first = self.action.as_ref().is_none_or(|a| a.clip != death || !a.started);
-            self.action = Some(Action { clip: death, until: f32::MAX, started: true });
+            self.action = Some(Action { clip: death, until: f32::MAX, started: true, ..Default::default() });
             return Some((death, first, true));
         }
         match &mut self.action {
@@ -173,7 +183,12 @@ impl Plugin for CombatFxPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, load_splat_images).add_systems(
             Update,
-            apply_events.after(super::poll_server).before(super::sync_player).before(super::npcs::sync_npcs),
+            apply_events
+                .after(super::poll_server)
+                .before(super::sync_player)
+                .before(super::npcs::sync_npcs)
+                // the ground anchors it spawns for tile effects must exist when they are played
+                .before(super::projectiles::DrawFx),
         )
         .add_systems(Update, (place_splats, place_bars).after(super::map_stream::stream_map));
     }
@@ -184,16 +199,23 @@ pub fn heading_between(from: Vec3, to: Vec3) -> f32 {
     (to.x - from.x).atan2(to.z - from.z)
 }
 
+/// Where the events' effects are queued to be drawn and heard, and the ground they land on.
+#[derive(bevy::ecs::system::SystemParam)]
+struct FxQueues<'w> {
+    projectiles: ResMut<'w, super::projectiles::ProjectileQueue>,
+    spots: ResMut<'w, super::projectiles::SpotQueue>,
+    sounds: ResMut<'w, super::sound_fx::SoundQueue>,
+    arrivals: Res<'w, super::projectiles::Arrivals>,
+    ground: Res<'w, osrs_render::streaming::StreamedWorld>,
+}
+
 /// Turns the server's events into fighter state, hit splats and sounds.
 #[allow(clippy::too_many_arguments)]
 fn apply_events(
     mut commands: Commands,
     time: Res<Time>,
     mut splat_images: ResMut<SplatImages>,
-    mut projectiles: ResMut<super::projectiles::ProjectileQueue>,
-    mut spots: ResMut<super::projectiles::SpotQueue>,
-    mut sounds: ResMut<super::sound_fx::SoundQueue>,
-    arrivals: Res<super::projectiles::Arrivals>,
+    mut fx: FxQueues,
     mut held: Local<Vec<(f32, WorldEvent)>>,
     mut images: ResMut<Assets<Image>>,
     mut server: NonSendMut<ServerLink>,
@@ -251,7 +273,7 @@ fn apply_events(
         };
         held_victim = None;
         if let Some(entity) = victim.and_then(entity_of) {
-            let due = arrivals.0.get(&entity).copied().unwrap_or(0.0);
+            let due = fx.arrivals.0.get(&entity).copied().unwrap_or(0.0);
             // (held events of one target all share its arrival time, so they keep their order)
             if due > now {
                 held.push((due, event));
@@ -260,7 +282,7 @@ fn apply_events(
             }
         }
         match event {
-            WorldEvent::Attack { attacker, target, animation } => {
+            WorldEvent::Attack { attacker, target, animation, windup_ticks } => {
                 let (Some(a), Some(t)) = (entity_of(attacker), entity_of(target)) else { continue };
                 // an attack with an animation of its own (Jad's stomp, his rearing up) plays that,
                 // when the model has it baked; anything else plays the fighter's usual attack
@@ -275,7 +297,15 @@ fn apply_events(
                 let length = length_of(a, attack);
                 if let Ok(mut fighter) = fighters.get_mut(a) {
                     if !fighter.dead {
-                        fighter.action = Some(Action { clip: attack, until: now + length, started: false });
+                        // a monster that repeats an attack of its own animation while it is still
+                        // playing (a volley) lingers in it: the pose is held, not started over
+                        let playing = fighter.action.as_ref().filter(|action| action.clip == attack && action.started && now < action.until);
+                        let lingers = animation.is_some() && matches!(attacker, Combatant::Npc(_)) && playing.is_some();
+                        // (it keeps hanging where the first attack of the run lets go)
+                        let resolve_ticks =
+                            playing.filter(|_| lingers).map_or(windup_ticks as f32 * TICK_SECONDS * 50.0, |action| action.resolve_ticks);
+                        fighter.action =
+                            Some(Action { clip: attack, until: now + length, started: lingers, resolve_ticks, hover: lingers });
                         fighter.face = toward;
                         fighter.bar_until = now + BAR_SECONDS;
                     }
@@ -288,7 +318,7 @@ fn apply_events(
                 if let (Some(a), Some(t)) = (entity_of(from), entity_of(to)) {
                     // `projectiles` times the release from the draw graphic (or, without one, from
                     // the attack animation) and has the arrow arrive as the hit lands
-                    projectiles.0.push(super::projectiles::Shot {
+                    fx.projectiles.0.push(super::projectiles::Shot {
                         from: a,
                         to: t,
                         graphic,
@@ -302,6 +332,33 @@ fn apply_events(
                     });
                 }
             }
+            WorldEvent::TileGraphic { tile, graphic, delay_ticks } => {
+                let at = now + delay_ticks as f32 * TICK_SECONDS;
+                if let Some(anchor) = tile_anchor(&mut commands, &fx.ground, tile, at + TILE_EFFECT_SECONDS) {
+                    fx.spots.0.push(super::projectiles::Spot { on: anchor, graphic, at });
+                }
+            }
+            WorldEvent::TileProjectile { from, tile, graphic, ticks, released } => {
+                let Some(a) = entity_of(from) else { continue };
+                let hit_in = ticks as f32 * TICK_SECONDS;
+                if let Some(anchor) = tile_anchor(&mut commands, &fx.ground, tile, now + hit_in + TILE_EFFECT_SECONDS) {
+                    fx.projectiles.0.push(super::projectiles::Shot {
+                        from: a,
+                        to: anchor,
+                        graphic,
+                        draw: None,
+                        from_mouth: mouths.get(a).is_ok(),
+                        swing: if released { 0.0 } else { length_of(a, clips_of(from).0) },
+                        hit_in,
+                    });
+                }
+            }
+            WorldEvent::TileSound { sound, tile, delay_ticks } => {
+                let at = now + delay_ticks as f32 * TICK_SECONDS;
+                if let Some(anchor) = tile_anchor(&mut commands, &fx.ground, tile, at + TILE_EFFECT_SECONDS) {
+                    fx.sounds.0.push(super::sound_fx::PendingSound { sound, from: anchor, at });
+                }
+            }
             WorldEvent::Hit { target, damage } => {
                 let Some(t) = entity_of(target) else { continue };
                 let (_, block, _) = clips_of(target);
@@ -311,14 +368,14 @@ fn apply_events(
                     // being hit while swinging does not interrupt the swing
                     let swinging = fighter.action.as_ref().is_some_and(|a| now < a.until);
                     if !fighter.dead && !swinging {
-                        fighter.action = Some(Action { clip: block, until: now + length, started: false });
+                        fighter.action = Some(Action { clip: block, until: now + length, started: false, ..Default::default() });
                     }
                 }
                 spawn_splat(&mut commands, &mut splat_images, &mut images, t, damage, now);
             }
             WorldEvent::Graphic { on, graphic, delay_ticks } => {
                 if let Some(e) = entity_of(on) {
-                    spots.0.push(super::projectiles::Spot { on: e, graphic, at: now + delay_ticks as f32 * TICK_SECONDS });
+                    fx.spots.0.push(super::projectiles::Spot { on: e, graphic, at: now + delay_ticks as f32 * TICK_SECONDS });
                 }
             }
             WorldEvent::Heal { healer, target, animation, .. } => {
@@ -335,7 +392,7 @@ fn apply_events(
                 let length = length_of(h, motion);
                 if let Ok(mut fighter) = fighters.get_mut(h) {
                     if !fighter.dead {
-                        fighter.action = Some(Action { clip: motion, until: now + length, started: false });
+                        fighter.action = Some(Action { clip: motion, until: now + length, started: false, ..Default::default() });
                         fighter.face = toward;
                     }
                 }
@@ -345,7 +402,7 @@ fn apply_events(
             }
             WorldEvent::Sound { sound, from, delay_ticks } => {
                 if let Some(e) = entity_of(from) {
-                    sounds.0.push(super::sound_fx::PendingSound { sound, from: e, at: now + delay_ticks as f32 * TICK_SECONDS });
+                    fx.sounds.0.push(super::sound_fx::PendingSound { sound, from: e, at: now + delay_ticks as f32 * TICK_SECONDS });
                 }
             }
             // experience drops and level-up fireworks are not drawn yet
@@ -368,6 +425,25 @@ fn apply_events(
             }
         }
     }
+}
+
+/// How long the marker standing on a tile for an effect there is kept, seconds past the effect.
+const TILE_EFFECT_SECONDS: f32 = 4.0;
+
+/// Something to play an effect on at a tile of the ground: an empty marker at the middle of the
+/// tile, which goes by itself at app time `until`. None if the tile's square is not loaded.
+fn tile_anchor(
+    commands: &mut Commands,
+    ground: &osrs_render::streaming::StreamedWorld,
+    tile: osrs_core::tiles::TileCoord,
+    until: f32,
+) -> Option<Entity> {
+    let position = ground.ground_at(tile.x, tile.z)?;
+    Some(
+        commands
+            .spawn((Transform::from_translation(position), Visibility::default(), super::projectiles::Until(until)))
+            .id(),
+    )
 }
 
 fn spawn_splat(
@@ -554,7 +630,7 @@ mod tests {
     #[test]
     fn a_fighter_plays_its_action_once_then_hands_back() {
         let mut fighter = Fighter::default();
-        fighter.action = Some(Action { clip: 7, until: 2.0, started: false });
+        fighter.action = Some(Action { clip: 7, until: 2.0, started: false, ..Default::default() });
 
         assert_eq!(fighter.clip(1.0, 9), Some((7, true, false)), "first ask starts it");
         assert_eq!(fighter.clip(1.5, 9), Some((7, false, false)), "then it just carries on");
@@ -565,7 +641,7 @@ mod tests {
     #[test]
     fn death_is_started_once_and_held() {
         let mut fighter = Fighter { dead: true, ..Default::default() };
-        fighter.action = Some(Action { clip: 7, until: f32::MAX, started: true });
+        fighter.action = Some(Action { clip: 7, until: f32::MAX, started: true, ..Default::default() });
 
         assert_eq!(fighter.clip(1.0, 9), Some((9, true, true)));
         assert_eq!(fighter.clip(50.0, 9), Some((9, false, true)));

@@ -141,6 +141,7 @@ pub fn builtin_scenarios() -> Vec<(&'static str, &'static str)> {
         ("mage_vs_jad", include_str!("../../data/scenarios/mage_vs_jad.json")),
         ("jad", include_str!("../../data/scenarios/jad.json")),
         ("jad_healers", include_str!("../../data/scenarios/jad_healers.json")),
+        ("gigajad", include_str!("../../data/scenarios/gigajad.json")),
     ]
 }
 

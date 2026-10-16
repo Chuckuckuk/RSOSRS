@@ -23,6 +23,9 @@ pub struct Actor {
     current_tile: TileCoord,
     /// For an NPC: whether it also stands in players' way. Every NPC blocks other NPCs.
     blocks_players: bool,
+    /// What this actor writes into the occupancy overlay instead of the usual for its kind (a
+    /// hazard that blocks players but not NPCs, or nobody).
+    occupancy_override: Option<OccupancyMask>,
 }
 
 impl Actor {
@@ -35,7 +38,14 @@ impl Actor {
             previous_tile: start_tile,
             current_tile: start_tile,
             blocks_players: true,
+            occupancy_override: None,
         }
+    }
+
+    /// This actor occupies tiles as `mask` says, whatever its kind.
+    pub fn with_occupancy(mut self, mask: OccupancyMask) -> Self {
+        self.occupancy_override = Some(mask);
+        self
     }
 
     pub fn blocks_players(&self) -> bool {
@@ -86,6 +96,9 @@ impl Actor {
 
     /// What this actor writes into the occupancy overlay (over its whole footprint).
     pub fn occupies_as(&self) -> OccupancyMask {
+        if let Some(mask) = self.occupancy_override {
+            return mask;
+        }
         match self.kind {
             ActorKind::Player => OccupancyMask::PLAYER,
             ActorKind::Npc if self.blocks_players => OccupancyMask::NPC | OccupancyMask::BLOCKS_PLAYERS,

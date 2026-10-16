@@ -75,10 +75,10 @@ pub struct Arrivals(pub HashMap<Entity, f32>);
 
 /// An effect on a character that goes when its animation has played.
 #[derive(Component)]
-struct Until(f32);
+pub(crate) struct Until(pub(crate) f32);
 
 /// The graphics' definitions and the models built from them so far.
-struct ProjectileArt {
+pub(crate) struct ProjectileArt {
     cache: Cache,
     defs: HashMap<u32, SpotAnim>,
     texture_hsl: HashMap<u32, u16>,
@@ -123,6 +123,15 @@ impl ProjectileArt {
         self.animated.get(&graphic).and_then(Option::as_ref)
     }
 
+    /// A graphic as something to put in the scene: its model and, if it has an animation, the
+    /// clip to loop on it.
+    pub(crate) fn drawable(&mut self, graphic: u32) -> Option<(LocMesh, Option<Clip>)> {
+        if let Some(drawn) = self.animated(graphic).cloned() {
+            return Some((drawn.mesh, Some(drawn.clip)));
+        }
+        self.mesh(graphic).cloned().map(|mesh| (mesh, None))
+    }
+
     fn mesh(&mut self, graphic: u32) -> Option<&LocMesh> {
         if !self.built.contains_key(&graphic) {
             let mesh = self.defs.get(&graphic).and_then(|d| build_spotanim(&self.cache, d, &self.texture_hsl));
@@ -149,6 +158,10 @@ struct Projectile {
     seconds: f32,
 }
 
+/// The systems that draw queued projectiles and graphics: whatever queues them runs before.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct DrawFx;
+
 pub struct ProjectilePlugin;
 
 impl Plugin for ProjectilePlugin {
@@ -157,7 +170,7 @@ impl Plugin for ProjectilePlugin {
             .init_resource::<SpotQueue>()
             .init_resource::<Arrivals>()
             .add_systems(Startup, open_art)
-            .add_systems(Update, (spawn_projectiles, fly, play_spots).chain());
+            .add_systems(Update, (spawn_projectiles, fly, play_spots).chain().in_set(DrawFx));
     }
 }
 
