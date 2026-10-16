@@ -287,7 +287,13 @@ fn apply_events(
                 let length = length_of(a, attack);
                 if let Ok(mut fighter) = fighters.get_mut(a) {
                     if !fighter.dead {
-                        fighter.action = Some(Action { clip: attack, until: now + length, started: false });
+                        // a monster that repeats an attack of its own animation while it is still
+                        // playing (a volley) lingers in it: the pose is held, not started over
+                        let lingers = animation.is_some()
+                            && matches!(attacker, Combatant::Npc(_))
+                            && fighter.action.as_ref().is_some_and(|action| action.clip == attack && action.started && now < action.until);
+                        let started = lingers;
+                        fighter.action = Some(Action { clip: attack, until: now + length, started });
                         fighter.face = toward;
                         fighter.bar_until = now + BAR_SECONDS;
                     }

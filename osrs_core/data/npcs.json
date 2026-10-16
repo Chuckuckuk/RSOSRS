@@ -238,7 +238,8 @@
               },
               "blocked_sound": 4031
             }
-          }
+          },
+          "animation": 2656
         }
       ],
       "rotation": "weighted",
@@ -381,7 +382,7 @@
         "hit": 410,
         "death": 409
       },
-      "notes": "A made-up boss that exercises generic engine mechanics, not a real OSRS monster. Jad's numbers with a 1000 hitpoint pool. Ranged drops 3-6 rocks around the player, one always on the player's tile, landing as the falling-rock graphic ends; every rock hurts a player under it, and the one on the player's tile leaves a boulder that blocks the player's line of sight but not its own. Magic leaves 2-4 lava tiles near the player; when a boulder is in the way it flies to the boulder instead and destroys it in a 3x3 blast. Below 60% it fires a volley of three weaker magic attacks, 3-2-2 ticks apart (a one-tick wind-up so a two-tick gap is possible); below 40% it walks on the player, destroying its own boulders and lava as it goes; below 20% it calls its healers, fires the volley without stopping and a boulder falls within 4 tiles of the player every 3 ticks. The rock damage (20), blast damage (120), lava damage (6 a tick) and boulder placement are guesses; the 'stays standing' volley has no rear-up animation."
+      "notes": "A made-up boss that exercises generic engine mechanics, not a real OSRS monster. Jad's numbers with a 1000 hitpoint pool. Ranged drops 3-6 rocks around the player, one always on the player's tile, landing as the falling-rock graphic ends; every rock hurts a player under it, and the one on the player's tile leaves a boulder that blocks the player's line of sight but not its own. Magic leaves 2-4 lava tiles near the player; when a boulder is in the way it flies to the boulder instead and destroys it in a 3x3 blast. Below 60% it fires a volley of three weaker magic attacks, 3-2-2 ticks apart (a one-tick wind-up so a two-tick gap is possible); below 40% it walks on the player, destroying its own boulders and lava as it goes; below 20% it calls its healers, fires the volley without stopping and a boulder falls within 4 tiles of the player every 3 ticks. The rock damage (20), blast damage (120), lava damage (6 a tick) and boulder placement are guesses; in the volley he holds the magic animation's last pose instead of restarting it."
     },
     {
       "id": "yt_hurkot", "name": "Yt-HurKot", "combat_level": 108, "hitpoints": 60,
