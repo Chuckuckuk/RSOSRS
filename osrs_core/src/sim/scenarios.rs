@@ -150,7 +150,7 @@ mod tests {
     use crate::actors::EntityId;
     use crate::combat::{
         AttackDefinition, AttackPattern, AttackStyle, FixedRotationPattern, GroundDamage, GroundTarget, PositionResolver,
-        HazardAnchor, ProtectionPrayer,
+        HazardAnchor, HazardDef, HazardPlacement, ObstructedShot, ProjectileSpeed, ProtectionPrayer,
     };
     use crate::encounters::{Phase, PhaseTrigger, TriggerAction, TriggerBinding};
     use crate::sim::config::{BossConfig, HealerConfig, NpcConfig, PassiveConfig};
@@ -986,5 +986,169 @@ mod tests {
 
         assert_eq!(trace(12345), trace(12345));
         assert_ne!(trace(12345), trace(54321));
+    }
+
+    // ---- hazards ----
+
+    fn boulder() -> Rc<HazardDef> {
+        Rc::new(HazardDef::new("Boulder").blocking_line_of_sight().blocking_players().cleared_by_owner_walking())
+    }
+
+    fn lava() -> Rc<HazardDef> {
+        Rc::new(HazardDef::new("Lava").hurting(5))
+    }
+
+    /// A boss at (0, 8) whose phase fires `special` every `every` ticks, against a player at the origin.
+    fn world_with_periodic(special: AttackDefinition, every: i32) -> (World, EntityId) {
+        let mut world = tough_arena(tc(0, 0));
+        let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
+        let phase = Phase::new("Main", idle_pattern(), None).with_periodic(every, special.shared());
+        world.configure_boss(boss, vec![phase.clone()], phase, vec![]);
+        (world, boss)
+    }
+
+    /// An attack cycle that never hurts anyone, so a test sees only what it is about.
+    fn idle_pattern() -> Rc<dyn AttackPattern> {
+        let harmless = PositionResolver::new(GroundTarget::square(HazardAnchor::SelfTile, 0), GroundDamage::Fixed(0));
+        Rc::new(FixedRotationPattern::new(vec![AttackDefinition::special("Wait", None, 1, harmless).shared()]))
+    }
+
+    fn rock_leaving(def: Rc<HazardDef>, placement: HazardPlacement, target: GroundTarget) -> AttackDefinition {
+        AttackDefinition::special("Rock", None, 0, PositionResolver::new(target, GroundDamage::Fixed(0)).leaving(def, placement))
+    }
+
+    #[test]
+    fn a_periodic_special_goes_off_on_its_own_clock_and_leaves_a_boulder() {
+        let rock = rock_leaving(boulder(), HazardPlacement::AnchorTile, GroundTarget::square(HazardAnchor::Target, 0));
+        let (mut world, _) = world_with_periodic(rock, 3);
+
+        run_ticks(&mut world, 2);
+        assert_eq!(world.hazards().count(), 0, "not before its first period");
+        run_ticks(&mut world, 1);
+        assert_eq!(world.hazards().map(|(name, tile, _)| (name.to_owned(), tile)).collect::<Vec<_>>(), vec![("Boulder".to_owned(), tc(0, 0))]);
+        run_ticks(&mut world, 6);
+        assert_eq!(world.hazards().count(), 3, "one more every 3 ticks");
+    }
+
+    #[test]
+    fn a_boulder_blocks_everyones_sight_but_its_owners() {
+        let rock = rock_leaving(boulder(), HazardPlacement::AnchorTile, GroundTarget::square(HazardAnchor::Target, 0));
+        let (mut world, boss) = world_with_periodic(rock, 1);
+        run_ticks(&mut world, 1);
+
+        assert_eq!(world.sight_blockers_against(Combatant::Player), vec![tc(0, 0)]);
+        assert!(world.sight_blockers_against(Combatant::Npc(boss)).is_empty(), "the owner sees past its own boulders");
+    }
+
+    #[test]
+    fn a_player_never_steps_onto_a_boulder_that_was_already_there() {
+        // a boulder two tiles east of the player, every tick, wherever they have got to
+        let rock = rock_leaving(
+            boulder(),
+            HazardPlacement::EveryCoveredTile,
+            GroundTarget::offsets(HazardAnchor::Target, vec![(2, 0)]),
+        );
+        let (mut world, _) = world_with_periodic(rock, 1);
+        world.player_request_walk_to(tc(8, 0), false);
+
+        let mut placed: Vec<TileCoord> = Vec::new();
+        for _ in 0..10 {
+            run_ticks(&mut world, 1);
+            let player = world.player.tile();
+            assert!(!placed.contains(&player), "the player stands on a boulder at {player:?}");
+            placed = world.hazards().map(|(_, tile, _)| tile).filter(|tile| *tile != player).collect();
+        }
+        assert!(world.player.tile().x > 0, "they did get somewhere");
+    }
+
+    #[test]
+    fn lava_hurts_a_player_standing_on_it_every_tick() {
+        let rock = rock_leaving(lava(), HazardPlacement::AnchorTile, GroundTarget::square(HazardAnchor::Target, 0));
+        let (mut world, _) = world_with_periodic(rock, 1000);
+        let before = world.player.mover.actor.health().current();
+        run_ticks(&mut world, 3);
+        assert_eq!(world.player.mover.actor.health().current(), before, "nothing yet");
+
+        let rock = rock_leaving(lava(), HazardPlacement::AnchorTile, GroundTarget::square(HazardAnchor::Target, 0));
+        let (mut world, _) = world_with_periodic(rock, 1);
+        let before = world.player.mover.actor.health().current();
+        run_ticks(&mut world, 5);
+
+        let lost = before - world.player.mover.actor.health().current();
+        assert!(lost >= 5 && lost % 5 == 0, "lava is 5 a tick while stood on: lost {lost}");
+    }
+
+    #[test]
+    fn a_boss_that_advances_destroys_its_own_boulders_in_its_way() {
+        let boulder_ahead = rock_leaving(
+            boulder(),
+            HazardPlacement::EveryCoveredTile,
+            GroundTarget::offsets(HazardAnchor::Target, vec![(0, 4)]),
+        );
+        let mut world = tough_arena(tc(0, 0));
+        let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
+        let idle: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![
+            AttackDefinition::telegraphed("Wait", Some(1), 1, AttackStyle::Melee).shared(),
+        ]));
+        let phase = Phase::new("Advance", idle, Some(Rc::new(crate::actors::AdvanceMovementPolicy)))
+            .with_periodic(1000, boulder_ahead.clone().shared());
+        // one boulder, placed once, in the boss's path
+        world.configure_boss(boss, vec![phase.clone()], phase, vec![]);
+        let shot = Phase::new("Main", Rc::new(FixedRotationPattern::new(vec![AttackDefinition::telegraphed("Wait", Some(1), 1, AttackStyle::Melee).shared()])), Some(Rc::new(crate::actors::AdvanceMovementPolicy)))
+            .with_periodic(2, boulder_ahead.shared());
+        world.configure_boss(boss, vec![shot.clone()], shot, vec![]);
+
+        let mut seen = false;
+        let mut cleared = false;
+        for _ in 0..12 {
+            run_ticks(&mut world, 1);
+            let boulders = world.hazards().count();
+            seen |= boulders > 0;
+            cleared |= seen && boulders == 0;
+        }
+
+        assert!(seen, "the boulder was placed");
+        assert!(cleared, "the boss walked over it and destroyed it");
+    }
+
+    #[test]
+    fn a_shot_stopped_by_a_boulder_blows_it_up_instead_of_hitting_the_player() {
+        let blast = PositionResolver::new(GroundTarget::square(HazardAnchor::SelfTile, 1), GroundDamage::Fixed(100));
+        let hit = crate::combat::TargetedAttack::new(AttackStyle::Magic)
+            .with_always_hits(true)
+            .with_max_hit(crate::combat::MaxHitSource::Fixed(40));
+        let magic = AttackDefinition::special("Magic", Some(15), 1, ObstructedShot::new(hit, ProjectileSpeed::tiles_per_tick(3.0), blast));
+        let mut world = tough_arena(tc(0, 0));
+        let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
+        let boulders = rock_leaving(boulder(), HazardPlacement::EveryCoveredTile, GroundTarget::offsets(HazardAnchor::Target, vec![(0, 4)]));
+        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![magic.shared()]));
+        // the boulder is the boss's own, so it does not block the boss's sight: only another owner's would.
+        let phase = Phase::new("Main", pattern, None);
+        world.configure_boss(boss, vec![phase.clone()], phase, vec![]);
+        let _ = boulders;
+
+        run_ticks(&mut world, 8);
+
+        // with nothing in the way the shot hits the player, bound until it lands
+        assert!(world.log().iter().any(|l| l.starts_with("Boss uses Magic on the player")), "{:?}", world.log());
+    }
+
+    #[test]
+    fn a_rider_goes_off_with_its_attack_and_leaves_a_boulder_where_the_player_stands() {
+        let rocks = PositionResolver::new(
+            GroundTarget::scatter_between(HazardAnchor::Target, 1, 3, 6).including_anchor(),
+            GroundDamage::Fixed(0),
+        )
+        .leaving(boulder(), HazardPlacement::AnchorTile);
+        let ranged = AttackDefinition::telegraphed("Ranged", Some(15), 1, AttackStyle::Ranged)
+            .with_rider(crate::combat::SpecialAttack::new(0, rocks));
+        let (mut world, _) = rock_world_with(ranged);
+
+        run_ticks(&mut world, 4);
+
+        assert!(world.log().iter().any(|l| l.starts_with("Boss uses Ranged on the player")), "{:?}", world.log());
+        let boulders: Vec<TileCoord> = world.hazards().map(|(_, tile, _)| tile).collect();
+        assert!(!boulders.is_empty());
+        assert!(boulders.iter().all(|tile| *tile == tc(0, 0)), "the one that stays is where the player stood: {boulders:?}");
     }
 }

@@ -16,7 +16,7 @@ use crate::combat::{
 };
 use crate::encounters::{EncounterContext, Phase, TriggerAction, TriggerBinding};
 use crate::model::{ConditionContext, Skill};
-use crate::pathfinding::{BfsPathfinder, TargetSpec};
+use crate::pathfinding::{line_of_sight, BfsPathfinder, TargetSpec};
 use crate::rng::DotNetRandom;
 use crate::tick::{TickPhase, TickRegistrar, TickScheduler};
 use crate::tiles::TileCoord;
@@ -861,7 +861,12 @@ impl World {
             (Kind::Npc, TickPhase::NpcAi) => self.run_npc_ai(&mut entity, registrar),
             (Kind::Npc, TickPhase::NpcMovement) => self.run_npc_movement(&mut entity),
             (Kind::Boss, TickPhase::NpcAi) => self.run_boss_ai(&mut entity, registrar),
-            (Kind::Boss, TickPhase::NpcMovement) => self.run_boss_movement(&mut entity),
+            (Kind::Boss, TickPhase::NpcMovement) => {
+                self.run_boss_movement(&mut entity);
+                // walking over its own boulders and lava destroys them
+                let size = entity.mover.actor.footprint_size();
+                self.clear_hazards_under(entity.id, entity.tile(), size);
+            }
             (Kind::Healer, TickPhase::NpcAi) => self.run_heal_ai(&mut entity),
             (Kind::Healer, TickPhase::NpcMovement) => self.run_healer_movement(&mut entity),
             (Kind::Passive, TickPhase::NpcMovement) => self.run_passive_movement(&mut entity),
@@ -984,6 +989,16 @@ impl World {
                 return;
             }
             player_tile = arrival;
+        }
+
+        // a shot needs a clear line: a boulder between the player and the target stops it
+        if !melee_adjacent {
+            let centre = view.tile.offset(view.footprint_size / 2, view.footprint_size / 2);
+            let blockers = self.sight_blockers_against(Combatant::Player);
+            if !line_of_sight(player_tile, centre, &blockers).is_clear() {
+                self.put_entity(target);
+                return;
+            }
         }
 
         if !self.player.attack_ready {
@@ -1480,6 +1495,20 @@ impl World {
 
         if actor.health().is_dead() {
             return; // triggers above still fire on death; nothing else does
+        }
+
+        // specials the phase fires on its own clock, apart from the attack cycle below
+        // the clock reads one behind the tick being played, so the first period ends on tick `every`
+        let tick = self.encounter.elapsed_ticks() + 1;
+        let due: Vec<Rc<AttackDefinition>> = state.current_phase.as_ref().map_or_else(Vec::new, |phase| {
+            phase.periodic.iter().filter(|p| tick % p.every_ticks == 0).map(|p| Rc::clone(&p.attack)).collect()
+        });
+        if !due.is_empty() {
+            let now = Origin { tile: actor.current_tile(), size: actor.footprint_size(), stats: actor.stats() };
+            let aimed_at = self.player.tile();
+            for attack in due {
+                self.fire_special(id, &entity.name, &attack, &now, aimed_at, registrar);
+            }
         }
 
         // Multi-attack NPCs don't gate telegraph-start on a single attack's range - per-attack
