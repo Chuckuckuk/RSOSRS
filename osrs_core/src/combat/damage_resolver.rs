@@ -1,4 +1,4 @@
-use super::attack_definition::AttackDefinition;
+use super::targeted_attack::TargetedAttack;
 use super::attack_style::AttackStyle;
 use super::combat_stats::CombatStats;
 use super::max_hit_source::MaxHitSource;
@@ -28,7 +28,7 @@ pub struct SimulatedSwings {
     pub mean_damage: f64,
 }
 
-fn condition_context<'a>(attack: &'a AttackDefinition, defender: &CombatStats) -> ConditionContext<'a> {
+fn condition_context<'a>(attack: &'a TargetedAttack, defender: &CombatStats) -> ConditionContext<'a> {
     ConditionContext {
         style: attack.style,
         damage_type: attack.damage_type,
@@ -45,7 +45,7 @@ fn apply_all(mut value: i64, modifiers: &[&Modifier]) -> i64 {
 }
 
 /// The max hit of `attack` from `attacker`'s stats, after every applicable modifier.
-fn max_hit_of(attack: &AttackDefinition, attacker: &CombatStats, ctx: &ConditionContext) -> i32 {
+fn max_hit_of(attack: &TargetedAttack, attacker: &CombatStats, ctx: &ConditionContext) -> i32 {
     let style = attack.style;
     let level_mods = Modifier::applicable(&attack.modifiers, ModifierTarget::DamageLevel, ctx);
 
@@ -80,7 +80,7 @@ fn magic_scaled(base: i32, attacker: &CombatStats, gear_scale: i32, modifiers: &
 }
 
 /// The deterministic half of a roll (see `RollAnalysis`).
-pub fn analyze(attack: &AttackDefinition, attacker: &CombatStats, defender: &CombatStats, defender_is_monster: bool) -> RollAnalysis {
+pub fn analyze(attack: &TargetedAttack, attacker: &CombatStats, defender: &CombatStats, defender_is_monster: bool) -> RollAnalysis {
     let ctx = condition_context(attack, defender);
 
     let accuracy_mods = Modifier::applicable(&attack.modifiers, ModifierTarget::AccuracyLevel, &ctx);
@@ -109,7 +109,7 @@ pub fn analyze(attack: &AttackDefinition, attacker: &CombatStats, defender: &Com
 /// an `always_hits` attack), then - only if that hit - exactly one `next_range` for damage, then
 /// one more per chance-based post-roll modifier.
 pub fn roll(
-    attack: &AttackDefinition,
+    attack: &TargetedAttack,
     attacker: &CombatStats,
     defender: &CombatStats,
     defender_is_monster: bool,
@@ -129,7 +129,7 @@ fn throw_die(rng: &mut dyn Rng, roll: i64) -> i32 {
 /// damage: with 1, a successful hit that rolls 0 becomes 1 and only a miss is 0 (what a player's
 /// attacks do). The RNG draws are exactly the same as `roll`'s.
 pub fn roll_with_floor(
-    attack: &AttackDefinition,
+    attack: &TargetedAttack,
     attacker: &CombatStats,
     defender: &CombatStats,
     defender_is_monster: bool,
@@ -168,7 +168,7 @@ pub fn roll_with_floor(
 /// connected and what it averaged. Nothing about the matchup is worked out analytically, so this
 /// covers every modifier and special case the dice do.
 pub fn simulate_swings(
-    attack: &AttackDefinition,
+    attack: &TargetedAttack,
     attacker: &CombatStats,
     defender: &CombatStats,
     defender_is_monster: bool,
@@ -189,7 +189,7 @@ pub fn simulate_swings(
 
 /// `roll`, then applies the result to `target`. Returns the damage dealt.
 pub fn resolve(
-    attack: &AttackDefinition,
+    attack: &TargetedAttack,
     attacker: &CombatStats,
     defender: &CombatStats,
     defender_is_monster: bool,
@@ -208,8 +208,8 @@ mod tests {
     use crate::combat::AttackStyle;
     use crate::rng::{DotNetRandom, ScriptedRng};
 
-    fn make_attack() -> AttackDefinition {
-        AttackDefinition::new("Test", 0, 1, AttackStyle::Melee)
+    fn make_attack() -> TargetedAttack {
+        TargetedAttack::new(AttackStyle::Melee)
     }
 
     fn modest_stats() -> CombatStats {
@@ -404,14 +404,14 @@ mod tests {
 
     #[test]
     fn a_fixed_max_hit_ignores_the_attackers_strength() {
-        let attack = AttackDefinition::new("Bite", 0, 1, AttackStyle::Melee).with_max_hit(MaxHitSource::Fixed(8));
+        let attack = TargetedAttack::new(AttackStyle::Melee).with_max_hit(MaxHitSource::Fixed(8));
 
         assert_eq!(analyze(&attack, &modest_stats(), &modest_stats(), false).max_hit, 8);
     }
 
     #[test]
     fn spells_scale_a_fixed_base_by_summed_magic_damage_bonuses() {
-        let attack = AttackDefinition::new("Ice Barrage", 10, 1, AttackStyle::Magic)
+        let attack = TargetedAttack::new(AttackStyle::Magic)
             .with_max_hit(MaxHitSource::Spell { base: 30 });
         let gear = EquipmentBonuses { magic_damage_permille: 100, ..Default::default() };
         let mage = CombatStats::new(1, 1, 1, 1, 99)
@@ -425,9 +425,9 @@ mod tests {
 
     #[test]
     fn powered_staves_scale_from_the_visible_magic_level_and_cap_the_gear_bonus() {
-        let trident = AttackDefinition::new("Trident", 8, 1, AttackStyle::Magic)
+        let trident = TargetedAttack::new(AttackStyle::Magic)
             .with_max_hit(MaxHitSource::powered_staff(3, -5));
-        let shadow = AttackDefinition::new("Shadow", 8, 1, AttackStyle::Magic)
+        let shadow = TargetedAttack::new(AttackStyle::Magic)
             .with_max_hit(MaxHitSource::PoweredStaff { divisor: 3, offset: 1, gear_bonus_scale: 3 });
         let mage = CombatStats::new(1, 1, 1, 1, 99).unwrap();
         let geared = mage.with_bonuses(EquipmentBonuses { magic_damage_permille: 500, ..Default::default() });
@@ -439,7 +439,7 @@ mod tests {
 
     #[test]
     fn only_the_better_of_slayer_helm_and_salve_applies() {
-        let attack = AttackDefinition::new("Slash", 0, 1, AttackStyle::Melee)
+        let attack = TargetedAttack::new(AttackStyle::Melee)
             .with_max_hit(MaxHitSource::Fixed(36))
             .with_flags(vec!["on_task".to_owned()])
             .with_modifiers(vec![
@@ -475,7 +475,7 @@ mod tests {
             Modifier::multiplier(ModifierTarget::TargetDefenceRoll, 1, 2),
         ]);
 
-        let simulate = |attack: &AttackDefinition| {
+        let simulate = |attack: &TargetedAttack| {
             simulate_swings(attack, &modest_stats(), &modest_stats(), true, &mut DotNetRandom::new(11), 20_000)
         };
 

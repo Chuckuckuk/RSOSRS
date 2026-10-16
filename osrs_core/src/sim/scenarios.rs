@@ -149,8 +149,8 @@ mod tests {
     use super::*;
     use crate::actors::EntityId;
     use crate::combat::{
-        AttackDefinition, AttackPattern, AttackStyle, FixedRotationPattern, GroundTarget, HazardAnchor,
-        ProtectionPrayer, ReactionRequirement,
+        AttackDefinition, AttackPattern, AttackStyle, FixedRotationPattern, GroundDamage, GroundTarget, PositionResolver,
+        HazardAnchor, ProtectionPrayer,
     };
     use crate::encounters::{Phase, PhaseTrigger, TriggerAction, TriggerBinding};
     use crate::sim::config::{BossConfig, HealerConfig, NpcConfig, PassiveConfig};
@@ -302,8 +302,7 @@ mod tests {
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig::default());
 
-        let slam = AttackDefinition::new("Slam", 15, 2, AttackStyle::Ranged)
-            .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Ranged))
+        let slam = AttackDefinition::telegraphed("Slam", Some(15), 2, AttackStyle::Ranged)
             .shared();
         let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![slam]));
         let phase = Phase::new("Main", pattern, None);
@@ -356,9 +355,9 @@ mod tests {
     fn a_when_entity_died_trigger_fires_on_the_tick_of_the_killing_blow() {
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
-        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![AttackDefinition::new(
+        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![AttackDefinition::telegraphed(
             "Slam",
-            15,
+            Some(15),
             2,
             AttackStyle::Ranged,
         )
@@ -374,15 +373,15 @@ mod tests {
     }
 
     /// A boss at (0, 8), fighting a player at (0, 0), whose only attack is a ground-targeted rock
-    /// fall that lands 3 ticks after it is released. The boss has 10 hitpoints so a test can kill it.
+    /// fall that lands when its 3-tick telegraph ends. The boss has 10 hitpoints so a test can kill it.
     fn rock_fall_world(target: GroundTarget) -> (World, EntityId) {
+        rock_world_with(AttackDefinition::special("Rock", Some(15), 3, PositionResolver::new(target, GroundDamage::Fixed(30))))
+    }
+
+    fn rock_world_with(rock: AttackDefinition) -> (World, EntityId) {
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
-        let rock = AttackDefinition::new("Rock", 3, 0, AttackStyle::Magic)
-            .with_impact_delay_ticks(3)
-            .with_ground_target(target)
-            .shared();
-        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![rock]));
+        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![rock.shared()]));
         let phase = Phase::new("Main", pattern, None);
         world.configure_boss(boss, vec![phase.clone()], phase, vec![]);
         (world, boss)
@@ -393,17 +392,38 @@ mod tests {
     }
 
     #[test]
-    fn a_ground_attack_hits_whoever_stands_on_its_tiles_after_its_delay() {
-        let (mut world, boss) = rock_fall_world(GroundTarget::square(HazardAnchor::Target, 0));
+    fn a_ground_attack_hits_whoever_stands_on_its_tiles_when_its_telegraph_ends() {
+        let (mut world, _) = rock_fall_world(GroundTarget::square(HazardAnchor::Target, 0));
 
-        run_ticks(&mut world, 1);
-        assert!(world.log().iter().any(|l| l.starts_with("Boss aims Rock at 1 tile(s)")), "{:?}", world.log());
-        assert_eq!(rock_hits(&world), 0, "it lands after its delay, not at once");
-        // the attacker dying does not stop it
-        world.entity_mut(boss).unwrap().mover.actor.health_mut().damage(10);
         run_ticks(&mut world, 3);
+        assert_eq!(rock_hits(&world), 0, "it lands when the telegraph ends, not before");
+        run_ticks(&mut world, 1);
 
         assert_eq!(rock_hits(&world), 1, "{:?}", world.log());
+    }
+
+    #[test]
+    fn a_ground_attack_is_gone_once_it_has_landed_and_does_not_linger() {
+        let (mut world, _) = rock_fall_world(GroundTarget::square(HazardAnchor::Target, 0));
+
+        run_ticks(&mut world, 4);
+        let hits = rock_hits(&world);
+        // the boss's next attack starts a fresh telegraph; nothing from the first one remains
+        run_ticks(&mut world, 2);
+
+        assert_eq!(hits, 1);
+        assert_eq!(rock_hits(&world), 1, "no second landing before the next telegraph ends");
+    }
+
+    #[test]
+    fn a_ground_attack_ends_with_its_attacker_if_it_dies_during_the_telegraph() {
+        let (mut world, boss) = rock_fall_world(GroundTarget::square(HazardAnchor::Target, 0));
+
+        run_ticks(&mut world, 2);
+        world.entity_mut(boss).unwrap().mover.actor.health_mut().damage(10);
+        run_ticks(&mut world, 4);
+
+        assert_eq!(rock_hits(&world), 0, "{:?}", world.log());
     }
 
     #[test]
@@ -413,8 +433,45 @@ mod tests {
 
         run_ticks(&mut world, 6);
 
-        assert!(world.log().iter().any(|l| l.starts_with("Boss aims Rock")));
+        assert!(world.log().iter().any(|l| l.starts_with("Boss lands Rock")), "{:?}", world.log());
         assert_eq!(rock_hits(&world), 0, "{:?}", world.log());
+    }
+
+    #[test]
+    fn a_ground_attack_never_misses_and_deals_its_plain_damage() {
+        let (mut world, _) = rock_fall_world(GroundTarget::square(HazardAnchor::Target, 0));
+        let before = world.player.mover.actor.health().current();
+
+        run_ticks(&mut world, 4);
+
+        assert_eq!(rock_hits(&world), 1);
+        assert_eq!(before - world.player.mover.actor.health().current(), 30);
+    }
+
+    #[test]
+    fn the_one_reducing_prayer_cuts_a_ground_attack_without_negating_it() {
+        let target = || GroundTarget::square(HazardAnchor::Target, 0);
+        let reducible = || {
+            AttackDefinition::special(
+                "Rock",
+                Some(15),
+                3,
+                PositionResolver::new(target(), GroundDamage::Fixed(30)).with_prayer_reduction(ProtectionPrayer::Melee, 0.5),
+            )
+        };
+        let lost = |prayer: Option<ProtectionPrayer>| {
+            let (mut world, _) = rock_world_with(reducible());
+            if let Some(prayer) = prayer {
+                world.player.set_active_prayer(prayer);
+            }
+            let before = world.player.mover.actor.health().current();
+            run_ticks(&mut world, 4);
+            before - world.player.mover.actor.health().current()
+        };
+
+        assert_eq!(lost(None), 30);
+        assert_eq!(lost(Some(ProtectionPrayer::Melee)), 15, "the right prayer halves it");
+        assert_eq!(lost(Some(ProtectionPrayer::Magic)), 30, "the wrong one does nothing");
     }
 
     #[test]
@@ -616,9 +673,11 @@ mod tests {
             }
         }
         // over 60 ticks Jad uses both; the rocks start at once, the splash as the fireball lands
+        // after its flight, which is the same number of ticks as the fireball is drawn in the air
         assert!(graphics.contains(&(451, 0)), "{graphics:?}");
-        assert!(graphics.contains(&(157, 1)), "{graphics:?}");
-        assert!(projectiles.contains(&(448, true, 1)), "{projectiles:?}");
+        let (_, _, flight) = *projectiles.iter().find(|(graphic, ..)| *graphic == 448).expect("a fireball flew");
+        assert!(projectiles.contains(&(448, true, flight)), "{projectiles:?}");
+        assert!(graphics.contains(&(157, flight)), "{graphics:?}");
     }
 
     #[test]

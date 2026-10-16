@@ -7,17 +7,20 @@ use crate::actors::{
     StyleReactiveMovementPolicy,
 };
 use crate::combat::{
-    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProtectionPrayer, RangeAwarePattern,
-    ReactionRequirement, RotationMode,
+    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProjectileSpeed, RangeAwarePattern,
+    Mitigation, RotationMode,
 };
 use crate::data::{NpcAttackDef, NpcDef, NpcMovementDef, RotationDef};
 use crate::model::{DamageType, StanceBonuses};
 
-fn protection_for(style: AttackStyle) -> ProtectionPrayer {
-    match style {
-        AttackStyle::Melee => ProtectionPrayer::Melee,
-        AttackStyle::Ranged => ProtectionPrayer::Ranged,
-        AttackStyle::Magic => ProtectionPrayer::Magic,
+/// A standard attack that rolls the tick it is chosen when `telegraph_ticks` is 0, else after that
+/// many ticks of wind-up: how data and config, which only have the number, name a timing.
+pub fn timed_attack(name: impl Into<String>, range: Option<i32>, telegraph_ticks: i32, style: AttackStyle) -> AttackDefinition {
+    assert!(telegraph_ticks >= 0, "telegraph_ticks must not be negative");
+    if telegraph_ticks == 0 {
+        AttackDefinition::instant(name, range, style)
+    } else {
+        AttackDefinition::telegraphed(name, range, telegraph_ticks, style)
     }
 }
 
@@ -29,20 +32,32 @@ pub fn attack_from_def(def: &NpcAttackDef) -> Rc<AttackDefinition> {
 
 /// [`attack_from_def`], heard as `fallback_sound` when the attack names no sound of its own.
 fn attack_sounding(def: &NpcAttackDef, fallback_sound: Option<u32>) -> Rc<AttackDefinition> {
-    let mut attack = AttackDefinition::new(def.name.clone(), def.range, def.telegraph_ticks, def.style)
-        .with_damage_type(def.damage_type.unwrap_or_else(|| DamageType::default_for(def.style)))
-        .with_max_hit(MaxHitSource::Fixed(def.max_hit))
-        .with_prayer_penetration(def.prayer_penetration)
-        .with_impact_delay_ticks(def.impact_delay_ticks)
-        .with_projectile_travel_ticks(def.projectile_travel_ticks)
-        .with_modifiers(def.modifiers.clone())
-        .with_hit_count(def.hit_count)
-        .with_attack_speed(def.speed)
-        .with_animation(def.animation)
-        .with_graphics(def.projectile, def.target_graphic, def.impact_graphic)
-        .with_sounds(def.sound.or(fallback_sound), def.resolve_sound);
-    if def.protectable {
-        attack = attack.with_reaction(ReactionRequirement::prayer_match(protection_for(def.style)));
+    // the attack's timing archetype comes from its numbers: a delay until it lands is Doom-style,
+    // a wind-up is Jad-style, neither is traditional
+    let mut attack = if def.impact_delay_ticks > 0 {
+        AttackDefinition::on_contact(def.name.clone(), def.range, def.impact_delay_ticks, def.style)
+    } else {
+        timed_attack(def.name.clone(), def.range, def.telegraph_ticks, def.style)
+    }
+    .with_damage_type(def.damage_type.unwrap_or_else(|| DamageType::default_for(def.style)))
+    .with_max_hit(MaxHitSource::Fixed(def.max_hit))
+    .with_prayer_penetration(def.prayer_penetration)
+    .with_modifiers(def.modifiers.clone())
+    .with_hit_count(def.hit_count)
+    .with_animation(def.animation)
+    .with_graphics(def.projectile, def.target_graphic, def.impact_graphic)
+    .with_sounds(def.sound.or(fallback_sound), def.resolve_sound);
+    if let Some(speed) = def.speed {
+        attack = attack.with_attack_speed(speed);
+    }
+    if let Some(min_range) = def.min_range {
+        attack = attack.with_min_range(min_range);
+    }
+    if let (Some(speed), 0) = (def.projectile_speed, def.impact_delay_ticks) {
+        attack = attack.with_projectile_speed(ProjectileSpeed::tiles_per_tick(speed));
+    }
+    if !def.protectable {
+        attack = attack.with_mitigation(Mitigation::Unmitigable);
     }
     if let Some(status) = def.on_hit.and_then(|effect| effect.to_status().ok()) {
         attack = attack.with_on_hit_status_effect(status);
@@ -66,7 +81,7 @@ pub fn pattern_from_def(def: &NpcDef) -> RangeAwarePattern {
         RotationDef::Fixed => RotationMode::Fixed,
         RotationDef::Weighted => RotationMode::Weighted,
     };
-    RangeAwarePattern::new(attacks, mode, def.size)
+    RangeAwarePattern::new(attacks, mode, def.size, def.attack_range)
 }
 
 /// A monster's combat stats: its levels, its attack/defence bonuses and its attribute tags. A
@@ -87,19 +102,47 @@ mod tests {
     use crate::data::Registry;
 
     #[test]
+    fn the_wind_up_number_picks_instant_or_telegraphed() {
+        assert!(matches!(timed_attack("A", None, 0, AttackStyle::Melee).kind, crate::combat::AttackKind::Instant(_)));
+        assert!(matches!(timed_attack("A", None, 2, AttackStyle::Melee).kind, crate::combat::AttackKind::Telegraphed(_)));
+    }
+
+    #[test]
     fn jads_attacks_carry_their_listed_numbers() {
         let registry = Registry::builtin();
         let jad = registry.npc("tztok_jad").unwrap();
 
         let magic = attack_from_def(&jad.attacks[2]);
 
-        assert_eq!(magic.style, AttackStyle::Magic);
-        assert_eq!(magic.max_hit, MaxHitSource::Fixed(95));
-        assert_eq!(magic.projectile_travel_ticks, 1);
-        assert_eq!(magic.reaction, ReactionRequirement::prayer_match(ProtectionPrayer::Magic));
+        let targeted = magic.expect_targeted();
+        assert_eq!(targeted.style, AttackStyle::Magic);
+        assert_eq!(targeted.max_hit, MaxHitSource::Fixed(95));
+        assert_eq!(targeted.mitigation, Mitigation::ProtectionPrayer);
         assert_eq!(magic.animation, Some(2656));
-        // speed 8, telegraph 3 -> three busy ticks to resolve plus cooldown to fill the 8 ticks
-        assert_eq!(magic.cooldown_ticks, 4);
+        // a three-tick wind-up, then it rolls and flies at the engine's default speed
+        assert_eq!(magic.telegraph_ticks(), 3);
+        assert_eq!(magic.flight_ticks(10), crate::combat::ProjectileSpeed::DEFAULT.flight_ticks(10));
+        // the rate is Jad's own, not repeated on each attack
+        assert_eq!(jad.attack_speed, 8);
+        assert_eq!(magic.attack_speed, None);
+    }
+
+    #[test]
+    fn an_attack_reaches_as_far_as_its_monsters_attack_range_unless_it_names_its_own() {
+        let registry = Registry::builtin();
+
+        // the aviansie's one attack names no range, so it uses the monster's own 7
+        let aviansie = registry.npc("aviansie").unwrap();
+        assert_eq!(aviansie.attack_range, 7);
+        assert_eq!(attack_from_def(&aviansie.attacks[0]).range, None);
+        assert_eq!(attack_from_def(&aviansie.attacks[0]).reach(aviansie.attack_range), 7);
+
+        // Jad is a 15 tile monster whose melee swing says it needs adjacency
+        let jad = registry.npc("tztok_jad").unwrap();
+        assert_eq!(jad.attack_range, 15);
+        let melee = attack_from_def(&jad.attacks[0]);
+        assert!(melee.is_melee_reach(jad.attack_range));
+        assert!(!attack_from_def(&jad.attacks[2]).is_melee_reach(jad.attack_range));
     }
 
     #[test]

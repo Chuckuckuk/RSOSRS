@@ -9,7 +9,7 @@ group. Chapter references point to where the term is explained in full.
 |---|---|
 | **Aggression / tolerance** | Aggressive monsters attack players who come within range. After 10 minutes near them a player becomes "tolerated" and they stop. Monsters below level 63 ignore players more than twice their combat level. (6.4) |
 | **Attack roll / defence roll** | `effective level × (equipment bonus + 64)`. Each is the top face of a die: both are thrown and the attack hits if its throw is higher. (3.3) |
-| **Attack speed** | Ticks between consecutive attacks. A 4-tick weapon swings every 2.4 s. |
+| **Attack speed** | Ticks between consecutive attacks. A 4-tick weapon swings every 2.4 s. A stat of the attacker (a monster's `attack_speed`, a weapon's speed); one attack may override it. |
 | **Attribute** | A monster tag (undead, demon, draconic...) that some gear exploits. (3.4) |
 | **Combat level** | A single number summarising combat skills; colours NPC levels in menus. (3.3) |
 | **Effective level** | A level after potion boost, prayer, stance bonus and the +8 constant. (3.3) |

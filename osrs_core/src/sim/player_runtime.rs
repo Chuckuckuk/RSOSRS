@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use super::player::Player;
 use crate::combat::{
-    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProtectionPrayer,
+    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProjectileSpeed, ProtectionPrayer,
 };
 use crate::data::{ConsumableEffect, EquipSlot, Registry, StanceDef, StanceKind, WeaponDef};
 use crate::model::{Attribute, DamageType, EquipmentBonuses, Modifier, PrayerEffects, ScalingContext, Skill, StanceBonuses};
@@ -49,9 +49,9 @@ pub struct AttackPlan {
 }
 
 impl AttackPlan {
-    /// Fixes the projectile travel time for a shot at `distance` tiles and shares the definition.
-    pub fn finish(mut self, distance: i32) -> Rc<AttackDefinition> {
-        self.definition.projectile_travel_ticks = rules::projectile_travel_ticks(self.style, distance);
+    /// Shares the finished definition. Its projectile speed (the game's own flight times for
+    /// ranged and magic) is already part of it; the world measures the distance to the target.
+    pub fn finish(self) -> Rc<AttackDefinition> {
         self.definition.shared()
     }
 }
@@ -398,7 +398,7 @@ impl Player {
         };
         let modifiers = modifiers.iter().map(|m| m.resolved(&scaling)).collect();
 
-        let mut definition = AttackDefinition::new(name, range, 0, style)
+        let mut definition = AttackDefinition::instant(name, Some(range), style)
             .with_damage_type(damage_type)
             .with_max_hit(max_hit)
             .with_modifiers(modifiers)
@@ -406,6 +406,12 @@ impl Player {
             .with_hit_count(hit_count)
             .with_always_hits(always_hits)
             .with_sounds(sound, hit_sound);
+        // a player's shots keep the game's own flight times, whatever the engine's default is
+        definition = match style {
+            AttackStyle::Ranged => definition.with_projectile_speed(ProjectileSpeed::OsrsRanged),
+            AttackStyle::Magic => definition.with_projectile_speed(ProjectileSpeed::OsrsMagic),
+            AttackStyle::Melee => definition,
+        };
         if let Some(status) = on_hit.and_then(|effect| effect.to_status().ok()) {
             definition = definition.with_on_hit_status_effect(status);
         }
@@ -421,14 +427,14 @@ impl Player {
     pub fn expected_dps(&self, registry: &Registry, target: &CombatStats) -> Result<Dps, String> {
         let plan = self.plan_attack(registry, target)?;
         let stats = self.mover.actor.stats();
-        let max_hit = crate::combat::analyze_attack(&plan.definition, &stats, target, true).max_hit;
+        let max_hit = crate::combat::analyze_attack(plan.definition.expect_targeted(), &stats, target, true).max_hit;
         let mut rng = crate::rng::DotNetRandom::new(DPS_SEED);
-        let swings = crate::combat::simulate_swings(&plan.definition, &stats, target, true, &mut rng, DPS_SWINGS);
-        let per_swing = swings.mean_damage * plan.definition.hit_count as f64;
+        let swings = crate::combat::simulate_swings(plan.definition.expect_targeted(), &stats, target, true, &mut rng, DPS_SWINGS);
+        let per_swing = swings.mean_damage * plan.definition.expect_targeted().hit_count as f64;
         Ok(Dps {
             hit_rate: swings.hit_rate,
             max_hit,
-            hits_per_swing: plan.definition.hit_count,
+            hits_per_swing: plan.definition.expect_targeted().hit_count,
             swing_ticks: plan.speed,
             per_swing,
             per_second: per_swing / (plan.speed as f64 * 0.6),

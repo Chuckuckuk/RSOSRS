@@ -88,7 +88,7 @@ fn damage_dealt_never_exceeds_the_analysed_max_hit_and_the_dummy_loses_exactly_t
 
     let plan = world.player.plan_attack(world.registry(), &world.entity(dummy).unwrap().view().stats).unwrap();
     let analysis = analyze_attack(
-        &plan.definition,
+        plan.definition.expect_targeted(),
         &world.player.mover.actor.stats(),
         &world.entity(dummy).unwrap().view().stats,
         true,
@@ -173,7 +173,7 @@ fn spell_max_hit_and_requirements() {
     let defender = world.entity(dummy).unwrap().view().stats;
 
     let plan = world.player.plan_attack(world.registry(), &defender).unwrap();
-    let analysis = analyze_attack(&plan.definition, &world.player.mover.actor.stats(), &defender, true);
+    let analysis = analyze_attack(plan.definition.expect_targeted(), &world.player.mover.actor.stats(), &defender, true);
 
     // Fire Surge 24 * (1 + 0.15 + 0.05) = 28.8, floored (the occult necklace is +5% since its nerf).
     assert_eq!(analysis.max_hit, 28);
@@ -205,7 +205,7 @@ fn powered_staves_ignore_the_spellbook_and_scale_with_magic_level() {
     let defender = world.entity(dummy).unwrap().view().stats;
 
     let plan = world.player.plan_attack(world.registry(), &defender).unwrap();
-    let analysis = analyze_attack(&plan.definition, &world.player.mover.actor.stats(), &defender, true);
+    let analysis = analyze_attack(plan.definition.expect_targeted(), &world.player.mover.actor.stats(), &defender, true);
 
     assert_eq!(analysis.max_hit, 99 / 3 - 2); // 31
     assert_eq!(plan.speed, 4);
@@ -222,7 +222,7 @@ fn a_salve_amulet_boosts_against_the_undead_only_and_beats_a_slayer_helm() {
     let max_hit = |world: &World, target: EntityId| {
         let defender = world.entity(target).unwrap().view().stats;
         let plan = world.player.plan_attack(world.registry(), &defender).unwrap();
-        analyze_attack(&plan.definition, &world.player.mover.actor.stats(), &defender, true).max_hit
+        analyze_attack(plan.definition.expect_targeted(), &world.player.mover.actor.stats(), &defender, true).max_hit
     };
 
     let plain = max_hit(&world, zombie);
@@ -249,7 +249,7 @@ fn demonbane_and_kalphite_weapons_key_off_the_attribute_tags() {
     let roll = |world: &World, target: EntityId| {
         let defender = world.entity(target).unwrap().view().stats;
         let plan = world.player.plan_attack(world.registry(), &defender).unwrap();
-        analyze_attack(&plan.definition, &world.player.mover.actor.stats(), &defender, true)
+        analyze_attack(plan.definition.expect_targeted(), &world.player.mover.actor.stats(), &defender, true)
     };
 
     let vs_demon = roll(&world, demon);
@@ -567,7 +567,7 @@ fn the_twisted_bow_scales_with_the_targets_magic_level() {
         let target = world.spawn_npc_def(id, TileCoord::new(x, 0)).unwrap();
         let defender = world.entity(target).unwrap().view().stats;
         let plan = world.player.plan_attack(world.registry(), &defender).unwrap();
-        analyze_attack(&plan.definition, &world.player.mover.actor.stats(), &defender, true).max_hit
+        analyze_attack(plan.definition.expect_targeted(), &world.player.mover.actor.stats(), &defender, true).max_hit
     };
 
     let low = max_hit(&mut world, "low_magic", 4);
@@ -591,7 +591,7 @@ fn dragon_hunter_gear_only_applies_to_draconic_targets() {
     let analyse = |world: &World, id| {
         let defender = world.entity(id).unwrap().view().stats;
         let plan = world.player.plan_attack(world.registry(), &defender).unwrap();
-        analyze_attack(&plan.definition, &world.player.mover.actor.stats(), &defender, true)
+        analyze_attack(plan.definition.expect_targeted(), &world.player.mover.actor.stats(), &defender, true)
     };
 
     let vs_drake = analyse(&world, drake);
