@@ -7,19 +7,11 @@ use crate::actors::{
     StyleReactiveMovementPolicy,
 };
 use crate::combat::{
-    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProjectileSpeed, ProtectionPrayer, RangeAwarePattern,
-    ReactionRequirement, RotationMode,
+    AttackDefinition, CombatStats, MaxHitSource, ProjectileSpeed, RangeAwarePattern,
+    Mitigation, RotationMode,
 };
 use crate::data::{NpcAttackDef, NpcDef, NpcMovementDef, RotationDef};
 use crate::model::{DamageType, StanceBonuses};
-
-fn protection_for(style: AttackStyle) -> ProtectionPrayer {
-    match style {
-        AttackStyle::Melee => ProtectionPrayer::Melee,
-        AttackStyle::Ranged => ProtectionPrayer::Ranged,
-        AttackStyle::Magic => ProtectionPrayer::Magic,
-    }
-}
 
 /// One of a monster's attacks as a runtime `AttackDefinition`. Assumes the definition has been
 /// through `Registry::validate`.
@@ -53,8 +45,8 @@ fn attack_sounding(def: &NpcAttackDef, fallback_sound: Option<u32>) -> Rc<Attack
     if let (Some(speed), 0) = (def.projectile_speed, def.impact_delay_ticks) {
         attack = attack.with_projectile_speed(ProjectileSpeed::tiles_per_tick(speed));
     }
-    if def.protectable {
-        attack = attack.with_reaction(ReactionRequirement::prayer_match(protection_for(def.style)));
+    if !def.protectable {
+        attack = attack.with_mitigation(Mitigation::Unmitigable);
     }
     if let Some(status) = def.on_hit.and_then(|effect| effect.to_status().ok()) {
         attack = attack.with_on_hit_status_effect(status);
@@ -96,6 +88,7 @@ pub fn stats_from_def(def: &NpcDef) -> CombatStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::combat::AttackStyle;
     use crate::data::Registry;
 
     #[test]
@@ -108,7 +101,7 @@ mod tests {
         let targeted = magic.expect_targeted();
         assert_eq!(targeted.style, AttackStyle::Magic);
         assert_eq!(targeted.max_hit, MaxHitSource::Fixed(95));
-        assert_eq!(targeted.reaction, ReactionRequirement::prayer_match(ProtectionPrayer::Magic));
+        assert_eq!(targeted.mitigation, Mitigation::ProtectionPrayer);
         assert_eq!(magic.animation, Some(2656));
         // a three-tick wind-up, then it rolls and flies at the engine's default speed
         assert_eq!(magic.telegraph_ticks(), 3);

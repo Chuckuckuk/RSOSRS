@@ -9,7 +9,7 @@ use crate::collision::CollisionMap;
 use crate::data::NpcDef;
 use crate::combat::{
     AttackDefinition, AttackStyle, DamageBuffer, FixedRotationPattern, NpcCombatState,
-    PendingAttackQueue, ProtectionPrayer, ReactionRequirement,
+    PendingAttackQueue, 
 };
 use crate::encounters::{Phase, TriggerBinding};
 use crate::tiles::TileCoord;
@@ -142,7 +142,6 @@ impl Entity {
         let actor = Actor::new(ActorKind::Npc, start, config.footprint_size, config.max_health, config.levels.to_stats());
         let mover = Mover::new(actor, map);
         let attack = AttackDefinition::targeted("Melee", None, config.melee_telegraph_ticks, AttackStyle::Melee)
-            .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Melee))
             .shared();
         // Only one attack exists, so a one-entry FixedRotationPattern is just "always this attack".
         let combat_state = NpcCombatState::new(Rc::new(FixedRotationPattern::new(vec![Rc::clone(&attack)])));

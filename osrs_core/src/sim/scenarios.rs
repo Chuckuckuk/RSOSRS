@@ -150,7 +150,7 @@ mod tests {
     use crate::actors::EntityId;
     use crate::combat::{
         AttackDefinition, AttackPattern, AttackStyle, FixedRotationPattern, GroundDamage, GroundTarget,
-        HazardAnchor, ProtectionPrayer, ReactionRequirement,
+        HazardAnchor, ProtectionPrayer,
     };
     use crate::encounters::{Phase, PhaseTrigger, TriggerAction, TriggerBinding};
     use crate::sim::config::{BossConfig, HealerConfig, NpcConfig, PassiveConfig};
@@ -303,7 +303,6 @@ mod tests {
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig::default());
 
         let slam = AttackDefinition::targeted("Slam", Some(15), 2, AttackStyle::Ranged)
-            .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Ranged))
             .shared();
         let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![slam]));
         let phase = Phase::new("Main", pattern, None);

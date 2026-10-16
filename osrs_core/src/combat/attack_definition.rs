@@ -6,7 +6,7 @@ use super::ground_target::GroundTarget;
 use super::max_hit_source::MaxHitSource;
 use super::projectile_speed::ProjectileSpeed;
 use super::protection_prayer::ProtectionPrayer;
-use super::reaction_requirement::ReactionRequirement;
+use super::mitigation::Mitigation;
 use super::status_effect::StatusEffectDefinition;
 use super::targeted_attack::TargetedAttack;
 use crate::model::{DamageType, Modifier};
@@ -60,7 +60,7 @@ pub enum AttackKind {
     /// Rolls the tick it is chosen, with no wind-up to read (the "traditional" archetype: most
     /// melee, and any attack the player must already be praying against when it starts).
     Instant(InstantAttack),
-    /// A visible wind-up, then it rolls the tick the wind-up ends (Jad).
+    /// A visible wind-up, then it rolls the tick the wind-up ends (Jad, The Nightmare, ).
     Telegraphed(TelegraphedAttack),
     /// Rolls only once it makes contact, `impact_delay_ticks` after it is released, so the
     /// defender's state at that moment is what counts (Doom of Mokhaiotl's "Doom-style").
@@ -329,8 +329,8 @@ impl AttackDefinition {
         self.change_targeted("with_prayer_penetration", |t| t.with_prayer_penetration(prayer_penetration))
     }
 
-    pub fn with_reaction(self, reaction: ReactionRequirement) -> Self {
-        self.change_targeted("with_reaction", |t| t.with_reaction(reaction))
+    pub fn with_mitigation(self, mitigation: Mitigation) -> Self {
+        self.change_targeted("with_mitigation", |t| t.with_mitigation(mitigation))
     }
 
     // ---- flight builder ----

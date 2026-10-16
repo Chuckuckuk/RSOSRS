@@ -35,7 +35,6 @@ fn make_melee_attack(telegraph_ticks: i32, impact_delay_ticks: i32) -> Rc<Attack
     };
     attack
         .with_prayer_penetration(0.0)
-        .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Melee))
         .shared()
 }
 
@@ -56,7 +55,7 @@ fn advance(state: &mut NpcCombatState) -> bool {
 }
 
 fn current_multiplier(state: &NpcCombatState, reaction: &PlayerReactionState) -> f32 {
-    get_damage_multiplier(state.current_attack().unwrap().expect_targeted(), Some(reaction), tile(), tile())
+    get_damage_multiplier(state.current_attack().unwrap().expect_targeted(), Some(reaction))
 }
 
 fn alive(_: EntityId) -> bool {
@@ -122,7 +121,7 @@ fn doom_style_attack_late_switch_during_the_travel_phase_still_fully_blocks_the_
 
     assert!(advance(&mut state)); // no telegraph - resolves at once; honoring the delay is the caller's job
     let attack = Rc::clone(state.current_attack().unwrap());
-    queue.enqueue(Rc::clone(&attack), tile(), Some(EntityId(7)), attacker_stats(), attack.impact_delay_ticks());
+    queue.enqueue(Rc::clone(&attack), Some(EntityId(7)), attacker_stats(), attack.impact_delay_ticks());
 
     let run = |queue: &mut PendingAttackQueue, reaction: &PlayerReactionState, target: &mut FakeCombatTarget| {
         queue.advance(&target.view, &mut target.damage_buffer, Some(reaction), &mut DotNetRandom::new(1), &alive);
@@ -155,7 +154,7 @@ fn doom_style_attack_correct_prayer_dropped_before_impact_still_takes_full_damag
 
     assert!(advance(&mut state)); // no telegraph - resolves at once
     let attack = Rc::clone(state.current_attack().unwrap());
-    queue.enqueue(Rc::clone(&attack), tile(), Some(EntityId(7)), attacker_stats(), attack.impact_delay_ticks());
+    queue.enqueue(Rc::clone(&attack), Some(EntityId(7)), attacker_stats(), attack.impact_delay_ticks());
 
     queue.advance(&target.view, &mut target.damage_buffer, Some(&reaction), &mut DotNetRandom::new(1), &alive); // travelling
     queue.advance(&target.view, &mut target.damage_buffer, Some(&reaction), &mut DotNetRandom::new(1), &alive); // still travelling

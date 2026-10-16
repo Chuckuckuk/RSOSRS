@@ -1,12 +1,11 @@
 use super::attack_style::AttackStyle;
 use super::max_hit_source::MaxHitSource;
-use super::reaction_requirement::ReactionRequirement;
+use super::mitigation::Mitigation;
 use crate::model::{DamageType, Modifier};
 
 /// What an attack that is rolled against a defender has beyond the common fields of an
 /// `AttackDefinition`: a combat style and the defence bonus it rolls against, the dice that decide
-/// whether it hits and for how much, and how the defender's prayers and position change the
-/// outcome. A ground-targeted attack has none of this.
+/// whether it hits and for how much, and how the defender's prayers change the outcome. A ground-targeted attack has none of this.
 #[derive(Debug, Clone)]
 pub struct TargetedAttack {
     pub style: AttackStyle,
@@ -23,10 +22,12 @@ pub struct TargetedAttack {
     pub hit_count: i32,
     /// Skips the accuracy roll entirely (and its RNG draw): the hit always connects.
     pub always_hits: bool,
-    /// Fraction of damage that gets through a CORRECT protection prayer (0 = fully blocked,
-    /// 1 = "ignore"); see `reaction_resolver`.
+    /// Fraction of damage that still gets through when the defender meets `mitigation` (0 =
+    /// fully blocked, 1 = "ignore"); see `reaction_resolver`.
     pub prayer_penetration: f32,
-    pub reaction: ReactionRequirement,
+    /// What lets the defender cut this attack down: the protection prayer for its style unless it
+    /// says otherwise.
+    pub mitigation: Mitigation,
 }
 
 impl TargetedAttack {
@@ -40,7 +41,7 @@ impl TargetedAttack {
             hit_count: 1,
             always_hits: false,
             prayer_penetration: 0.0,
-            reaction: ReactionRequirement::default(),
+            mitigation: Mitigation::default(),
         }
     }
 
@@ -82,8 +83,8 @@ impl TargetedAttack {
         self
     }
 
-    pub fn with_reaction(mut self, reaction: ReactionRequirement) -> Self {
-        self.reaction = reaction;
+    pub fn with_mitigation(mut self, mitigation: Mitigation) -> Self {
+        self.mitigation = mitigation;
         self
     }
 }

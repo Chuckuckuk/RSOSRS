@@ -1,5 +1,5 @@
 /// What an attack's damage type is, for reaction-matching purposes (Stage 2's
-/// `ReactionRequirement` checks this against the target's active protection).
+/// `Mitigation` checks this against the target's active protection).
 ///
 /// Deliberately only three values - "typeless" is NOT a real 4th style. Per OSRS wiki
 /// research, it's old terminology for an attack with 100% prayer penetration: it still rolls

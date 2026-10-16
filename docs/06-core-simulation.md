@@ -214,7 +214,7 @@ case. A data-defined monster with no attacks becomes `Passive`.
 [`sim/npc_factory.rs`](../osrs_core/src/sim/npc_factory.rs) does the conversion:
 
 * `attack_from_def` turns an `NpcAttackDef` into an `AttackDefinition` with a fixed max hit, the
-  three timing numbers, `with_attack_speed(speed)`, a prayer-match reaction if `protectable`, and
+  three timing numbers, `with_attack_speed(speed)`, `Mitigation::Unmitigable` if not `protectable`, and
   the on-hit status effect;
 * `pattern_from_def` builds a `RangeAwarePattern` over all the monster's attacks;
 * `movement_policy_from_def` maps the JSON `movement` to a policy;
@@ -304,8 +304,7 @@ scheduler runs (primer 1.7).
      the `Attack` event now, carrying the attack's own `animation`: the wind-up is the warning the
      player reacts to (Jad). If an attack resolved: either land a ground attack
      (`fire_at_ground`), or call `fire_at_player` with the distance to the player (for the
-     projectile's flight). A positional reaction's origin comes from
-     `NpcCombatState::hazard_origin`.
+     projectile's flight).
 * **`fire_at_player`** pushes an `Attack` event (only for attacks without a telegraph, which were
   not announced yet), the attack's sounds and its `Projectile` (marked `released` for a telegraphed
   attack), then calls **`deliver_attack`**: it pushes the `Graphic` events for the attack's target

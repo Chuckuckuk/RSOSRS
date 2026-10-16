@@ -907,7 +907,6 @@ impl World {
                 // a player's successful hit never rolls 0
                 target.pending_attacks.enqueue_with_floor(
                     Rc::clone(&attack),
-                    player_tile,
                     Some(PLAYER_ID),
                     stats,
                     attack.impact_delay_ticks(),
@@ -992,7 +991,6 @@ impl World {
         attacker_name: &str,
         attacker_stats: CombatStats,
         attack: &Rc<AttackDefinition>,
-        hazard_origin: TileCoord,
         distance: i32,
     ) {
         self.announce_attack(attacker, attack);
@@ -1011,7 +1009,7 @@ impl World {
                 released: attack.telegraph_ticks() > 0,
             });
         }
-        self.deliver_attack(Some(attacker), attacker_name, attacker_stats, attack, hazard_origin, flight);
+        self.deliver_attack(Some(attacker), attacker_name, attacker_stats, attack, flight);
     }
 
     /// Resolves a ground-targeted attack whose telegraph has just ended: the attacker is seen and
@@ -1098,7 +1096,6 @@ impl World {
         attacker_name: &str,
         attacker_stats: CombatStats,
         attack: &Rc<AttackDefinition>,
-        hazard_origin: TileCoord,
         flight_ticks: i32,
     ) -> i32 {
         let targeted = attack.expect_targeted();
@@ -1110,7 +1107,6 @@ impl World {
             for _ in 0..targeted.hit_count {
                 self.player.pending_attacks.enqueue(
                     Rc::clone(attack),
-                    hazard_origin,
                     attacker,
                     attacker_stats,
                     attack.impact_delay_ticks(),
@@ -1123,7 +1119,7 @@ impl World {
             ));
             return 0;
         }
-        self.roll_on_player(attacker_name, attacker_stats, attack, hazard_origin, flight_ticks)
+        self.roll_on_player(attacker_name, attacker_stats, attack, flight_ticks)
     }
 
     /// Rolls each of `attack`'s hits against the player now and enqueues them in the player's
@@ -1134,15 +1130,13 @@ impl World {
         attacker_name: &str,
         attacker_stats: CombatStats,
         attack: &Rc<AttackDefinition>,
-        hazard_origin: TileCoord,
         flight_ticks: i32,
     ) -> i32 {
         let targeted = attack.expect_targeted();
         let mut total = 0;
         for _ in 0..targeted.hit_count {
             let player_view = self.player.view();
-            let multiplier =
-                get_damage_multiplier(targeted, Some(&self.player.reaction_state), hazard_origin, player_view.tile);
+            let multiplier = get_damage_multiplier(targeted, Some(&self.player.reaction_state));
             let damage = roll_damage(
                 targeted,
                 &attacker_stats,
@@ -1214,12 +1208,11 @@ impl World {
         }
 
         let attack = Rc::clone(state.combat_state.current_attack().expect("an attack resolved, so one was selected"));
-        let hazard_origin = state.combat_state.hazard_origin(&attack);
         let stats = actor.stats();
         let size = actor.footprint_size();
         let distance = TargetSpec::distance_to_rect(player_tile, actor.current_tile(), size, size);
 
-        self.fire_at_player(id, &entity.name, stats, &attack, hazard_origin, distance);
+        self.fire_at_player(id, &entity.name, stats, &attack, distance);
     }
 
     fn run_npc_movement(&mut self, entity: &mut Entity) {
@@ -1361,12 +1354,11 @@ impl World {
             return;
         }
 
-        let hazard_origin = combat_state.hazard_origin(&attack);
         let stats = actor.stats();
         let size = actor.footprint_size();
         let distance = TargetSpec::distance_to_rect(player_tile, actor.current_tile(), size, size);
 
-        self.fire_at_player(id, &entity.name, stats, &attack, hazard_origin, distance);
+        self.fire_at_player(id, &entity.name, stats, &attack, distance);
     }
 
     fn apply_boss_action(
@@ -1391,7 +1383,7 @@ impl World {
             TriggerAction::SpawnEntities { spawn_id } => self.activate_spawn_group(&spawn_id, registrar),
             TriggerAction::SetFlag { flag_name, value } => self.encounter.set_flag(&flag_name, value),
             TriggerAction::ModifyStats { stat_name, delta } => {
-                // Recognised-but-unimplemented, same stance as ReactionKind::Interrupt - nothing
+                // Recognised-but-unimplemented, same stance as other recognised-but-unimplemented hooks - nothing
                 // in this project's encounters needs it yet.
                 self.log_line(format!(
                     "{boss_name}: ModifyStats trigger fired (stat={stat_name}, delta={delta}) - not implemented yet, no effect."

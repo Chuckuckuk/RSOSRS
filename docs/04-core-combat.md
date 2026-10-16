@@ -70,7 +70,7 @@ The first three wrap a **`TargetedAttack`**, which is what is rolled against a d
 | `hit_count` | separate rolls per use (dragon claws: 4) |
 | `always_hits` | skip the accuracy roll entirely |
 | `prayer_penetration` | the fraction of damage that gets through the *correct* protection prayer: 0 = fully blocked, 1 = ignores prayer |
-| `reaction` | what the player must do to avoid it ([`ReactionRequirement`](../osrs_core/src/combat/reaction_requirement.rs)) |
+| `mitigation` | what lets the defender cut it down ([`Mitigation`](../osrs_core/src/combat/mitigation.rs)): the protection prayer for its style by default |
 
 The damage resolver, the reaction resolver, `PendingAttackQueue` and the player's swings take a
 `TargetedAttack`, so rolling a ground attack against a defender's accuracy cannot be written.
@@ -345,19 +345,25 @@ return round_half_away_from_zero(rolled as f32 * damage_multiplier);
 
 ## 4.7 Avoiding damage: reactions and prayers
 
-Files: [`reaction_requirement.rs`](../osrs_core/src/combat/reaction_requirement.rs),
+Files: [`mitigation.rs`](../osrs_core/src/combat/mitigation.rs),
 [`reaction_resolver.rs`](../osrs_core/src/combat/reaction_resolver.rs),
 [`player_reaction_state.rs`](../osrs_core/src/combat/player_reaction_state.rs),
 [`protection_prayer.rs`](../osrs_core/src/combat/protection_prayer.rs).
 
-An attack's `reaction` says what the player must do:
+Three things avoid damage, one per kind of attack:
 
-| `ReactionKind` | Damage multiplier |
-|---|---|
-| `None` | 1 |
-| `PrayerMatch` | `prayer_penetration` if the player's active protection prayer equals `required_prayer`, else 1 |
-| `MoveToTile` | 0 if the player is at least `move_away_distance` (Chebyshev) from the hazard's origin tile, else 1. The origin is the attacker's or target's tile **at selection time** (`HazardAnchor`). |
-| `Interrupt` | 1 (not implemented yet) |
+* **A targeted attack checks the protection prayer for its style.** Melee, ranged and magic attacks
+  are all answered by the matching prayer without saying so (`ProtectionPrayer::against(style)`);
+  nothing has to be declared.
+* **An area attack is avoided by where the defender stands.** A `GroundAttack` has no mitigation: it
+  resolves against whoever is on its tiles when it lands (4.10).
+* **Any targeted attack may name another condition instead.** `Mitigation::When(DefenderCondition)`
+  is met by a state of the defender other than the matching prayer (`NoProtectionPrayer` for a
+  screech that only lands on someone with prayer down), and `Mitigation::Unmitigable` is a typeless
+  attack nothing changes.
+
+When the mitigation is met, `prayer_penetration` of the damage still gets through (0 blocks it, 1
+means the prayer does nothing); otherwise the damage is whole.
 
 [`get_damage_multiplier`](../osrs_core/src/combat/reaction_resolver.rs) reads the player's
 `PlayerReactionState` (active protection prayer and current fighting style) **at the moment of the
@@ -367,8 +373,8 @@ prayer's protection by dropping it one tick early.
 [`prayer_check_timing_tests.rs`](../osrs_core/src/combat/prayer_check_timing_tests.rs) pins this
 for all three timing archetypes (4.8).
 
-Data-defined monster attacks with `"protectable": true` (the default) get
-`ReactionRequirement::prayer_match(<matching protection>)` automatically.
+Data-defined monster attacks are checked against the matching protection prayer by default;
+`"protectable": false` makes one `Mitigation::Unmitigable`.
 
 ---
 
