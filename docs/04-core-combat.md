@@ -482,7 +482,10 @@ no style or damage type.
 | `TileSelection` | Covers |
 |---|---|
 | `Offsets(Vec<(dx, dz)>)` | each offset from the anchor: squares (`GroundTarget::square(anchor, 1)` is the 3x3), crosses, lines, claw patterns; need not be contiguous |
-| `Scatter { radius, count }` | `count` distinct random tiles within `radius` of the anchor |
+| `Scatter { radius, min, max }` | `min` to `max` distinct random tiles within `radius` of the anchor (the count is drawn first when it varies) |
+
+`GroundTarget::including_anchor()` makes the anchor tile always covered, counting toward a scatter's
+count (the first boulder always lands on the player).
 
 The tiles come from the attacker's and target's tiles as they were at selection. That tile is all
 that is taken from the target: the attack carries no target and no target stats.
