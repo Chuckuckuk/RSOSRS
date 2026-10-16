@@ -98,6 +98,12 @@ impl<Id: Copy + PartialEq> TickScheduler<Id> {
         self.registrar.unregister(phase, id);
     }
 
+    /// Takes on the registrations and unregistrations queued on `stand_in` (a scheduler put in
+    /// this one's place while it was running), to apply at the next phase boundary.
+    pub fn adopt_pending(&mut self, stand_in: TickScheduler<Id>) {
+        self.registrar.pending.extend(stand_in.registrar.pending);
+    }
+
     /// Advances the tick counter and runs every phase in order, calling
     /// `dispatch(phase, id, tick, registrar)` for each registered id.
     pub fn run_tick(&mut self, mut dispatch: impl FnMut(TickPhase, Id, i32, &mut TickRegistrar<Id>)) {

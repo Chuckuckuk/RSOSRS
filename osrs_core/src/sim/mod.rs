@@ -11,6 +11,7 @@ mod events;
 mod inventory;
 mod examine;
 mod firemaking;
+mod followers;
 mod gathering;
 mod ground_items;
 mod loadout;
@@ -31,6 +32,7 @@ pub use animations::{draw_graphic, player_animations, projectile_graphic, Player
 pub use config::{BossConfig, CombatLevels, HealerConfig, NpcConfig, PassiveConfig, PlayerConfig};
 pub use events::{Combatant, WorldEvent};
 pub use examine::ExamineTexts;
+pub use followers::{Follower, CATCH_UP_DISTANCE};
 pub use firemaking::{LightAction, RestAction, BONFIRE_LOC, BONFIRE_OPTIONS};
 pub use gathering::GatherAction;
 pub use ground_items::{GroundItem, GroundItems, DESPAWN_TICKS};

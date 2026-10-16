@@ -357,7 +357,7 @@ is the cache sprite `cross` (frames 0-3 yellow, 4-7 red, on a 16x16 canvas), eac
 |---|---|
 | `Walk(tile)` | `WalkTo { tile }` |
 | `Npc { option: "Attack" }` | `Attack { target }` |
-| `Npc { other option }` | `InteractNpc { target }` (walk up and face it) |
+| `Npc { other option }` | `InteractNpc { target, option }` (picks up the player's follower; otherwise walks up and faces it) |
 | `ExamineNpc`, `Examine`, `ExamineItem`, `ExamineGroundItem` | the matching examine command |
 | `InventoryOption`, `Unequip` | the matching item command |
 | `Object { .. }` | nothing yet (printed) |

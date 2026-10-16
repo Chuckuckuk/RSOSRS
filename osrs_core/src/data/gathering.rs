@@ -89,6 +89,8 @@ pub enum DepletionDef {
     /// while it is gathered from and back up (at the same rate) while it is not; once it has run
     /// out, the next success depletes it (oak, willow, yew...).
     Timer { ticks: i32 },
+    /// Each success depletes it with a 1 in `one_in` chance (a mature juniper tree, 1 in 16).
+    Chance { one_in: i32 },
 }
 
 /// A pet a node can give, rolled once per product gathered.
@@ -141,6 +143,15 @@ pub struct GatheringNodeDef {
     /// Said on each success (`"You get some logs."`).
     #[serde(default)]
     pub success_message: Option<String>,
+    /// The cache sound played with each attempt (the axe striking the tree).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_sound: Option<u32>,
+    /// The cache sound played as it depletes (the tree falling).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depleted_sound: Option<u32>,
+    /// Where the values came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 impl GatheringNodeDef {

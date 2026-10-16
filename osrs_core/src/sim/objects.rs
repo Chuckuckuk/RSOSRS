@@ -50,6 +50,8 @@ pub enum PlayerAction {
     Rest(RestAction),
     /// Walking onto a ground item to pick it up (by its uid).
     Take { uid: u32 },
+    /// Walking up to the player's follower to pick it up.
+    PickUp { entity: crate::actors::EntityId },
 }
 
 /// Opening or closing a door.
@@ -314,6 +316,7 @@ impl World {
             Some(PlayerAction::Tend(tend)) => self.run_tend_action(tend),
             Some(PlayerAction::Rest(rest)) => self.run_rest_action(rest),
             Some(PlayerAction::Take { uid }) => self.run_take_action(uid),
+            Some(PlayerAction::PickUp { entity }) => self.run_pick_up_action(entity),
             None => false,
         }
     }
@@ -325,7 +328,7 @@ impl World {
             Some(PlayerAction::Door(door)) => Some(self.scenery_state.current(&door.leaf)),
             Some(PlayerAction::Tend(tend)) => self.scenery_state.spawned_at(tend.tile).map(|fire| fire.loc),
             Some(PlayerAction::Rest(rest)) => self.scenery_state.spawned_at(rest.tile).map(|fire| fire.loc),
-            Some(PlayerAction::Light(_)) | Some(PlayerAction::Take { .. }) | None => None,
+            Some(PlayerAction::Light(_)) | Some(PlayerAction::Take { .. }) | Some(PlayerAction::PickUp { .. }) | None => None,
         }
     }
 }
