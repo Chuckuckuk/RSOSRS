@@ -463,6 +463,7 @@ pub fn sync_npcs(
                 if first {
                     model.play_once(clip);
                 }
+                model.set_hover(fighter.hover_at());
             }
             None => model.play(if walking { CLIP_WALK } else { CLIP_STAND }),
         }

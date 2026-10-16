@@ -102,6 +102,291 @@
       "notes": "Levels, max hits, size, speed and the +60 magic attack bonus from the wiki. Melee is instant (no warning) and only used in melee range. Like every monster, he holds still while an attack of his can reach the player, so with 15-tile ranged and magic he does not walk to approach. Ranged (stomp, 2652) and magic (rear-up, 2656) start their animation 3 ticks before the roll; the protection prayer is read at the roll, so the player switches while Jad winds up. The 3-tick window is a tuning choice: the wiki gives no tick count. Below 150 hitpoints he calls four Yt-HurKot; if they heal him back to full, the dead ones come again the next time he falls below 150. Graphics: 451 (rocks dropped on the player by the stomp), 448 (fireball), 157 (its splash). Sounds: 159 (firebreath) as the magic wind-up starts and 410 (dragon_hit) when he is hit, both per the wiki. The ranged stomp is 163 (firewave_hit), heard on the roll tick rather than at the wind-up, identified by ear by the user. His melee (408 dragon_attack) and death (409 dragon_death) are the chromatic dragons' sounds, which he shares with them (the user's knowledge; ids from the wiki's List of sound IDs, next to 410 dragon_hit)."
     },
     {
+      "id": "gigajad",
+      "name": "GigaJad",
+      "combat_level": 1000,
+      "hitpoints": 1000,
+      "size": 5,
+      "levels": {
+        "attack": 640,
+        "strength": 960,
+        "defence": 480,
+        "ranged": 960,
+        "magic": 480
+      },
+      "bonuses": {
+        "attack": {
+          "magic": 60
+        }
+      },
+      "attack_speed": 8,
+      "attack_range": 15,
+      "hazards": [
+        {
+          "id": "boulder",
+          "name": "Boulder",
+          "blocks_line_of_sight": true,
+          "blocks_players": true,
+          "cleared_by_owner_walking": true,
+          "object": 6950,
+          "players_see_past": true
+        },
+        {
+          "id": "lava",
+          "name": "Lava",
+          "damage_per_tick": 6,
+          "cleared_by_owner_walking": true,
+          "graphic": 1246
+        }
+      ],
+      "attacks": [
+        {
+          "name": "Melee",
+          "range": 1,
+          "style": "melee",
+          "damage_type": "crush",
+          "max_hit": 97,
+          "animation": 2655,
+          "sound": 408
+        },
+        {
+          "name": "Ranged",
+          "style": "ranged",
+          "max_hit": 97,
+          "telegraph_ticks": 3,
+          "animation": 2652,
+          "resolve_sound": 163,
+          "riders": [
+            {
+              "delay_ticks": 2,
+              "special": {
+                "tiles": {
+                  "anchor": "target",
+                  "scatter": {
+                    "radius": 1,
+                    "min": 3,
+                    "max": 6
+                  },
+                  "always_include_anchor": true
+                },
+                "damage": {
+                  "fixed": 20
+                },
+                "leaves": {
+                  "hazard": "boulder",
+                  "placement": "anchor"
+                },
+                "falling_graphic": 451
+              }
+            }
+          ]
+        },
+        {
+          "name": "Magic",
+          "style": "magic",
+          "max_hit": 95,
+          "telegraph_ticks": 3,
+          "animation": 2656,
+          "projectile": 448,
+          "impact_graphic": 157,
+          "sound": 159,
+          "special": {
+            "obstructed_shot": {
+              "landing_hazards": {
+                "hazard": "lava",
+                "radius": 2,
+                "min": 2,
+                "max": 4
+              },
+              "on_blocked": {
+                "tiles": {
+                  "anchor": "target",
+                  "square": 1
+                },
+                "damage": {
+                  "fixed": 120
+                }
+              },
+              "blocked_sound": 4031
+            }
+          }
+        },
+        {
+          "name": "Magic barrage",
+          "style": "magic",
+          "max_hit": 47,
+          "prayer_penetration": 0.25,
+          "telegraph_ticks": 1,
+          "projectile": 448,
+          "impact_graphic": 157,
+          "sound": 159,
+          "special": {
+            "obstructed_shot": {
+              "landing_hazards": {
+                "hazard": "lava",
+                "radius": 2,
+                "min": 2,
+                "max": 4
+              },
+              "on_blocked": {
+                "tiles": {
+                  "anchor": "target",
+                  "square": 1
+                },
+                "damage": {
+                  "fixed": 120
+                }
+              },
+              "blocked_sound": 4031
+            }
+          },
+          "animation": 2656,
+          "animation_release_ticks": 3
+        }
+      ],
+      "rotation": "weighted",
+      "phases": [
+        {
+          "name": "opening",
+          "attacks": [
+            {
+              "attack": "Melee"
+            },
+            {
+              "attack": "Ranged"
+            },
+            {
+              "attack": "Magic"
+            }
+          ]
+        },
+        {
+          "name": "barrage",
+          "when_hp_below": 0.6,
+          "rotation": "fixed",
+          "movement": "stationary",
+          "attacks": [
+            {
+              "attack": "Magic barrage",
+              "speed": 3
+            },
+            {
+              "attack": "Magic barrage",
+              "speed": 2
+            },
+            {
+              "attack": "Magic barrage",
+              "speed": 6
+            },
+            {
+              "attack": "Ranged"
+            },
+            {
+              "attack": "Magic"
+            }
+          ]
+        },
+        {
+          "name": "advance",
+          "when_hp_below": 0.4,
+          "rotation": "fixed",
+          "movement": "advance",
+          "attacks": [
+            {
+              "attack": "Melee"
+            },
+            {
+              "attack": "Magic barrage",
+              "speed": 3
+            },
+            {
+              "attack": "Magic barrage",
+              "speed": 2
+            },
+            {
+              "attack": "Magic barrage",
+              "speed": 6
+            },
+            {
+              "attack": "Ranged"
+            },
+            {
+              "attack": "Magic"
+            }
+          ]
+        },
+        {
+          "name": "last stand",
+          "when_hp_below": 0.2,
+          "rotation": "fixed",
+          "movement": "stationary",
+          "attacks": [
+            {
+              "attack": "Magic barrage",
+              "speed": 3
+            },
+            {
+              "attack": "Magic barrage",
+              "speed": 2
+            },
+            {
+              "attack": "Magic barrage",
+              "speed": 6
+            }
+          ],
+          "periodic": [
+            {
+              "name": "Falling boulder",
+              "every_ticks": 3,
+              "special": {
+                "tiles": {
+                  "anchor": "target",
+                  "scatter": {
+                    "radius": 4,
+                    "min": 1,
+                    "max": 1
+                  }
+                },
+                "damage": {
+                  "fixed": 20
+                },
+                "leaves": {
+                  "hazard": "boulder",
+                  "placement": "every_covered_tile"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "aggression": {
+        "aggressive": true,
+        "range": 15,
+        "ignores_tolerance": true,
+        "ignores_combat_level": true
+      },
+      "appearance": 3127,
+      "animations": {
+        "attack": 2655,
+        "defend": 2653,
+        "death": 2654
+      },
+      "summons": [
+        {
+          "npc": "yt_hurkot",
+          "count": 4,
+          "below_hitpoints": 200,
+          "again_once_healed_to_full": true
+        }
+      ],
+      "examine": "This is going to hurt a great deal more...",
+      "sounds": {
+        "hit": 410,
+        "death": 409
+      },
+      "notes": "A made-up boss that exercises generic engine mechanics, not a real OSRS monster. Jad's numbers with a 1000 hitpoint pool. Ranged drops 3-6 rocks around the player, one always on the player's tile, landing as the falling-rock graphic ends; every rock hurts a player under it, and the one on the player's tile leaves a boulder that blocks his own magic and the player's path but not the player's sight. Magic leaves 2-4 lava tiles near the player; when a boulder is in the way it flies to the boulder instead and destroys it in a 3x3 blast. Below 60% it fires a volley of three weaker magic attacks, 3-2-2 ticks apart and then a 6-tick pause (a one-tick wind-up so a two-tick gap is possible); below 40% it walks on the player, destroying its own boulders and lava as it goes; below 20% it calls its healers, fires the volley without stopping and a boulder falls within 4 tiles of the player every 3 ticks. The rock damage (20), blast damage (120), lava damage (6 a tick) and boulder placement are guesses; in the volley he holds the magic animation's last pose instead of restarting it."
+    },
+    {
       "id": "yt_hurkot", "name": "Yt-HurKot", "combat_level": 108, "hitpoints": 60,
       "levels": { "attack": 140, "strength": 100, "defence": 60, "ranged": 120, "magic": 120 },
       "bonuses": { "defence": { "ranged": 100, "magic": 100 } },

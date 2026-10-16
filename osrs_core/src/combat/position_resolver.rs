@@ -1,4 +1,7 @@
+use std::rc::Rc;
+
 use super::ground_target::GroundTarget;
+use super::hazard::HazardDef;
 use super::player_reaction_state::PlayerReactionState;
 use super::protection_prayer::ProtectionPrayer;
 use super::special_attack::{SpecialContext, SpecialEffect, SpecialResolver};
@@ -33,6 +36,22 @@ pub struct PrayerReduction {
     pub penetration: f32,
 }
 
+/// Where a position special leaves its hazard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HazardPlacement {
+    /// On the tile the area is centred on, once.
+    AnchorTile,
+    /// On every tile the area covers.
+    EveryCoveredTile,
+}
+
+/// What a position special leaves behind where it lands, whether or not it hurt anyone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LeftBehind {
+    pub def: Rc<HazardDef>,
+    pub placement: HazardPlacement,
+}
+
 /// A special that is decided by position: it covers the tiles of its `target` and, when its
 /// wind-up ends, hurts whoever is standing on them then, and is gone. It has no style, no damage
 /// type and never rolls accuracy. (Falling rocks, a boulder, an aftershock, a claw.)
@@ -42,6 +61,12 @@ pub struct PositionResolver {
     pub damage: GroundDamage,
     /// The one prayer that reduces (but never negates) the damage, if any.
     pub prayer_reduction: Option<PrayerReduction>,
+    /// A hazard it leaves where it lands (the boulder a rock becomes). Every covered tile hurts
+    /// whether or not it gets one.
+    pub leaves: Option<LeftBehind>,
+    /// The cache graphic shown falling on each tile from the moment it is sent, so that it lands
+    /// as the graphic ends (a rock). Needs the special to wait: see `SpecialAttack`.
+    pub falling_graphic: Option<u32>,
 }
 
 impl PositionResolver {
@@ -50,7 +75,7 @@ impl PositionResolver {
             GroundDamage::Fixed(amount) => assert!(amount >= 0, "ground damage must not be negative"),
             GroundDamage::Uniform { max } => assert!(max >= 0, "ground damage must not be negative"),
         }
-        Self { target, damage, prayer_reduction: None }
+        Self { target, damage, prayer_reduction: None, leaves: None, falling_graphic: None }
     }
 
     /// The one protection prayer that cuts this attack's damage without negating it:
@@ -59,6 +84,18 @@ impl PositionResolver {
         assert!(prayer != ProtectionPrayer::None, "a prayer reduction needs a prayer");
         assert!((0.0..=1.0).contains(&penetration), "penetration must be within [0, 1]");
         self.prayer_reduction = Some(PrayerReduction { prayer, penetration });
+        self
+    }
+
+    /// Leaves `def` behind where this lands.
+    pub fn leaving(mut self, def: Rc<HazardDef>, placement: HazardPlacement) -> Self {
+        self.leaves = Some(LeftBehind { def, placement });
+        self
+    }
+
+    /// Shows the cache graphic `graphic` falling on each tile while the special waits to land.
+    pub fn with_falling_graphic(mut self, graphic: u32) -> Self {
+        self.falling_graphic = Some(graphic);
         self
     }
 
@@ -79,14 +116,26 @@ impl PositionResolver {
 impl SpecialResolver for PositionResolver {
     fn resolve(&self, context: &SpecialContext, rng: &mut dyn Rng) -> Vec<SpecialEffect> {
         // the tiles are fixed from where both sides stood at selection; who is on them is now
-        let tiles = self.target.tiles(context.self_tile, context.target_tile, rng);
-        if !context.player_alive || !tiles.contains(&context.player_tile) {
-            return Vec::new();
+        let tiles = match context.chosen_tiles {
+            Some(chosen) => chosen.to_vec(),
+            None => self.target.tiles(context.self_tile, context.target_tile, rng),
+        };
+        let mut effects = Vec::new();
+        if context.player_alive && tiles.contains(&context.player_tile) {
+            // no accuracy roll: standing there is what hurts, less what the one prayer cuts
+            let rolled = self.damage.roll(rng);
+            let multiplier = self.damage_multiplier(Some(context.player_reaction));
+            let damage = ((rolled as f32 * multiplier) as f64).round() as i32;
+            effects.push(SpecialEffect::HurtPlayer { damage, delay_ticks: 0 });
         }
-        // no accuracy roll: standing there is what hurts, less what the one prayer cuts
-        let rolled = self.damage.roll(rng);
-        let multiplier = self.damage_multiplier(Some(context.player_reaction));
-        vec![SpecialEffect::HurtPlayer { damage: ((rolled as f32 * multiplier) as f64).round() as i32 }]
+        if let Some(left) = &self.leaves {
+            let places = match left.placement {
+                HazardPlacement::AnchorTile => vec![self.target.anchor_tile(context.self_tile, context.target_tile)],
+                HazardPlacement::EveryCoveredTile => tiles,
+            };
+            effects.extend(places.into_iter().map(|tile| SpecialEffect::SpawnHazard { def: Rc::clone(&left.def), tile, armed_in: 0 }));
+        }
+        effects
     }
 
     fn as_position(&self) -> Option<&PositionResolver> {

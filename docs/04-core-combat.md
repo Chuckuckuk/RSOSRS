@@ -482,7 +482,10 @@ no style or damage type.
 | `TileSelection` | Covers |
 |---|---|
 | `Offsets(Vec<(dx, dz)>)` | each offset from the anchor: squares (`GroundTarget::square(anchor, 1)` is the 3x3), crosses, lines, claw patterns; need not be contiguous |
-| `Scatter { radius, count }` | `count` distinct random tiles within `radius` of the anchor |
+| `Scatter { radius, min, max }` | `min` to `max` distinct random tiles within `radius` of the anchor (the count is drawn first when it varies) |
+
+`GroundTarget::including_anchor()` makes the anchor tile always covered, counting toward a scatter's
+count (the first boulder always lands on the player).
 
 The tiles come from the attacker's and target's tiles as they were at selection. That tile is all
 that is taken from the target: the attack carries no target and no target stats.
@@ -499,7 +502,63 @@ different thing and is not this: it lives in the world as an entity. See issue #
 
 ---
 
-## 4.11 Small pieces
+## 4.11 Hazards, shots that need a clear line, riders and phases
+
+Files: [`hazard.rs`](../osrs_core/src/combat/hazard.rs),
+[`obstructed_shot.rs`](../osrs_core/src/combat/obstructed_shot.rs),
+[`line_of_sight.rs`](../osrs_core/src/pathfinding/line_of_sight.rs),
+[`phase.rs`](../osrs_core/src/encounters/phase.rs),
+[`specials.rs`](../osrs_core/src/data/specials.rs).
+
+These are the generic parts a multi-mechanic boss is assembled from (the data entry `gigajad`
+exercises all of them).
+
+**Hazards.** A special can leave a **hazard** behind: a world entity (`Behavior::Hazard`, hidden
+from the client snapshot until the client can draw it) defined by a `HazardDef`: it may block
+line of sight for everyone but the monster that left it, block players (never monsters), hurt a
+player standing on it each tick, expire after a lifetime, and be destroyed by its owner walking
+over it. It takes tiles on the collision map only as `BLOCKS_PLAYERS`, so monsters walk through.
+`World::sight_blockers_against(shooter)` lists the tiles that block someone's sight;
+`World::sight_blockers()` lists every one, which is what a projectile runs into.
+
+**Line of sight.** `line_of_sight(from, to, blockers)` walks the straight line between two tiles
+and names the first blocker. Neither end blocks; what blocks is the caller's choice. The player's
+ranged and magic attacks need a clear line past other monsters' hazards.
+
+**Richer specials.** A resolver is also told the attacker's centre and stats, the player's stats and
+the sight blockers, and `SpecialContext::roll_shot` makes the standard accuracy-and-prayer roll for it.
+`SpecialEffect` has `HurtPlayer { damage, delay_ticks }` (a shot's flight), `BindPlayer`,
+`SpawnHazard { armed_in }`, `DestroyHazard { delay_ticks }` and `Strike`, which sends the attack's
+projectile to a tile instead of the player (see below).
+
+**`ObstructedShot`** is a special that needs a clear line to the player. Clear, it is a normal hit
+that may bind the player until it lands and leave hazards around them (lava). Blocked, it hits the
+blocker: a `Strike` flies the attack's projectile to the blocker's tile (its impact graphic plays
+there, and `blocked_sound` is heard), and as it arrives the blocker is destroyed and `on_blocked`
+goes off on its tile. A boulder stops a shot whoever left it; only its owner's own *sight* is
+unaffected. Binding the player until the shot lands is optional (`binds_until_landing`); GigaJad's
+shots do not bind.
+
+**Riders.** An attack can carry `riders`: specials that go off with it, aimed at where the player is
+when it resolves (the rocks that fall as Jad fires). A rider with a delay waits that long, and if it
+has a `falling_graphic` it chooses its tiles as it is sent and the world reports a
+`WorldEvent::TileGraphic` on each, so the rocks are seen falling and land as the graphic ends (the
+falling-rock graphic, 451, runs 2.2 ticks). `PositionResolver::leaving(hazard, placement)` makes a
+rock leave a boulder behind (on the anchor tile or every covered tile); every covered tile hurts a
+player standing on it either way. Tile selection can scatter a *range* of tiles and always include the
+anchor tile. `TileProjectile` and `TileSound` are the matching events for a shot flown or a sound
+heard at a tile; the client plays them on a marker it stands on that tile.
+
+**Phases.** `Phase::with_periodic(every_ticks, special)` fires a special on its own clock while
+the phase lasts, apart from the attack cycle. A data monster with `phases` gets one `Phase` per
+entry; each after the first starts when its health falls to `when_hp_below` of its maximum. A phase
+names the attacks it uses (a use can set its own attack `speed`, which is how a 3-2-2 volley is
+written), may replace the monster's movement (`advance` walks on the player even in reach), and
+lists its periodic specials. The data shapes are in `data/specials.rs`.
+
+---
+
+## 4.12 Small pieces
 
 * [`heal_resolver::resolve(amount, health)`](../osrs_core/src/combat/heal_resolver.rs) heals and
   returns how much was actually restored (clamped at max).

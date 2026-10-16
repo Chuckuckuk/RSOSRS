@@ -1,5 +1,6 @@
 //! Things the server has put in the world that the map does not have: fires players lit
-//! (`Snapshot::spawned`) and items lying on the ground (`Snapshot::ground_items`).
+//! (`Snapshot::spawned`), items lying on the ground (`Snapshot::ground_items`) and what attacks
+//! have left behind (`Snapshot::hazards`).
 //!
 //! Like `scenery_swaps` this is a diff of what the server lists against what is on screen, done
 //! when a tick's snapshot arrives or a mesh comes back. Each thing is spawned as a one-object
@@ -11,6 +12,7 @@
 
 use super::interface::ItemIcons;
 use super::map_stream::SquareSpawner;
+use super::projectiles::ProjectileArt;
 use super::scenery_swaps::SwapMeshes;
 use super::{ServerLink, Textures};
 use bevy::prelude::*;
@@ -28,6 +30,8 @@ const ITEM_KEY_BASE: u32 = 1_000_000;
 pub enum Thing {
     Fire(LocKey),
     Item(u32),
+    /// Something an attack left in the world (a boulder, lava), by the server's id for it.
+    Hazard(u32),
 }
 
 impl Thing {
@@ -37,6 +41,7 @@ impl Thing {
         match self {
             Thing::Fire(key) => (i32::MIN / 4 - key.x, key.z),
             Thing::Item(uid) => (i32::MIN / 4 + 1, *uid as i32),
+            Thing::Hazard(id) => (i32::MIN / 4 + 2, *id as i32),
         }
     }
 }
@@ -58,6 +63,7 @@ pub fn show_ground_things(
     textures: Res<Textures>,
     mut shown: Local<BTreeMap<Thing, Vec<Entity>>>,
     mut seen: Local<Seen>,
+    mut art: Option<NonSendMut<ProjectileArt>>,
     alive: Query<(), With<GroundThing>>,
     mut spawner: SquareSpawner,
 ) {
@@ -72,11 +78,21 @@ pub fn show_ground_things(
     enum Mesh {
         Object { id: u32, kind: u8, orientation: u8 },
         Item(u32),
+        /// A cache graphic played on the tile, looping.
+        Graphic(u32),
     }
     let mut wanted: BTreeMap<Thing, (osrs_core::tiles::TileCoord, Mesh)> = BTreeMap::new();
     for fire in &snapshot.spawned {
         let loc = fire.loc;
         wanted.insert(Thing::Fire(loc.key()), (loc.tile, Mesh::Object { id: loc.id, kind: loc.kind, orientation: loc.orientation }));
+    }
+    for hazard in &snapshot.hazards {
+        let mesh = match (hazard.graphic, hazard.object) {
+            (Some(graphic), _) => Mesh::Graphic(graphic),
+            (None, Some(object)) => Mesh::Object { id: object, kind: 10, orientation: 0 },
+            (None, None) => continue,
+        };
+        wanted.insert(Thing::Hazard(hazard.id), (hazard.tile, mesh));
     }
     if let Some(icons) = icons.as_deref() {
         for item in &snapshot.ground_items {
@@ -104,6 +120,40 @@ pub fn show_ground_things(
         }
         // the square is not loaded: nothing to stand it on yet
         let Some(origin) = spawner.world.ground_at(tile.x, tile.z) else { continue };
+        if let Mesh::Graphic(graphic) = mesh {
+            // a graphic is played on its tile, looping; not clickable, it is not an object
+            let Some((model, clip)) = art.as_mut().and_then(|art| art.drawable(graphic)) else {
+                eprintln!("[client] hazard graphic {graphic} cannot be drawn");
+                shown.insert(key, Vec::new());
+                continue;
+            };
+            let transform = Transform::from_translation(origin);
+            let entity = match clip {
+                Some(clip) => spawn_animated(
+                    &mut spawner.commands,
+                    &mut spawner.meshes,
+                    &mut spawner.materials,
+                    &mut spawner.images,
+                    &textures.0 .0,
+                    &model,
+                    vec![clip],
+                    transform,
+                ),
+                None => osrs_render::spawn_loc_mesh(
+                    &mut spawner.commands,
+                    &mut spawner.meshes,
+                    &mut spawner.materials,
+                    &mut spawner.images,
+                    &textures.0 .0,
+                    &model,
+                    transform,
+                ),
+            };
+            spawner.world.attach(square_of(tile.x, tile.z), entity);
+            spawner.commands.entity(entity).insert(GroundThing);
+            shown.insert(key, vec![entity]);
+            continue;
+        }
         let (object_key, mesh) = match mesh {
             Mesh::Object { id, kind, orientation } => {
                 let mesh_key = (id, kind, orientation);
@@ -115,6 +165,7 @@ pub fn show_ground_things(
                 };
                 ((id, kind, orientation, 255, 0), mesh.clone())
             }
+            Mesh::Graphic(_) => unreachable!("handled above"),
             Mesh::Item(id) => {
                 let Some(mesh) = swaps.items.get(&id) else {
                     if swaps.items_requested.insert(id) {
@@ -133,7 +184,7 @@ pub fn show_ground_things(
         // an object with an animation (flames) plays it, looping
         let clip = match key {
             Thing::Fire(loc) => swaps.clips.get(&(loc.id, 10, 0)).cloned(),
-            Thing::Item(_) => None,
+            Thing::Item(_) | Thing::Hazard(_) => None,
         };
         if let Some(clip) = clip {
             let entity = spawn_animated(

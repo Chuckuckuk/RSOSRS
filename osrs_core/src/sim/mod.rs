@@ -39,12 +39,12 @@ pub use scenery::{Loc, LocChange, LocKey, SceneryIndex, SpawnedLoc};
 pub use inventory::{Inventory, ItemStack, INVENTORY_SIZE};
 pub use entity::{Behavior, BossState, Entity, HealerState, NpcState};
 pub use loadout::Loadout;
-pub use npc_factory::{attack_from_def, pattern_from_def};
+pub use npc_factory::{attack_from_def, pattern_from_def, phases_from_def};
 pub use player::Player;
 pub use player_runtime::{AttackPlan, Dps, UNARMED_SPEED_FALLBACK};
 pub use skills::Skills;
 pub use server::{
-    spawn_server, ClientCommand, EntitySnapshot, GroundItemView, ItemView, PlayerId, PlayerSnapshot, Server, ServerHandle, SkillSnapshot, Snapshot,
+    spawn_server, ClientCommand, EntitySnapshot, GroundItemView, HazardView, ItemView, PlayerId, PlayerSnapshot, Server, ServerHandle, SkillSnapshot, Snapshot,
 };
 pub use tick_driver::TickDriver;
 pub use world::{SpawnBlueprint, World, ENCOUNTER_CLOCK_ID, PLAYER_ID};

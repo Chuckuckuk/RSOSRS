@@ -42,6 +42,9 @@ pub struct AttackDefinition {
     /// The cache sequence the attacker plays for this attack, if it has its own (presentation
     /// only: the rules never read it).
     pub animation: Option<u32>,
+    /// How many ticks into `animation` the attack lets go, when that is not its telegraph (a
+    /// short wind-up that reuses a longer animation); clients hold the pose there as it repeats.
+    pub animation_release_ticks: Option<i32>,
     /// Graphics (cache spot animations) for the client: one flying from attacker to target, one
     /// on the target as the attack is released, one on it as the hit lands. Presentation only.
     pub projectile: Option<u32>,
@@ -51,6 +54,10 @@ pub struct AttackDefinition {
     /// spell's impact). Presentation only.
     pub sound: Option<u32>,
     pub hit_sound: Option<u32>,
+    /// Specials that go off with this attack (the rocks that fall as Jad fires). A rider with a
+    /// `telegraph_ticks` waits that long after the attack resolves, aimed at where the player
+    /// stood when it did; one without goes off at once.
+    pub riders: Vec<SpecialAttack>,
 }
 
 /// When an attack resolves, and the data only that kind of attack has.
@@ -148,11 +155,13 @@ impl AttackDefinition {
             attack_speed: None,
             on_hit_status_effect: None,
             animation: None,
+            animation_release_ticks: None,
             projectile: None,
             target_graphic: None,
             impact_graphic: None,
             sound: None,
             hit_sound: None,
+            riders: Vec::new(),
             kind,
         }
     }
@@ -266,8 +275,20 @@ impl AttackDefinition {
         self
     }
 
+    /// A special that goes off with this attack, after the rider's own `telegraph_ticks` (none:
+    /// the tick the attack resolves).
+    pub fn with_rider(mut self, rider: SpecialAttack) -> Self {
+        self.riders.push(rider);
+        self
+    }
+
     pub fn with_on_hit_status_effect(mut self, effect: StatusEffectDefinition) -> Self {
         self.on_hit_status_effect = Some(effect);
+        self
+    }
+
+    pub fn with_animation_release(mut self, ticks: Option<i32>) -> Self {
+        self.animation_release_ticks = ticks;
         self
     }
 

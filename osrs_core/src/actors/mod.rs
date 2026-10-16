@@ -12,7 +12,7 @@ pub use combat_target_view::CombatTargetView;
 pub use entity_id::EntityId;
 pub use health::Health;
 pub use movement_policy::{
-    ChaseToMeleeRangeMovementPolicy, MaintainDistanceMovementPolicy, MovementPolicy, StationaryMovementPolicy,
+    AdvanceMovementPolicy, ChaseToMeleeRangeMovementPolicy, MaintainDistanceMovementPolicy, MovementPolicy, StationaryMovementPolicy,
     StyleReactiveMovementPolicy,
 };
 pub use mover::Mover;

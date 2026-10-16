@@ -69,6 +69,28 @@ impl MovementPolicy for ChaseToMeleeRangeMovementPolicy {
     }
 }
 
+/// Walks toward the target until adjacent even while one of its attacks can already reach (a boss
+/// that advances on the player rather than firing from where it stands).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AdvanceMovementPolicy;
+
+impl MovementPolicy for AdvanceMovementPolicy {
+    fn step(
+        &self,
+        mover: &mut Mover,
+        pathfinder: &BfsPathfinder,
+        map: &mut CollisionMap,
+        target: Option<&CombatTargetView>,
+        target_style: AttackStyle,
+    ) {
+        ChaseToMeleeRangeMovementPolicy.step(mover, pathfinder, map, target, target_style);
+    }
+
+    fn holds_when_in_reach(&self) -> bool {
+        false
+    }
+}
+
 /// Holds a preferred Chebyshev distance: backs off when closer, closes in when farther.
 #[derive(Debug, Clone, Copy)]
 pub struct MaintainDistanceMovementPolicy {

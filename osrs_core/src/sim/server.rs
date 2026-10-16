@@ -163,6 +163,18 @@ pub struct ItemView {
     pub wearable: bool,
 }
 
+/// Something an attack left in the world that a client draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HazardView {
+    /// Names it while it lies there.
+    pub id: u32,
+    pub tile: TileCoord,
+    /// The game cache's object it is drawn as, if it is drawn as one.
+    pub object: Option<u32>,
+    /// The game cache's graphic it is played as on its tile; it wins over the object.
+    pub graphic: Option<u32>,
+}
+
 /// An item lying on the ground.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroundItemView {
@@ -224,6 +236,8 @@ pub struct Snapshot {
     pub spawned: Vec<SpawnedLoc>,
     /// Every item on the ground.
     pub ground_items: Vec<GroundItemView>,
+    /// Everything attacks have left in the world that is drawn (boulders, lava).
+    pub hazards: Vec<HazardView>,
 }
 
 /// A player that has entered the world.
@@ -501,6 +515,7 @@ impl Server {
             entities: self
                 .world
                 .entities()
+                .filter(|entity| !entity.is_hazard())
                 .map(|entity| EntitySnapshot {
                     is_dead: self.world.death_confirmed(Combatant::Npc(entity.id)),
                     ..entity_snapshot(entity)
@@ -510,6 +525,12 @@ impl Server {
             messages,
             scenery: self.world.scenery_changes().copied().collect(),
             spawned: self.world.spawned_scenery().copied().collect(),
+            hazards: self
+                .world
+                .drawn_hazards()
+                .into_iter()
+                .map(|(id, tile, object, graphic)| HazardView { id: id.0, tile, object, graphic })
+                .collect(),
             ground_items: self
                 .world
                 .ground_items()
@@ -932,7 +953,7 @@ mod tests {
         }
 
         let npc = Combatant::Npc(man);
-        assert!(events.contains(&WorldEvent::Attack { attacker: Combatant::Player, target: npc, animation: None }));
+        assert!(events.contains(&WorldEvent::Attack { attacker: Combatant::Player, target: npc, animation: None, windup_ticks: 0 }));
         assert!(events.iter().any(|e| matches!(e, WorldEvent::Attack { attacker, target: Combatant::Player, .. } if *attacker == npc)));
         let hits_on_man: Vec<i32> = events
             .iter()
@@ -1085,7 +1106,7 @@ mod tests {
         let mut previous = server.snapshot().player.tile;
         for _ in 0..6 {
             let Some(snapshot) = server.advance(0.6) else { continue };
-            let swung = snapshot.events.contains(&WorldEvent::Attack { attacker: Combatant::Player, target: Combatant::Npc(dummy), animation: None });
+            let swung = snapshot.events.contains(&WorldEvent::Attack { attacker: Combatant::Player, target: Combatant::Npc(dummy), animation: None, windup_ticks: 0 });
             if swung {
                 assert_eq!(previous, TileCoord::new(2, 0), "it was still a step short at the start of the tick");
                 assert_eq!(snapshot.player.tile, TileCoord::new(3, 0), "and the step took it into range");
