@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::specials::{HazardData, PhaseData, PositionData, SpecialData};
+use super::specials::{HazardData, PhaseData, RiderData, SpecialData};
 use super::OnHitDef;
 use crate::combat::AttackStyle;
 use crate::model::{AttributeSet, Condition, DamageType, EquipmentBonuses, Modifier};
@@ -87,7 +87,7 @@ pub struct NpcAttackDef {
     pub special: Option<SpecialData>,
     /// Area specials that go off with this attack, the tick it resolves (the rocks that fall as
     /// Jad fires).
-    pub riders: Vec<PositionData>,
+    pub riders: Vec<RiderData>,
 }
 
 impl Default for NpcAttackDef {

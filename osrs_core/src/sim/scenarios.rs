@@ -1232,4 +1232,35 @@ mod tests {
         let boulders: Vec<TileCoord> = world.hazards().filter(|(name, _, _)| *name == "Boulder").map(|(_, tile, _)| tile).collect();
         assert!(!boulders.is_empty(), "his ranged attack left a boulder in 200 ticks: {:?}", world.log().iter().rev().take(5).collect::<Vec<_>>());
     }
+
+    #[test]
+    fn a_rider_with_a_delay_lands_that_many_ticks_after_its_attack_on_the_tile_the_player_stood_on() {
+        let rocks = PositionResolver::new(GroundTarget::square(HazardAnchor::Target, 0), GroundDamage::Fixed(7))
+            .leaving(boulder(), HazardPlacement::AnchorTile);
+        let ranged = AttackDefinition::telegraphed("Ranged", Some(15), 1, AttackStyle::Ranged)
+            .with_rider(crate::combat::SpecialAttack::new(2, rocks));
+        let (mut world, _) = rock_world_with(ranged);
+        let rock_hits = |world: &World| world.log().iter().filter(|l| l.contains("uses a rock on the player")).count();
+
+        // the ranged attack resolves on tick 2 (a 1-tick wind-up from tick 1)
+        let mut resolved = None;
+        for tick in 1..=8 {
+            run_ticks(&mut world, 1);
+            if resolved.is_none() && world.log().iter().any(|l| l.starts_with("Boss uses Ranged on the player")) {
+                resolved = Some(tick);
+                assert_eq!(world.hazards().count(), 0, "nothing has landed the tick it is thrown");
+            }
+            if let Some(thrown) = resolved {
+                if tick == thrown + 1 {
+                    assert_eq!(rock_hits(&world), 0, "still falling");
+                }
+                if tick == thrown + 2 {
+                    assert_eq!(rock_hits(&world), 1, "lands two ticks later");
+                    assert_eq!(world.hazards().count(), 1, "and leaves its boulder");
+                    return;
+                }
+            }
+        }
+        panic!("the ranged attack never resolved: {:?}", world.log());
+    }
 }

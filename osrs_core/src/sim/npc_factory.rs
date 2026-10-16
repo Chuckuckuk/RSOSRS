@@ -98,7 +98,7 @@ fn attack_sounding(def: &NpcAttackDef, fallback_sound: Option<u32>, hazards: &[H
         attack = attack.with_on_hit_status_effect(status);
     }
     for rider in &def.riders {
-        attack = attack.with_rider(SpecialAttack::new(0, position_from_data(rider, hazards)));
+        attack = attack.with_rider(SpecialAttack::new(rider.delay_ticks, position_from_data(&rider.special, hazards)));
     }
     attack.shared()
 }

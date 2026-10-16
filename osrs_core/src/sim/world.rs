@@ -95,6 +95,19 @@ pub struct World {
     pub(super) scenery_state: SceneryState,
     /// Items lying on the ground.
     pub(super) ground_items: super::ground_items::GroundItems,
+    /// Riders of attacks that have resolved, waiting out their delay.
+    pending_specials: Vec<PendingSpecial>,
+}
+
+/// A rider waiting to go off: aimed at the tile the player stood on when its attack resolved, and
+/// cancelled if its attacker dies first.
+struct PendingSpecial {
+    ticks_left: i32,
+    attacker: EntityId,
+    attacker_name: String,
+    special: SpecialAttack,
+    origin: Origin,
+    target_tile: TileCoord,
 }
 
 fn slot_index(id: EntityId) -> Option<usize> {
@@ -221,6 +234,7 @@ impl World {
             scenery: SceneryIndex::new(),
             scenery_state: SceneryState::new(),
             ground_items: Default::default(),
+            pending_specials: Vec::new(),
         }
     }
 
@@ -833,6 +847,7 @@ impl World {
                 self.encounter.advance_tick();
                 self.update_aggro_region();
                 self.advance_scenery();
+                self.advance_pending_specials(registrar);
             }
             return;
         }
@@ -1151,9 +1166,58 @@ impl World {
         }
         self.deliver_attack(Some(attacker), attacker_name, attacker_stats, attack, flight);
         // whatever goes off with it, the tick it resolves, aimed at where the player is now
+        self.fire_riders(attacker, attacker_name, attack, origin, registrar);
+    }
+
+    /// Sends off the riders of `attack`, aimed at where the player is now: those with no delay go
+    /// off at once, the rest wait their delay and land on that tile.
+    fn fire_riders(
+        &mut self,
+        attacker: EntityId,
+        attacker_name: &str,
+        attack: &AttackDefinition,
+        origin: &Origin,
+        registrar: &mut TickRegistrar<EntityId>,
+    ) {
         let target_tile = self.player.tile();
         for rider in &attack.riders {
-            self.resolve_special(attacker, attacker_name, None, rider, origin, target_tile, registrar);
+            if rider.telegraph_ticks == 0 {
+                self.resolve_special(attacker, attacker_name, None, rider, origin, target_tile, registrar);
+            } else {
+                self.pending_specials.push(PendingSpecial {
+                    // counted down in the Regen phase, which ends the tick this one began in
+                    ticks_left: rider.telegraph_ticks + 1,
+                    attacker,
+                    attacker_name: attacker_name.to_owned(),
+                    special: rider.clone(),
+                    origin: *origin,
+                    target_tile,
+                });
+            }
+        }
+    }
+
+    /// Counts the waiting riders down a tick; those whose delay is up go off, unless the attacker
+    /// died first.
+    fn advance_pending_specials(&mut self, registrar: &mut TickRegistrar<EntityId>) {
+        for pending in &mut self.pending_specials {
+            pending.ticks_left -= 1;
+        }
+        let (due, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending_specials).into_iter().partition(|p| p.ticks_left <= 0);
+        self.pending_specials = waiting;
+        for pending in due {
+            if entity_is_dead(&self.entities, pending.attacker) {
+                continue;
+            }
+            self.resolve_special(
+                pending.attacker,
+                &pending.attacker_name,
+                None,
+                &pending.special,
+                &pending.origin,
+                pending.target_tile,
+                registrar,
+            );
         }
     }
 
@@ -1174,9 +1238,7 @@ impl World {
         self.play_sound(attack.hit_sound, Combatant::Npc(attacker), 0);
         self.log_line(format!("{attacker_name} lands {}.", attack.name));
         self.resolve_special(attacker, attacker_name, Some(attack), special, origin, target_tile, registrar);
-        for rider in &attack.riders {
-            self.resolve_special(attacker, attacker_name, None, rider, origin, self.player.tile(), registrar);
-        }
+        self.fire_riders(attacker, attacker_name, attack, origin, registrar);
     }
 
     /// Runs `special`'s resolver and applies what it returns. `presented` is the attack whose

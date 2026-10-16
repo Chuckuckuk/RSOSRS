@@ -30,7 +30,7 @@ pub use prayers::PrayerDef;
 pub use scenario::{builtin_scenarios, load_scenario, InventoryStack, NpcSpawn, PlayerSetup, ScenarioDef, SkillLevelsDef};
 pub use specials::{
     AnchorData, DamageData, HazardData, LandingHazardsData, LeavesData, ObstructedShotData, PeriodicData, PhaseAttackData, PhaseData,
-    PlacementData, PositionData, PrayerData, PrayerReductionData, ScatterData, SpecialData, TilesData,
+    PlacementData, PositionData, PrayerData, PrayerReductionData, RiderData, ScatterData, SpecialData, TilesData,
 };
 pub use spells::{LevelScaling, SpellDef};
 
@@ -675,7 +675,10 @@ fn check_specials(npc: &NpcDef, who: &str, problems: &mut Vec<String>) {
             problems.push(format!("{label}: a special has a telegraph, not an impact delay"));
         }
         for rider in &attack.riders {
-            check_position(rider, &label, &has_hazard, problems);
+            if rider.delay_ticks < 0 {
+                problems.push(format!("{label}: a rider's delay_ticks must not be negative"));
+            }
+            check_position(&rider.special, &label, &has_hazard, problems);
         }
     }
 
@@ -792,7 +795,7 @@ mod tests {
                     "npcs":[{
                         "id":"n","hitpoints":10,
                         "attacks":[
-                            {"name":"Rocks","riders":[{"tiles":{"square":1},"damage":{"fixed":5},"leaves":{"hazard":"ghost"}}]},
+                            {"name":"Rocks","riders":[{"delay_ticks":2,"special":{"tiles":{"square":1},"damage":{"fixed":5},"leaves":{"hazard":"ghost"}}}]},
                             {"name":"Shot","style":"magic","special":{"obstructed_shot":{}}}
                         ],
                         "phases":[

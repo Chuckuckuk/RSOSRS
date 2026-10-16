@@ -156,21 +156,24 @@
           "resolve_sound": 163,
           "riders": [
             {
-              "tiles": {
-                "anchor": "target",
-                "scatter": {
-                  "radius": 1,
-                  "min": 3,
-                  "max": 6
+              "delay_ticks": 2,
+              "special": {
+                "tiles": {
+                  "anchor": "target",
+                  "scatter": {
+                    "radius": 1,
+                    "min": 3,
+                    "max": 6
+                  },
+                  "always_include_anchor": true
                 },
-                "always_include_anchor": true
-              },
-              "damage": {
-                "fixed": 20
-              },
-              "leaves": {
-                "hazard": "boulder",
-                "placement": "anchor"
+                "damage": {
+                  "fixed": 20
+                },
+                "leaves": {
+                  "hazard": "boulder",
+                  "placement": "anchor"
+                }
               }
             }
           ]

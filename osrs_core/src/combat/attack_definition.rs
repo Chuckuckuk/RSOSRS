@@ -51,8 +51,9 @@ pub struct AttackDefinition {
     /// spell's impact). Presentation only.
     pub sound: Option<u32>,
     pub hit_sound: Option<u32>,
-    /// Specials that go off with this attack, the tick it resolves (the rocks that fall as Jad
-    /// fires). Each has no wind-up of its own.
+    /// Specials that go off with this attack (the rocks that fall as Jad fires). A rider with a
+    /// `telegraph_ticks` waits that long after the attack resolves, aimed at where the player
+    /// stood when it did; one without goes off at once.
     pub riders: Vec<SpecialAttack>,
 }
 
@@ -270,9 +271,9 @@ impl AttackDefinition {
         self
     }
 
-    /// A special that goes off with this attack, the tick it resolves.
+    /// A special that goes off with this attack, after the rider's own `telegraph_ticks` (none:
+    /// the tick the attack resolves).
     pub fn with_rider(mut self, rider: SpecialAttack) -> Self {
-        assert_eq!(rider.telegraph_ticks, 0, "a rider goes off with its attack, so it has no wind-up of its own");
         self.riders.push(rider);
         self
     }

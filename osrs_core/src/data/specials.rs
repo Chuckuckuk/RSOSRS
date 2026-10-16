@@ -160,6 +160,16 @@ pub enum SpecialData {
     ObstructedShot(ObstructedShotData),
 }
 
+/// A special that goes off with an attack, `delay_ticks` after it resolves (none: at once),
+/// aimed at where the player stood when it did.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RiderData {
+    #[serde(default)]
+    pub delay_ticks: i32,
+    pub special: PositionData,
+}
+
 /// A special a phase fires on its own clock.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
