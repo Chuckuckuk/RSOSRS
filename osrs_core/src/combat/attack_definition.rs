@@ -51,6 +51,9 @@ pub struct AttackDefinition {
     /// spell's impact). Presentation only.
     pub sound: Option<u32>,
     pub hit_sound: Option<u32>,
+    /// Specials that go off with this attack, the tick it resolves (the rocks that fall as Jad
+    /// fires). Each has no wind-up of its own.
+    pub riders: Vec<SpecialAttack>,
 }
 
 /// When an attack resolves, and the data only that kind of attack has.
@@ -153,6 +156,7 @@ impl AttackDefinition {
             impact_graphic: None,
             sound: None,
             hit_sound: None,
+            riders: Vec::new(),
             kind,
         }
     }
@@ -263,6 +267,13 @@ impl AttackDefinition {
     pub fn with_attack_speed(mut self, speed_ticks: i32) -> Self {
         assert!(speed_ticks >= 1, "attack speed must be at least 1 tick");
         self.attack_speed = Some(speed_ticks);
+        self
+    }
+
+    /// A special that goes off with this attack, the tick it resolves.
+    pub fn with_rider(mut self, rider: SpecialAttack) -> Self {
+        assert_eq!(rider.telegraph_ticks, 0, "a rider goes off with its attack, so it has no wind-up of its own");
+        self.riders.push(rider);
         self
     }
 

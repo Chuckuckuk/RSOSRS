@@ -65,6 +65,14 @@ impl GroundTarget {
         self
     }
 
+    /// The tile this area is centred on.
+    pub fn anchor_tile(&self, self_tile: TileCoord, target_tile: TileCoord) -> TileCoord {
+        match self.anchor {
+            HazardAnchor::SelfTile => self_tile,
+            HazardAnchor::Target => target_tile,
+        }
+    }
+
     /// The tiles this attack covers, from the attacker's and target's tiles as they were when the
     /// attack was selected. The target's tile is all this ever takes from the target.
     pub fn tiles(&self, self_tile: TileCoord, target_tile: TileCoord, rng: &mut dyn Rng) -> Vec<TileCoord> {

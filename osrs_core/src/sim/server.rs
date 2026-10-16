@@ -501,6 +501,7 @@ impl Server {
             entities: self
                 .world
                 .entities()
+                .filter(|entity| !entity.is_hazard())
                 .map(|entity| EntitySnapshot {
                     is_dead: self.world.death_confirmed(Combatant::Npc(entity.id)),
                     ..entity_snapshot(entity)

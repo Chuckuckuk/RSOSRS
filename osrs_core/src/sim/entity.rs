@@ -5,10 +5,10 @@ use super::config::{BossConfig, HealerConfig, NpcConfig, PassiveConfig};
 use super::npc_factory;
 use super::wander::Wander;
 use crate::actors::{Actor, ActorKind, CombatTargetView, EntityId, Health, MovementPolicy, Mover};
-use crate::collision::CollisionMap;
+use crate::collision::{CollisionMap, OccupancyMask};
 use crate::data::NpcDef;
 use crate::combat::{
-    AttackDefinition, AttackStyle, DamageBuffer, FixedRotationPattern, NpcCombatState,
+    AttackDefinition, AttackStyle, DamageBuffer, FixedRotationPattern, HazardDef, NpcCombatState,
     PendingAttackQueue, 
 };
 use crate::encounters::{Phase, TriggerBinding};
@@ -49,12 +49,26 @@ pub struct HealerState {
     pub movement_policy: Rc<dyn MovementPolicy>,
 }
 
-/// What kind of NPC an `Entity` is, and the state only that kind has.
+/// State specific to a `Hazard`: something an attack left in the world, which lives on its own.
+pub struct HazardState {
+    pub def: Rc<HazardDef>,
+    /// The monster that left it, which it never stands in the way of.
+    pub owner: EntityId,
+    /// Ticks until it takes effect (lava is not hot until the shot that makes it has landed).
+    pub armed_in: i32,
+    /// Ticks until it goes away, if it does.
+    pub remaining: Option<i32>,
+    /// Set once it has gone: it has left the map and does nothing more.
+    pub gone: bool,
+}
+
+/// What kind of thing an `Entity` is, and the state only that kind has.
 pub enum Behavior {
     Npc(NpcState),
     Boss(BossState),
     Healer(HealerState),
     Passive,
+    Hazard(HazardState),
 }
 
 /// Where one of a monster's `summons` stands: whether the call will be answered when its hitpoints
@@ -192,6 +206,29 @@ impl Entity {
         Self::new(id, name, mover, Behavior::Passive)
     }
 
+    /// A hazard left by `owner` on `tile`. It takes up one tile, is never a target, and stands in
+    /// players' way only if its definition says so (NPCs walk through every hazard).
+    pub fn new_hazard(
+        id: EntityId,
+        start: TileCoord,
+        def: &Rc<HazardDef>,
+        owner: EntityId,
+        armed_in: i32,
+        map: &mut CollisionMap,
+    ) -> Self {
+        let mask = if def.blocks_players { OccupancyMask::BLOCKS_PLAYERS } else { OccupancyMask::NONE };
+        let stats = crate::combat::CombatStats::new(1, 1, 1, 1, 1).expect("levels of 1 are valid");
+        let actor = Actor::new(ActorKind::Npc, start, 1, 1, stats).with_occupancy(mask);
+        let mover = Mover::new(actor, map);
+        let state = HazardState { def: Rc::clone(def), owner, armed_in, remaining: def.lifetime_ticks, gone: false };
+        Self::new(id, &def.name, mover, Behavior::Hazard(state))
+    }
+
+    /// Whether this is a hazard.
+    pub fn is_hazard(&self) -> bool {
+        matches!(self.behavior, Behavior::Hazard(_))
+    }
+
     pub fn view(&self) -> CombatTargetView {
         self.mover.actor.view()
     }
@@ -227,6 +264,7 @@ impl Entity {
             Behavior::Boss(_) => "It looks extremely dangerous.",
             Behavior::Healer(_) => "It's healing its master.",
             Behavior::Passive => "It doesn't seem interested in fighting.",
+            Behavior::Hazard(_) => "Something an attack left behind.",
         };
         format!("{}: {}", self.name, flavour)
     }

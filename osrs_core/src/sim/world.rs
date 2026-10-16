@@ -12,7 +12,7 @@ use crate::actors::{ActorKind, EntityId, MovementPolicy, StationaryMovementPolic
 use crate::collision::{CollisionFlag, CollisionMap};
 use crate::data::{EquipSlot, Registry};
 use crate::combat::{
-    AttackDefinition, AttackStyle, CombatState, SpecialContext, SpecialEffect, CombatStats, NpcCombatState, get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor,
+    AttackDefinition, AttackStyle, CombatState, HazardDef, SpecialAttack, SpecialContext, SpecialEffect, CombatStats, NpcCombatState, get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor,
 };
 use crate::encounters::{EncounterContext, Phase, TriggerAction, TriggerBinding};
 use crate::model::{ConditionContext, Skill};
@@ -152,7 +152,28 @@ fn monster_distance_to_player(entity: &Entity, player: &Player) -> i32 {
 fn hook_phases(behavior: &Behavior) -> &'static [TickPhase] {
     match behavior {
         Behavior::Passive => &[TickPhase::NpcMovement],
+        Behavior::Hazard(_) => &[TickPhase::NpcAi],
         _ => &[TickPhase::NpcAi, TickPhase::NpcMovement],
+    }
+}
+
+/// Where an attacker is and what it hits with when one of its attacks resolves.
+#[derive(Clone, Copy)]
+struct Origin {
+    /// The south-west tile of its footprint.
+    tile: TileCoord,
+    size: i32,
+    stats: CombatStats,
+}
+
+impl Origin {
+    fn of(entity: &Entity) -> Self {
+        Self { tile: entity.tile(), size: entity.mover.actor.footprint_size(), stats: entity.mover.actor.stats() }
+    }
+
+    /// The middle of the footprint: where a shot leaves from.
+    fn centre(&self) -> TileCoord {
+        self.tile.offset(self.size / 2, self.size / 2)
     }
 }
 
@@ -162,6 +183,7 @@ enum Kind {
     Boss,
     Healer,
     Passive,
+    Hazard,
 }
 
 impl World {
@@ -352,6 +374,99 @@ impl World {
     pub fn spawn_passive(&mut self, name: &str, start: TileCoord, config: PassiveConfig) -> EntityId {
         let entity = Entity::new_passive(self.next_id(), name, start, &config, &mut self.map);
         self.add_entity(entity)
+    }
+
+    /// Leaves `def` on `tile` for `owner`, taking effect after `armed_in` ticks. Returns the id.
+    fn spawn_hazard(
+        &mut self,
+        def: &Rc<HazardDef>,
+        tile: TileCoord,
+        owner: EntityId,
+        armed_in: i32,
+        registrar: &mut TickRegistrar<EntityId>,
+    ) -> EntityId {
+        let entity = Entity::new_hazard(self.next_id(), tile, def, owner, armed_in, &mut self.map);
+        let (id, phases) = self.place_entity(entity);
+        for &phase in phases {
+            registrar.register(phase, id);
+        }
+        id
+    }
+
+    /// The tiles of every live hazard that stands in `shooter`'s line of sight: all that block
+    /// sight, except the ones the shooter itself left.
+    pub fn sight_blockers_against(&self, shooter: Combatant) -> Vec<TileCoord> {
+        self.entities()
+            .filter_map(|entity| match &entity.behavior {
+                Behavior::Hazard(state)
+                    if !state.gone && state.def.blocks_line_of_sight && Combatant::Npc(state.owner) != shooter =>
+                {
+                    Some(entity.tile())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The live hazards on the map, with where they are: what they are called and who left them.
+    pub fn hazards(&self) -> impl Iterator<Item = (&str, TileCoord, EntityId)> {
+        self.entities().filter_map(|entity| match &entity.behavior {
+            Behavior::Hazard(state) if !state.gone => Some((entity.name.as_str(), entity.tile(), state.owner)),
+            _ => None,
+        })
+    }
+
+    /// Takes a hazard off the map for good.
+    fn remove_hazard(&mut self, entity: &mut Entity) {
+        if let Behavior::Hazard(state) = &mut entity.behavior {
+            state.gone = true;
+        }
+        entity.mover.leave_map(&mut self.map);
+    }
+
+    /// The hazards `owner` clears by walking over them, when it stands where `origin` and `size`
+    /// say: they go.
+    fn clear_hazards_under(&mut self, owner: EntityId, origin: TileCoord, size: i32) {
+        let covered = |tile: TileCoord| {
+            tile.plane == origin.plane && (origin.x..origin.x + size).contains(&tile.x) && (origin.z..origin.z + size).contains(&tile.z)
+        };
+        for index in 0..self.entities.len() {
+            let Some(entity) = self.entities[index].as_deref() else { continue };
+            let Behavior::Hazard(state) = &entity.behavior else { continue };
+            if state.gone || state.owner != owner || !state.def.cleared_by_owner_walking || !covered(entity.tile()) {
+                continue;
+            }
+            let mut entity = self.entities[index].take().expect("just seen");
+            self.remove_hazard(&mut entity);
+            self.entities[index] = Some(entity);
+        }
+    }
+
+    /// A hazard's own tick: it arms, hurts a player standing on it, and ends when its time is up.
+    fn run_hazard(&mut self, entity: &mut Entity) {
+        let tile = entity.tile();
+        let Behavior::Hazard(state) = &mut entity.behavior else { return };
+        if state.gone {
+            return;
+        }
+        if state.armed_in > 0 {
+            state.armed_in -= 1;
+            return;
+        }
+        let damage = state.def.damage_per_tick;
+        let over = match &mut state.remaining {
+            Some(remaining) => {
+                *remaining -= 1;
+                *remaining <= 0
+            }
+            None => false,
+        };
+        if damage > 0 && !self.player.is_dead() && self.player.tile() == tile {
+            self.player.damage_buffer.enqueue(damage, 0, None);
+        }
+        if over {
+            self.remove_hazard(entity);
+        }
     }
 
     /// Registers entities that stay dormant until a `SpawnEntities` trigger names `spawn_id`.
@@ -739,16 +854,18 @@ impl World {
             Behavior::Boss(_) => Kind::Boss,
             Behavior::Healer(_) => Kind::Healer,
             Behavior::Passive => Kind::Passive,
+            Behavior::Hazard(_) => Kind::Hazard,
         };
 
         match (kind, phase) {
-            (Kind::Npc, TickPhase::NpcAi) => self.run_npc_ai(&mut entity),
+            (Kind::Npc, TickPhase::NpcAi) => self.run_npc_ai(&mut entity, registrar),
             (Kind::Npc, TickPhase::NpcMovement) => self.run_npc_movement(&mut entity),
             (Kind::Boss, TickPhase::NpcAi) => self.run_boss_ai(&mut entity, registrar),
             (Kind::Boss, TickPhase::NpcMovement) => self.run_boss_movement(&mut entity),
             (Kind::Healer, TickPhase::NpcAi) => self.run_heal_ai(&mut entity),
             (Kind::Healer, TickPhase::NpcMovement) => self.run_healer_movement(&mut entity),
             (Kind::Passive, TickPhase::NpcMovement) => self.run_passive_movement(&mut entity),
+            (Kind::Hazard, TickPhase::NpcAi) => self.run_hazard(&mut entity),
             _ => {}
         }
 
@@ -989,10 +1106,12 @@ impl World {
         &mut self,
         attacker: EntityId,
         attacker_name: &str,
-        attacker_stats: CombatStats,
+        origin: &Origin,
         attack: &Rc<AttackDefinition>,
         distance: i32,
+        registrar: &mut TickRegistrar<EntityId>,
     ) {
+        let attacker_stats = origin.stats;
         self.announce_attack(attacker, attack);
         // an attack with a sound of its own at the roll (Jad's stomp) is heard now
         self.play_sound(attack.hit_sound, Combatant::Npc(attacker), 0);
@@ -1010,6 +1129,11 @@ impl World {
             });
         }
         self.deliver_attack(Some(attacker), attacker_name, attacker_stats, attack, flight);
+        // whatever goes off with it, the tick it resolves, aimed at where the player is now
+        let target_tile = self.player.tile();
+        for rider in &attack.riders {
+            self.resolve_special(attacker, attacker_name, None, rider, origin, target_tile, registrar);
+        }
     }
 
     /// Resolves a special whose wind-up has just ended: the attacker is seen and heard as for any
@@ -1020,29 +1144,90 @@ impl World {
         attacker: EntityId,
         attacker_name: &str,
         attack: &Rc<AttackDefinition>,
-        self_tile: TileCoord,
+        origin: &Origin,
         target_tile: TileCoord,
+        registrar: &mut TickRegistrar<EntityId>,
     ) {
         let special = attack.special_part().expect("only a special is fired as one");
         self.announce_attack(attacker, attack);
         self.play_sound(attack.hit_sound, Combatant::Npc(attacker), 0);
         self.log_line(format!("{attacker_name} lands {}.", attack.name));
+        self.resolve_special(attacker, attacker_name, Some(attack), special, origin, target_tile, registrar);
+        for rider in &attack.riders {
+            self.resolve_special(attacker, attacker_name, None, rider, origin, self.player.tile(), registrar);
+        }
+    }
+
+    /// Runs `special`'s resolver and applies what it returns. `presented` is the attack whose
+    /// graphics and status effect go with a hit, if the special is an attack of its own and not
+    /// a rider of another.
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_special(
+        &mut self,
+        attacker: EntityId,
+        attacker_name: &str,
+        presented: Option<&Rc<AttackDefinition>>,
+        special: &SpecialAttack,
+        origin: &Origin,
+        target_tile: TileCoord,
+        registrar: &mut TickRegistrar<EntityId>,
+    ) {
+        let blockers = self.sight_blockers_against(Combatant::Npc(attacker));
         let context = SpecialContext {
-            self_tile,
+            self_tile: origin.tile,
+            attacker_centre: origin.centre(),
+            attacker_stats: origin.stats,
             target_tile,
             player_tile: self.player.tile(),
             player_alive: !self.player.is_dead(),
+            player_stats: self.player.mover.actor.stats(),
             player_reaction: &self.player.reaction_state,
+            sight_blockers: &blockers,
         };
         let effects = special.resolver.resolve(&context, self.encounter.rng());
         for effect in effects {
             match effect {
-                SpecialEffect::HurtPlayer { damage } => {
-                    self.show_hit_graphics(attack, 0);
-                    self.player.damage_buffer.enqueue(damage, 0, attack.on_hit_status_effect);
-                    self.log_line(format!("{attacker_name} uses {} on the player for {damage}.", attack.name));
+                SpecialEffect::HurtPlayer { damage, delay_ticks } => {
+                    if let Some(attack) = presented {
+                        self.show_hit_graphics(attack, delay_ticks);
+                        if let (Some(graphic), true) = (attack.projectile, delay_ticks > 0) {
+                            self.events.push(WorldEvent::Projectile {
+                                from: Combatant::Npc(attacker),
+                                to: Combatant::Player,
+                                graphic,
+                                draw: None,
+                                ticks: delay_ticks,
+                                released: attack.telegraph_ticks() > 0,
+                            });
+                        }
+                    }
+                    let status = presented.and_then(|attack| attack.on_hit_status_effect);
+                    self.player.damage_buffer.enqueue(damage, delay_ticks, status);
+                    let name = presented.map_or("a rock", |attack| attack.name.as_str());
+                    self.log_line(format!("{attacker_name} uses {name} on the player for {damage}."));
                 }
+                SpecialEffect::BindPlayer { ticks } => {
+                    self.player.status_effects.apply(crate::combat::StatusEffectDefinition::freeze(ticks));
+                }
+                SpecialEffect::SpawnHazard { def, tile, armed_in } => {
+                    self.spawn_hazard(&def, tile, attacker, armed_in, registrar);
+                }
+                SpecialEffect::DestroyHazard { tile } => self.destroy_hazard_at(attacker, tile),
             }
+        }
+    }
+
+    /// Destroys `owner`'s hazard standing on `tile`, if there is one.
+    fn destroy_hazard_at(&mut self, owner: EntityId, tile: TileCoord) {
+        for index in 0..self.entities.len() {
+            let Some(entity) = self.entities[index].as_deref() else { continue };
+            let Behavior::Hazard(state) = &entity.behavior else { continue };
+            if state.gone || state.owner != owner || entity.tile() != tile || !state.def.blocks_line_of_sight {
+                continue;
+            }
+            let mut entity = self.entities[index].take().expect("just seen");
+            self.remove_hazard(&mut entity);
+            self.entities[index] = Some(entity);
         }
     }
 
@@ -1163,7 +1348,7 @@ impl World {
 
     // ---- plain NPC ----
     // TODO: support custom NPCs that don't use the default AI, e.g. a boss that uses a custom attack scheduler
-    fn run_npc_ai(&mut self, entity: &mut Entity) {
+    fn run_npc_ai(&mut self, entity: &mut Entity, registrar: &mut TickRegistrar<EntityId>) {
         let id = entity.id;
         let Behavior::Npc(state) = &mut entity.behavior else { return };
         let actor = &entity.mover.actor;
@@ -1192,11 +1377,10 @@ impl World {
         }
 
         let attack = Rc::clone(state.combat_state.current_attack().expect("an attack resolved, so one was selected"));
-        let stats = actor.stats();
-        let size = actor.footprint_size();
-        let distance = TargetSpec::distance_to_rect(player_tile, actor.current_tile(), size, size);
+        let origin = Origin { tile: actor.current_tile(), size: actor.footprint_size(), stats: actor.stats() };
+        let distance = TargetSpec::distance_to_rect(player_tile, origin.tile, origin.size, origin.size);
 
-        self.fire_at_player(id, &entity.name, stats, &attack, distance);
+        self.fire_at_player(id, &entity.name, &origin, &attack, distance, registrar);
     }
 
     fn run_npc_movement(&mut self, entity: &mut Entity) {
@@ -1329,16 +1513,17 @@ impl World {
 
         if attack.special_part().is_some() {
             // from where both sides stood when the attack was selected
-            let (self_tile, target_tile) = (combat_state.self_tile_at_selection(), combat_state.target_tile_at_selection());
-            self.fire_special(id, &entity.name, &attack, self_tile, target_tile);
+            let mut origin = Origin { tile: actor.current_tile(), size: actor.footprint_size(), stats: actor.stats() };
+            origin.tile = combat_state.self_tile_at_selection();
+            let target_tile = combat_state.target_tile_at_selection();
+            self.fire_special(id, &entity.name, &attack, &origin, target_tile, registrar);
             return;
         }
 
-        let stats = actor.stats();
-        let size = actor.footprint_size();
-        let distance = TargetSpec::distance_to_rect(player_tile, actor.current_tile(), size, size);
+        let origin = Origin { tile: actor.current_tile(), size: actor.footprint_size(), stats: actor.stats() };
+        let distance = TargetSpec::distance_to_rect(player_tile, origin.tile, origin.size, origin.size);
 
-        self.fire_at_player(id, &entity.name, stats, &attack, distance);
+        self.fire_at_player(id, &entity.name, &origin, &attack, distance, registrar);
     }
 
     fn apply_boss_action(
