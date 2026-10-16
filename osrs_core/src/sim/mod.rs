@@ -44,7 +44,7 @@ pub use player::Player;
 pub use player_runtime::{AttackPlan, Dps, UNARMED_SPEED_FALLBACK};
 pub use skills::Skills;
 pub use server::{
-    spawn_server, ClientCommand, EntitySnapshot, GroundItemView, ItemView, PlayerId, PlayerSnapshot, Server, ServerHandle, SkillSnapshot, Snapshot,
+    spawn_server, ClientCommand, EntitySnapshot, GroundItemView, HazardView, ItemView, PlayerId, PlayerSnapshot, Server, ServerHandle, SkillSnapshot, Snapshot,
 };
 pub use tick_driver::TickDriver;
 pub use world::{SpawnBlueprint, World, ENCOUNTER_CLOCK_ID, PLAYER_ID};

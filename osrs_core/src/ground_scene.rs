@@ -1,5 +1,6 @@
 //! Things the server has put in the world that the map does not have: fires players lit
-//! (`Snapshot::spawned`) and items lying on the ground (`Snapshot::ground_items`).
+//! (`Snapshot::spawned`), items lying on the ground (`Snapshot::ground_items`) and what attacks
+//! have left behind (`Snapshot::hazards`).
 //!
 //! Like `scenery_swaps` this is a diff of what the server lists against what is on screen, done
 //! when a tick's snapshot arrives or a mesh comes back. Each thing is spawned as a one-object
@@ -28,6 +29,8 @@ const ITEM_KEY_BASE: u32 = 1_000_000;
 pub enum Thing {
     Fire(LocKey),
     Item(u32),
+    /// Something an attack left in the world (a boulder, lava), by the server's id for it.
+    Hazard(u32),
 }
 
 impl Thing {
@@ -37,6 +40,7 @@ impl Thing {
         match self {
             Thing::Fire(key) => (i32::MIN / 4 - key.x, key.z),
             Thing::Item(uid) => (i32::MIN / 4 + 1, *uid as i32),
+            Thing::Hazard(id) => (i32::MIN / 4 + 2, *id as i32),
         }
     }
 }
@@ -77,6 +81,9 @@ pub fn show_ground_things(
     for fire in &snapshot.spawned {
         let loc = fire.loc;
         wanted.insert(Thing::Fire(loc.key()), (loc.tile, Mesh::Object { id: loc.id, kind: loc.kind, orientation: loc.orientation }));
+    }
+    for hazard in &snapshot.hazards {
+        wanted.insert(Thing::Hazard(hazard.id), (hazard.tile, Mesh::Object { id: hazard.object, kind: 10, orientation: 0 }));
     }
     if let Some(icons) = icons.as_deref() {
         for item in &snapshot.ground_items {
@@ -133,7 +140,7 @@ pub fn show_ground_things(
         // an object with an animation (flames) plays it, looping
         let clip = match key {
             Thing::Fire(loc) => swaps.clips.get(&(loc.id, 10, 0)).cloned(),
-            Thing::Item(_) => None,
+            Thing::Item(_) | Thing::Hazard(_) => None,
         };
         if let Some(clip) = clip {
             let entity = spawn_animated(

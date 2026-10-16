@@ -118,6 +118,9 @@ fn hazard_named(hazards: &[HazardData], id: &str) -> Rc<HazardDef> {
     if data.cleared_by_owner_walking {
         def = def.cleared_by_owner_walking();
     }
+    if let Some(object) = data.object {
+        def = def.drawn_as(object);
+    }
     Rc::new(def)
 }
 

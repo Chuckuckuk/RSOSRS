@@ -17,6 +17,8 @@ pub struct HazardDef {
     pub lifetime_ticks: Option<i32>,
     /// Whether its owner destroys it by walking over it.
     pub cleared_by_owner_walking: bool,
+    /// The cache object a client draws it as, if it is drawn at all.
+    pub object: Option<u32>,
 }
 
 impl HazardDef {
@@ -28,6 +30,7 @@ impl HazardDef {
             damage_per_tick: 0,
             lifetime_ticks: None,
             cleared_by_owner_walking: false,
+            object: None,
         }
     }
 
@@ -50,6 +53,12 @@ impl HazardDef {
     pub fn lasting(mut self, ticks: i32) -> Self {
         assert!(ticks >= 1, "a hazard must last at least a tick");
         self.lifetime_ticks = Some(ticks);
+        self
+    }
+
+    /// Drawn by clients as the cache object `object`.
+    pub fn drawn_as(mut self, object: u32) -> Self {
+        self.object = Some(object);
         self
     }
 

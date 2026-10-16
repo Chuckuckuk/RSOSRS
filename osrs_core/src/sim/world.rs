@@ -436,6 +436,17 @@ impl World {
         })
     }
 
+    /// The hazards a client should draw: each one's entity id, tile and the cache object it is
+    /// drawn as. Hazards with no object are not drawn.
+    pub fn drawn_hazards(&self) -> Vec<(EntityId, TileCoord, u32)> {
+        self.entities()
+            .filter_map(|entity| match &entity.behavior {
+                Behavior::Hazard(state) if !state.gone => state.def.object.map(|object| (entity.id, entity.tile(), object)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Takes a hazard off the map for good.
     fn remove_hazard(&mut self, entity: &mut Entity) {
         if let Behavior::Hazard(state) = &mut entity.behavior {

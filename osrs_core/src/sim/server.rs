@@ -163,6 +163,16 @@ pub struct ItemView {
     pub wearable: bool,
 }
 
+/// Something an attack left in the world that a client draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HazardView {
+    /// Names it while it lies there.
+    pub id: u32,
+    pub tile: TileCoord,
+    /// The game cache's object it is drawn as.
+    pub object: u32,
+}
+
 /// An item lying on the ground.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroundItemView {
@@ -224,6 +234,8 @@ pub struct Snapshot {
     pub spawned: Vec<SpawnedLoc>,
     /// Every item on the ground.
     pub ground_items: Vec<GroundItemView>,
+    /// Everything attacks have left in the world that is drawn (boulders, lava).
+    pub hazards: Vec<HazardView>,
 }
 
 /// A player that has entered the world.
@@ -511,6 +523,12 @@ impl Server {
             messages,
             scenery: self.world.scenery_changes().copied().collect(),
             spawned: self.world.spawned_scenery().copied().collect(),
+            hazards: self
+                .world
+                .drawn_hazards()
+                .into_iter()
+                .map(|(id, tile, object)| HazardView { id: id.0, tile, object })
+                .collect(),
             ground_items: self
                 .world
                 .ground_items()

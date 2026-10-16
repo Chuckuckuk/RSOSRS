@@ -127,13 +127,15 @@
           "name": "Boulder",
           "blocks_line_of_sight": true,
           "blocks_players": true,
-          "cleared_by_owner_walking": true
+          "cleared_by_owner_walking": true,
+          "object": 6950
         },
         {
           "id": "lava",
           "name": "Lava",
           "damage_per_tick": 6,
-          "cleared_by_owner_walking": true
+          "cleared_by_owner_walking": true,
+          "object": 17334
         }
       ],
       "attacks": [

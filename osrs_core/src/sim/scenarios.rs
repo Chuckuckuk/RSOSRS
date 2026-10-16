@@ -1263,4 +1263,19 @@ mod tests {
         }
         panic!("the ranged attack never resolved: {:?}", world.log());
     }
+
+    #[test]
+    fn only_hazards_with_an_object_are_offered_to_clients_to_draw() {
+        let drawn = Rc::new(HazardDef::new("Boulder").drawn_as(6950));
+        let rock = rock_leaving(drawn, HazardPlacement::AnchorTile, GroundTarget::square(HazardAnchor::Target, 0));
+        let (mut world, _) = world_with_periodic(rock, 1);
+        run_ticks(&mut world, 1);
+        assert_eq!(world.drawn_hazards().iter().map(|(_, tile, object)| (*tile, *object)).collect::<Vec<_>>(), vec![(tc(0, 0), 6950)]);
+
+        let invisible = rock_leaving(lava(), HazardPlacement::AnchorTile, GroundTarget::square(HazardAnchor::Target, 0));
+        let (mut world, _) = world_with_periodic(invisible, 1);
+        run_ticks(&mut world, 1);
+        assert_eq!(world.hazards().count(), 1);
+        assert!(world.drawn_hazards().is_empty());
+    }
 }
