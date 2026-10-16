@@ -24,11 +24,20 @@ fn tile() -> TileCoord {
     TileCoord::default()
 }
 
+/// One of the three archetypes: no wind-up and no delay (traditional), a wind-up (Jad-style), or
+/// a delay until it lands (Doom-style, which has no wind-up).
 fn make_melee_attack(telegraph_ticks: i32, impact_delay_ticks: i32) -> Rc<AttackDefinition> {
-    AttackDefinition::targeted("Test Melee", 0, telegraph_ticks, AttackStyle::Melee)
+    let attack = if impact_delay_ticks > 0 {
+        assert_eq!(telegraph_ticks, 0, "an on-contact attack has no wind-up");
+        AttackDefinition::on_contact("Test Melee", None, impact_delay_ticks, AttackStyle::Melee)
+    } else {
+        match telegraph_ticks {
+            0 => AttackDefinition::instant("Test Melee", None, AttackStyle::Melee),
+            _ => AttackDefinition::telegraphed("Test Melee", None, telegraph_ticks, AttackStyle::Melee),
+        }
+    };
+    attack
         .with_prayer_penetration(0.0)
-        .with_reaction(ReactionRequirement::prayer_match(ProtectionPrayer::Melee))
-        .with_impact_delay_ticks(impact_delay_ticks)
         .shared()
 }
 
@@ -49,7 +58,7 @@ fn advance(state: &mut NpcCombatState) -> bool {
 }
 
 fn current_multiplier(state: &NpcCombatState, reaction: &PlayerReactionState) -> f32 {
-    get_damage_multiplier(state.current_attack().unwrap().expect_targeted(), Some(reaction), tile(), tile())
+    get_damage_multiplier(state.current_attack().unwrap().expect_targeted(), Some(reaction))
 }
 
 fn alive(_: EntityId) -> bool {
@@ -104,20 +113,18 @@ fn traditional_attack_no_telegraph_no_travel_still_only_checks_prayer_on_the_res
 
 #[test]
 fn doom_style_attack_late_switch_during_the_travel_phase_still_fully_blocks_the_hit() {
-    // "Doom-style": little/no telegraph (1, as small as a telegraph can be while still being
-    // distinct from Traditional's 0), but a multi-tick travel/impact delay during which the roll
+    // "Doom-style": no telegraph at all, but a multi-tick travel/impact delay during which the roll
     // hasn't happened yet - a FULL late reaction is possible right up through the final travel
     // tick, same as Jad-style's telegraph. The delay itself lives on the DEFENDER's
     // PendingAttackQueue, so this test drives both pieces together, same as the real call sites.
-    let mut state = state_for(make_melee_attack(1, 2));
+    let mut state = state_for(make_melee_attack(0, 2));
     let mut queue = PendingAttackQueue::new();
     let mut target = FakeCombatTarget::new(100);
     let mut reaction = prayer(ProtectionPrayer::None);
 
-    assert!(!advance(&mut state)); // starts the (brief) telegraph
-    assert!(advance(&mut state)); // telegraph ends - resolves immediately; honoring the delay is the caller's job
+    assert!(advance(&mut state)); // no telegraph - resolves at once; honoring the delay is the caller's job
     let attack = Rc::clone(state.current_attack().unwrap());
-    queue.enqueue(Rc::clone(&attack), tile(), Some(EntityId(7)), attacker_stats(), attack.impact_delay_ticks);
+    queue.enqueue(Rc::clone(&attack), Some(EntityId(7)), attacker_stats(), attack.impact_delay_ticks());
 
     let run = |queue: &mut PendingAttackQueue, reaction: &PlayerReactionState, target: &mut FakeCombatTarget| {
         queue.advance(&target.view, &mut target.damage_buffer, Some(reaction), &mut DotNetRandom::new(1), &alive);
@@ -143,15 +150,14 @@ fn doom_style_attack_late_switch_during_the_travel_phase_still_fully_blocks_the_
 
 #[test]
 fn doom_style_attack_correct_prayer_dropped_before_impact_still_takes_full_damage() {
-    let mut state = state_for(make_melee_attack(1, 2));
+    let mut state = state_for(make_melee_attack(0, 2));
     let mut queue = PendingAttackQueue::new();
     let mut target = FakeCombatTarget::new(100);
     let mut reaction = prayer(ProtectionPrayer::Melee);
 
-    assert!(!advance(&mut state)); // starts telegraphing
-    assert!(advance(&mut state)); // telegraph ends - resolves immediately
+    assert!(advance(&mut state)); // no telegraph - resolves at once
     let attack = Rc::clone(state.current_attack().unwrap());
-    queue.enqueue(Rc::clone(&attack), tile(), Some(EntityId(7)), attacker_stats(), attack.impact_delay_ticks);
+    queue.enqueue(Rc::clone(&attack), Some(EntityId(7)), attacker_stats(), attack.impact_delay_ticks());
 
     queue.advance(&target.view, &mut target.damage_buffer, Some(&reaction), &mut DotNetRandom::new(1), &alive); // travelling
     queue.advance(&target.view, &mut target.damage_buffer, Some(&reaction), &mut DotNetRandom::new(1), &alive); // still travelling

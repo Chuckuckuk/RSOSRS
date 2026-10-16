@@ -1,6 +1,15 @@
-use super::reaction_requirement::HazardAnchor;
 use crate::rng::Rng;
 use crate::tiles::TileCoord;
+
+/// Which tile an area attack is centred on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HazardAnchor {
+    /// The attacker's own tile at the moment the attack was selected.
+    #[default]
+    SelfTile,
+    /// The target's tile at the moment the attack was selected.
+    Target,
+}
 
 /// How a ground-targeted attack picks the tiles it covers, relative to its anchor.
 #[derive(Debug, Clone, PartialEq, Eq)]

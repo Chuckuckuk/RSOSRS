@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use super::player::Player;
 use crate::combat::{
-    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProtectionPrayer,
+    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProjectileSpeed, ProtectionPrayer,
 };
 use crate::data::{ConsumableEffect, EquipSlot, Registry, StanceDef, StanceKind, WeaponDef};
 use crate::model::{Attribute, DamageType, EquipmentBonuses, Modifier, PrayerEffects, ScalingContext, Skill, StanceBonuses};
@@ -49,10 +49,10 @@ pub struct AttackPlan {
 }
 
 impl AttackPlan {
-    /// Fixes the projectile travel time for a shot at `distance` tiles and shares the definition.
-    pub fn finish(self, distance: i32) -> Rc<AttackDefinition> {
-        let travel = rules::projectile_travel_ticks(self.style, distance);
-        self.definition.with_projectile_travel_ticks(travel).shared()
+    /// Shares the finished definition. Its projectile speed (the game's own flight times for
+    /// ranged and magic) is already part of it; the world measures the distance to the target.
+    pub fn finish(self) -> Rc<AttackDefinition> {
+        self.definition.shared()
     }
 }
 
@@ -398,7 +398,7 @@ impl Player {
         };
         let modifiers = modifiers.iter().map(|m| m.resolved(&scaling)).collect();
 
-        let mut definition = AttackDefinition::targeted(name, range, 0, style)
+        let mut definition = AttackDefinition::instant(name, Some(range), style)
             .with_damage_type(damage_type)
             .with_max_hit(max_hit)
             .with_modifiers(modifiers)
@@ -406,6 +406,12 @@ impl Player {
             .with_hit_count(hit_count)
             .with_always_hits(always_hits)
             .with_sounds(sound, hit_sound);
+        // a player's shots keep the game's own flight times, whatever the engine's default is
+        definition = match style {
+            AttackStyle::Ranged => definition.with_projectile_speed(ProjectileSpeed::OsrsRanged),
+            AttackStyle::Magic => definition.with_projectile_speed(ProjectileSpeed::OsrsMagic),
+            AttackStyle::Melee => definition,
+        };
         if let Some(status) = on_hit.and_then(|effect| effect.to_status().ok()) {
             definition = definition.with_on_hit_status_effect(status);
         }

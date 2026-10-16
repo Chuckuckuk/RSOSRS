@@ -8,11 +8,9 @@ use super::player_reaction_state::PlayerReactionState;
 use super::reaction_resolver;
 use crate::actors::{ActorKind, CombatTargetView, EntityId};
 use crate::rng::Rng;
-use crate::tiles::TileCoord;
 
 struct PendingRoll {
     attack: Rc<AttackDefinition>,
-    hazard_origin_tile: TileCoord,
     attacker: Option<EntityId>,
     attacker_stats: CombatStats,
     ticks_remaining: i32,
@@ -45,19 +43,17 @@ impl PendingAttackQueue {
     pub fn enqueue(
         &mut self,
         attack: Rc<AttackDefinition>,
-        hazard_origin_tile: TileCoord,
         attacker: Option<EntityId>,
         attacker_stats: CombatStats,
         impact_delay_ticks: i32,
     ) {
-        self.enqueue_with_floor(attack, hazard_origin_tile, attacker, attacker_stats, impact_delay_ticks, 0);
+        self.enqueue_with_floor(attack, attacker, attacker_stats, impact_delay_ticks, 0);
     }
 
     /// `enqueue`, for an attacker whose successful hits deal at least `successful_floor`.
     pub fn enqueue_with_floor(
         &mut self,
         attack: Rc<AttackDefinition>,
-        hazard_origin_tile: TileCoord,
         attacker: Option<EntityId>,
         attacker_stats: CombatStats,
         impact_delay_ticks: i32,
@@ -65,7 +61,6 @@ impl PendingAttackQueue {
     ) {
         self.pending.push(PendingRoll {
             attack,
-            hazard_origin_tile,
             attacker,
             attacker_stats,
             ticks_remaining: impact_delay_ticks,
@@ -98,7 +93,7 @@ impl PendingAttackQueue {
                 // a defender's queue only ever holds attacks that are rolled against it
                 let attack = roll.attack.expect_targeted();
                 let multiplier = match reaction_state {
-                    Some(_) => reaction_resolver::get_damage_multiplier(attack, reaction_state, roll.hazard_origin_tile, defender.tile),
+                    Some(_) => reaction_resolver::get_damage_multiplier(attack, reaction_state),
                     None => 1.0,
                 };
                 let damage = damage_resolver::roll_with_floor(
@@ -110,7 +105,8 @@ impl PendingAttackQueue {
                     multiplier,
                     roll.successful_floor,
                 );
-                damage_buffer.enqueue(damage, attack.projectile_travel_ticks, roll.attack.on_hit_status_effect);
+                // it rolled on contact, so the damage lands the moment it rolls: no flight to wait out
+                damage_buffer.enqueue(damage, 0, roll.attack.on_hit_status_effect);
             } else {
                 self.pending[i].ticks_remaining -= 1;
                 i += 1;
@@ -126,17 +122,13 @@ mod tests {
     use super::*;
     use crate::actors::Health;
     use crate::combat::test_support::FakeCombatTarget;
-    use crate::combat::{AttackStyle, ProtectionPrayer, ReactionRequirement};
+    use crate::combat::{AttackStyle, Mitigation, ProtectionPrayer};
     use crate::rng::{DotNetRandom, ScriptedRng};
 
     const ATTACKER: EntityId = EntityId(1);
-    const ATTACKER_TILE: TileCoord = TileCoord { x: 5, z: 5, plane: 0 };
 
-    fn make_attack(projectile_travel_ticks: i32, reaction: ReactionRequirement) -> Rc<AttackDefinition> {
-        AttackDefinition::targeted("Test Doom-style", 10, 0, AttackStyle::Magic)
-            .with_reaction(reaction)
-            .with_projectile_travel_ticks(projectile_travel_ticks)
-            .shared()
+    fn make_attack(mitigation: Mitigation) -> Rc<AttackDefinition> {
+        AttackDefinition::on_contact("Test Doom-style", Some(10), 1, AttackStyle::Magic).with_mitigation(mitigation).shared()
     }
 
     fn attacker_stats() -> CombatStats {
@@ -160,7 +152,7 @@ mod tests {
     fn enqueue_then_advance_does_not_touch_health_until_the_delay_elapses() {
         let mut target = FakeCombatTarget::new(100);
         let mut queue = PendingAttackQueue::new();
-        queue.enqueue(make_attack(0, ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 2);
+        queue.enqueue(make_attack(Mitigation::Unmitigable), Some(ATTACKER), attacker_stats(), 2);
 
         advance(&mut queue, &mut target, None, &mut DotNetRandom::new(1)); // still travelling
         assert_eq!(target.health.current(), 100);
@@ -180,8 +172,7 @@ mod tests {
         let mut queue = PendingAttackQueue::new();
         let mut reaction = PlayerReactionState { active_prayer: ProtectionPrayer::None, ..Default::default() };
         queue.enqueue(
-            make_attack(0, ReactionRequirement::prayer_match(ProtectionPrayer::Magic)),
-            ATTACKER_TILE,
+            make_attack(Mitigation::ProtectionPrayer),
             Some(ATTACKER),
             attacker_stats(),
             1,
@@ -203,8 +194,7 @@ mod tests {
         let mut target = FakeCombatTarget::new(100);
         let mut queue = PendingAttackQueue::new();
         queue.enqueue(
-            make_attack(0, ReactionRequirement::prayer_match(ProtectionPrayer::Magic)),
-            ATTACKER_TILE,
+            make_attack(Mitigation::ProtectionPrayer),
             Some(ATTACKER),
             attacker_stats(),
             0,
@@ -217,21 +207,16 @@ mod tests {
     }
 
     #[test]
-    fn advance_forwards_into_damage_buffer_with_the_attacks_own_projectile_travel_ticks() {
-        // Proves composition: a Doom-style roll-delay followed by its own post-roll travel
-        // delay still ends up resolved by DamageBuffer, unaffected by PendingAttackQueue.
+    fn an_on_contact_hit_lands_the_moment_it_rolls_with_no_flight_after_the_roll() {
+        // The roll was deferred until the attack made contact, so the damage that comes out of it
+        // is applied by the damage buffer in the same tick.
         let mut target = FakeCombatTarget::new(100);
         let mut queue = PendingAttackQueue::new();
-        queue.enqueue(make_attack(2, ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 1);
+        queue.enqueue(make_attack(Mitigation::Unmitigable), Some(ATTACKER), attacker_stats(), 1);
 
-        advance(&mut queue, &mut target, None, &mut DotNetRandom::new(1)); // still travelling
-        advance(&mut queue, &mut target, None, &mut guaranteed_hit_of(10)); // rolls, hands off to DamageBuffer with 2 travel ticks
+        advance(&mut queue, &mut target, None, &mut DotNetRandom::new(1)); // still on its way
+        advance(&mut queue, &mut target, None, &mut guaranteed_hit_of(10)); // rolls on contact
 
-        assert_eq!(target.damage_buffer.pending_count(), 1);
-        target.damage_buffer.advance(&mut target.health, None);
-        assert_eq!(target.health.current(), 100);
-        target.damage_buffer.advance(&mut target.health, None);
-        assert_eq!(target.health.current(), 100);
         target.damage_buffer.advance(&mut target.health, None);
         assert_eq!(target.health.current(), 90);
     }
@@ -240,7 +225,7 @@ mod tests {
     fn pending_count_reflects_only_unrolled_attacks() {
         let mut target = FakeCombatTarget::new(100);
         let mut queue = PendingAttackQueue::new();
-        queue.enqueue(make_attack(0, ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 1);
+        queue.enqueue(make_attack(Mitigation::Unmitigable), Some(ATTACKER), attacker_stats(), 1);
         assert_eq!(queue.pending_count(), 1);
 
         advance(&mut queue, &mut target, None, &mut DotNetRandom::new(1)); // still travelling
@@ -258,7 +243,7 @@ mod tests {
         let mut queue = PendingAttackQueue::new();
         let attacker_dead = Cell::new(false);
         let is_dead = |_: EntityId| attacker_dead.get();
-        queue.enqueue(make_attack(0, ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 2);
+        queue.enqueue(make_attack(Mitigation::Unmitigable), Some(ATTACKER), attacker_stats(), 2);
 
         queue.advance(&target.view, &mut target.damage_buffer, None, &mut DotNetRandom::new(1), &is_dead); // attacker alive
         assert_eq!(queue.pending_count(), 1);
@@ -280,7 +265,7 @@ mod tests {
         let mut attacker_health = Health::new(10);
         attacker_health.damage(attacker_health.max());
         let is_dead = |_: EntityId| attacker_health.is_dead();
-        queue.enqueue(make_attack(0, ReactionRequirement::none()), ATTACKER_TILE, Some(ATTACKER), attacker_stats(), 0);
+        queue.enqueue(make_attack(Mitigation::Unmitigable), Some(ATTACKER), attacker_stats(), 0);
 
         queue.advance(&target.view, &mut target.damage_buffer, None, &mut DotNetRandom::new(1), &is_dead);
 
@@ -291,7 +276,7 @@ mod tests {
     fn an_attack_with_no_attacker_handle_always_rolls() {
         let mut target = FakeCombatTarget::new(100);
         let mut queue = PendingAttackQueue::new();
-        queue.enqueue(make_attack(0, ReactionRequirement::none()), ATTACKER_TILE, None, attacker_stats(), 0);
+        queue.enqueue(make_attack(Mitigation::Unmitigable), None, attacker_stats(), 0);
 
         queue.advance(&target.view, &mut target.damage_buffer, None, &mut guaranteed_hit_of(4), &|_| true);
 

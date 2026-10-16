@@ -148,10 +148,12 @@ A worked example from the tests: 99 Strength + 19 from a Super strength potion =
 | Special energy | +10 % every 50 ticks (25 with a Lightbearer ring), max 100 |
 | Poison | every 30 ticks, deal `ceil(severity / 5)`, then severity drops by 1; ends at 0 |
 | Venom | every 30 ticks, damage goes 6, 8, 10 ... capped at 20; never wears off by itself |
-| Projectile travel | melee 0 ticks; ranged `1 + floor((3 + distance) / 6)`; magic `1 + floor((1 + distance) / 3)` |
+| Projectile travel (the player's weapons) | melee 0 ticks; ranged `1 + floor((3 + distance) / 6)`; magic `1 + floor((1 + distance) / 3)` |
 
 `projectile_travel_ticks` is at the bottom of `resources.rs` and takes an `AttackStyle` from the
-`combat` module, which is the one place `rules` reaches upward.
+`combat` module, which is the one place `rules` reaches upward. Attacks do not call it directly:
+they carry a `ProjectileSpeed` (4.2), and a player's ranged and magic weapons select these two
+formulas as `OsrsRanged` and `OsrsMagic`. Monsters use an engine default in tiles per tick.
 
 ---
 

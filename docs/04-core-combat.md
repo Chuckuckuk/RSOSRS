@@ -31,25 +31,44 @@ gear when it swings (chapter 6), then joins the same roll and buffer path.
 
 Files: [`attack_definition.rs`](../osrs_core/src/combat/attack_definition.rs),
 [`targeted_attack.rs`](../osrs_core/src/combat/targeted_attack.rs),
-[`ground_attack.rs`](../osrs_core/src/combat/ground_attack.rs).
+[`position_resolver.rs`](../osrs_core/src/combat/position_resolver.rs),
+[`special_attack.rs`](../osrs_core/src/combat/special_attack.rs),
+[`projectile_speed.rs`](../osrs_core/src/combat/projectile_speed.rs).
 
-An attack is the fields every attack has, plus a `kind` that holds only what that kind of attack
-uses, so a boulder does not carry (and silently ignore) an accuracy modifier.
+An attack is the fields every attack has, plus a `kind` that says *when* it resolves and holds only
+what that kind uses, so a boulder does not carry (and silently ignore) an accuracy modifier, and a
+melee swing does not carry a telegraph length it never uses.
 
 **Common to every attack** (`AttackDefinition`):
 
 | Field | Meaning |
 |---|---|
 | `name` | for logs |
-| `range` | a melee-style targeted attack with `range` 1 or less must be orthogonally adjacent to the attacker's footprint; anything else is within Chebyshev `range` (a halberd is melee style with range 2) |
-| `telegraph_ticks` | visible wind-up before it resolves |
-| `impact_delay_ticks` | extra ticks between the telegraph ending and the roll or landing ("Doom-style", and every ground attack) |
-| `cooldown_ticks` | wait after resolving before the next telegraph may start |
+| `range` | optional override of the attacker's own attack range for this attack (below); `None` uses the attacker's |
+| `attack_speed` | optional override of the attacker's own attack speed for this attack (below) |
 | `on_hit_status_effect` | poison, freeze, burn... applied when it lands |
 | `animation`, `projectile`, `target_graphic`, `impact_graphic`, `sound`, `hit_sound` | presentation only |
-| `kind` | `AttackKind::Targeted(TargetedAttack)` or `AttackKind::Ground(GroundAttack)` |
+| `kind` | when and how it resolves, below |
 
-**`TargetedAttack`**: rolled against a defender.
+**`AttackKind`**: an attack is either *standard* or a *special*. A standard attack is one of three
+timing archetypes, each carrying only its own numbers, and is answered by nothing but the overhead
+protection prayer. Anything that does not fit those, or that must check anything else, is a special.
+
+| Kind | Resolves | Own fields |
+|---|---|---|
+| `Instant` | the tick it is chosen (the "traditional" archetype: most melee) | `projectile_speed` (override) |
+| `Telegraphed` | when a visible wind-up ends (Jad) | `telegraph_ticks`, `projectile_speed` (override) |
+| `OnContact` | the roll waits until it lands, `impact_delay_ticks` after release (Doom-style) | `impact_delay_ticks` |
+| `Special` | resolves itself, by the `SpecialAttack` it carries (below) | its own |
+
+A `SpecialAttack` is a `telegraph_ticks` wind-up plus a **`SpecialResolver`**: when the wind-up ends
+the resolver is given a `SpecialContext` (where the attacker and player stood at selection, where the
+player is now, their prayer) and the encounter's RNG, and returns `SpecialEffect`s (so far only
+`HurtPlayer { damage }`) for the world to apply. The resolver is a trait, like `AttackPattern`: a
+boss can register a special of its own, and the logic bosses share is one reusable implementation.
+The built-in one is `PositionResolver` (who is standing on which tiles, 4.10).
+
+The three standard kinds wrap a **`TargetedAttack`**, which is what is rolled against a defender:
 
 | Field | Meaning |
 |---|---|
@@ -60,24 +79,29 @@ uses, so a boulder does not carry (and silently ignore) an accuracy modifier.
 | `hit_count` | separate rolls per use (dragon claws: 4) |
 | `always_hits` | skip the accuracy roll entirely |
 | `prayer_penetration` | the fraction of damage that gets through the *correct* protection prayer: 0 = fully blocked, 1 = ignores prayer |
-| `reaction` | what the player must do to avoid it ([`ReactionRequirement`](../osrs_core/src/combat/reaction_requirement.rs)) |
-| `projectile_travel_ticks` | ticks between the roll and the damage landing |
-
-**`GroundAttack`**: aimed at tiles, never rolls accuracy (see 4.10): a `GroundTarget` (which
-tiles), a `GroundDamage` (`Fixed(n)` or `Uniform { max }`), and optionally one `PrayerReduction`.
+| `mitigation` | what lets the defender cut it down ([`Mitigation`](../osrs_core/src/combat/mitigation.rs)): the protection prayer for its style by default |
 
 The damage resolver, the reaction resolver, `PendingAttackQueue` and the player's swings take a
 `TargetedAttack`, so rolling a ground attack against a defender's accuracy cannot be written.
 
-`AttackDefinition::targeted(name, range, telegraph, style)` and `AttackDefinition::ground(name,
-range, telegraph, target, damage)` take the required fields and fill the rest with defaults; the
-`with_*` methods set the others (primer 1.4). They validate their input and panic on nonsense,
-including a builder for a field the attack's kind does not have (`with_always_hits` on a ground
-attack), because a bad attack is a bug in data or code, not something a player can cause.
+**Projectile flight.** An `Instant` or `Telegraphed` attack rolls when it is released and its damage
+lands after the flight. How long the flight is comes from a `ProjectileSpeed`: chebyshev tiles per
+tick, `ceil(distance / speed)` and never less than one tick, with an engine-wide default
+(`ProjectileSpeed::DEFAULT`, 3 tiles a tick) that an attack may override. Melee has no flight. An
+`OnContact` attack has none either: its impact delay *is* the time until it lands. The player's
+ranged and magic weapons override the default with the game's own flight formulas
+(`ProjectileSpeed::OsrsRanged` and `OsrsMagic`), so their timing is unchanged.
+`AttackDefinition::flight_ticks(distance)` is the one place that answers it.
 
-Definitions are shared as `Rc<AttackDefinition>` (`.shared()`), because the pattern that owns the
-list, the state machine currently telegraphing it and the queue that later rolls it all refer to
-the same attack.
+Constructors: `AttackDefinition::instant(name, range, style)`, `telegraphed(name, range,
+telegraph_ticks, style)`, `on_contact(name, range, impact_delay_ticks, style)` and `ground(name,
+range, telegraph_ticks, target, damage)`, where `range` is an `Option` (`None` inherits the
+attacker's). Data and config, which only have a wind-up number, use
+`npc_factory::timed_attack(name, range, telegraph_ticks, style)`, which picks `Instant` or
+`Telegraphed` from it. The `with_*` methods set the rest (primer 1.4).
+They validate their input and panic on nonsense, including a builder for a field the attack's kind
+does not have (`with_always_hits` on a ground attack, `with_projectile_speed` on an `OnContact`
+one), because a bad attack is a bug in data or code, not something a player can cause.
 
 ### `MaxHitSource`
 
@@ -88,18 +112,48 @@ the same attack.
 | `Spell { base }` | a spell's fixed base, scaled only by Magic Damage % |
 | `PoweredStaff { divisor, offset, gear_bonus_scale }` | `floor(magic / divisor) + offset`, then Magic Damage % (the gear part multiplied by `gear_bonus_scale`, capped at +100 %) |
 
-### `with_attack_speed`: turning OSRS attack speed into a cooldown
+### Attack range: a stat of the attacker
 
-OSRS gives each attack a speed: the number of ticks between consecutive hits. An attack without a
-telegraph resolves on the tick it is chosen; one with a telegraph spends `telegraph_ticks` winding
-up first (4.4). `with_attack_speed(speed)` subtracts that wind-up:
+How far an attacker can strike from is a stat of the attacker too (`NpcDef::attack_range`, the
+weapon's range for the player), and an attack may name its own `range` to replace it. The reach an
+attack is measured by is `attack.range` if it has one, else the attacker's:
+
+* a **melee-style** attack whose reach is 1 or less must be orthogonally adjacent to the
+  attacker's footprint;
+* anything else (a ranged or magic attack, a melee attack with a longer reach such as a halberd's
+  2, and every ground attack) is within that many tiles.
+
+So an archer with `attack_range: 7` has attacks that inherit 7, while Jad (`attack_range: 15`)
+gives his melee swing `range: 1`, which keeps it needing adjacency.
+`AttackDefinition::build_range_check(tile, footprint, attacker_range)` answers the outer reach.
+
+An attack may also name a `min_range`: the fewest tiles away it can be used from. With `range`
+that is a distance band, so one monster can have different attacks available at different
+distances (a lob that only works from 4+ tiles, a swipe that only works up close).
+`AttackDefinition::is_in_reach(tile, footprint, attacker_range, target)` applies both bounds, and
+`RangeAwarePattern` and the plain NPC AI use it to decide what is usable and whether to engage.
+`min_range` is measured to the nearest tile of the attacker's footprint, and validation rejects
+one beyond the attack's own reach.
+
+### Attack speed: a stat of the attacker
+
+OSRS gives an attacker a rate: the number of ticks between consecutive attacks resolving. That is a
+stat of the attacker, not of each attack: `NpcCombatState::with_attack_speed(speed)` for a monster
+(`NpcDef::attack_speed`; the player's comes from the weapon). An attack may carry its own
+`attack_speed` (`with_attack_speed`) that replaces the attacker's for as long as that attack is the
+one resolving (a slow special among fast swings).
+
+An attack without a telegraph resolves on the tick it is chosen; one with a telegraph spends
+`telegraph_ticks` winding up first (4.4). So after an attack resolves the state idles for:
 
 ```
-busy           = telegraph_ticks
-cooldown_ticks = max(0, speed - 1 - busy)
+speed    = attack.attack_speed or the attacker's attack speed
+busy     = telegraph_ticks
+cooldown = max(0, speed - 1 - busy)
 ```
 
-The test `attack_speed_spaces_consecutive_resolves_exactly_that_many_ticks_apart` proves that
+The tests `attack_speed_spaces_consecutive_resolves_exactly_that_many_ticks_apart` and
+`the_attackers_own_attack_speed_spaces_its_attacks_and_an_attack_may_override_it` prove that
 resolves then land exactly `speed` ticks apart.
 
 ---
@@ -154,7 +208,7 @@ Each fighting NPC owns one of these. It is a two-state machine, advanced once pe
       │ Idle │ ───────────────────────────────────────────────────────►│ Telegraphing │
       └──────┘                                                         └──────┬───────┘
           ▲      ticks_remaining reaches 0: return TRUE ("resolved"),         │ ticks_remaining -= 1
-          └──────────── cooldown_remaining = attack.cooldown_ticks ◄──────────┘ (> 0: return false)
+          └──────────── cooldown_remaining = cooldown after ◄───────────┘ (> 0: return false)
 ```
 
 `advance(target_engaged, health_percent, elapsed_ticks, self_tile, target_tile, target_style,
@@ -172,9 +226,10 @@ Details that matter:
   to the pattern. Patterns stay stateless (4.5) and the per-NPC memory lives here.
 * **Phase swaps.** `set_pattern` replaces the pattern for future selections without disturbing an
   attack already in progress.
-* **Timing arithmetic.** With `telegraph_ticks = 0` (most monster melee), an attack chosen on
-  tick T resolves on T itself: the swing and its damage roll happen together, as in the game.
-  With `telegraph_ticks = 3`, it resolves on T+3. That is why "busy" in 4.2 is `telegraph_ticks`.
+* **Timing arithmetic.** With no telegraph (an `Instant` or `OnContact` attack, most monster
+  melee), an attack chosen on tick T resolves on T itself: the swing and its damage roll happen
+  together, as in the game. With `telegraph_ticks() = 3`, it resolves on T+3. That is why "busy"
+  in 4.2 is the telegraph length.
 * **Announcing.** For a telegraphed attack the `World` reports the attack (and its animation)
   on the tick the telegraph starts, so the wind-up is the warning; an attack without one is
   reported as it resolves (chapter 6.4).
@@ -300,19 +355,24 @@ return round_half_away_from_zero(rolled as f32 * damage_multiplier);
 
 ## 4.7 Avoiding damage: reactions and prayers
 
-Files: [`reaction_requirement.rs`](../osrs_core/src/combat/reaction_requirement.rs),
+Files: [`mitigation.rs`](../osrs_core/src/combat/mitigation.rs),
 [`reaction_resolver.rs`](../osrs_core/src/combat/reaction_resolver.rs),
 [`player_reaction_state.rs`](../osrs_core/src/combat/player_reaction_state.rs),
 [`protection_prayer.rs`](../osrs_core/src/combat/protection_prayer.rs).
 
-An attack's `reaction` says what the player must do:
+Two things avoid damage, one per kind of attack:
 
-| `ReactionKind` | Damage multiplier |
-|---|---|
-| `None` | 1 |
-| `PrayerMatch` | `prayer_penetration` if the player's active protection prayer equals `required_prayer`, else 1 |
-| `MoveToTile` | 0 if the player is at least `move_away_distance` (Chebyshev) from the hazard's origin tile, else 1. The origin is the attacker's or target's tile **at selection time** (`HazardAnchor`). |
-| `Interrupt` | 1 (not implemented yet) |
+* **A targeted attack checks the protection prayer for its style.** Melee, ranged and magic attacks
+  are all answered by the matching prayer without saying so (`ProtectionPrayer::against(style)`);
+  nothing has to be declared.
+* **An area attack is avoided by where the defender stands.** A position special has no mitigation: it
+  resolves against whoever is on its tiles when it lands (4.10).
+* **Anything else is a special.** A standard attack checks only the overhead protection prayer
+  (`Mitigation::Unmitigable` for a typeless one that nothing changes). An attack that must check
+  another state of the defender is a `SpecialAttack`, which carries its own check.
+
+When the mitigation is met, `prayer_penetration` of the damage still gets through (0 blocks it, 1
+means the prayer does nothing); otherwise the damage is whole.
 
 [`get_damage_multiplier`](../osrs_core/src/combat/reaction_resolver.rs) reads the player's
 `PlayerReactionState` (active protection prayer and current fighting style) **at the moment of the
@@ -322,8 +382,8 @@ prayer's protection by dropping it one tick early.
 [`prayer_check_timing_tests.rs`](../osrs_core/src/combat/prayer_check_timing_tests.rs) pins this
 for all three timing archetypes (4.8).
 
-Data-defined monster attacks with `"protectable": true` (the default) get
-`ReactionRequirement::prayer_match(<matching protection>)` automatically.
+Data-defined monster attacks are checked against the matching protection prayer by default;
+`"protectable": false` makes one `Mitigation::Unmitigable`.
 
 ---
 
@@ -331,11 +391,11 @@ Data-defined monster attacks with `"protectable": true` (the default) get
 
 OSRS attacks fall into three timing shapes, and the code supports all of them with two buffers.
 
-| Archetype | Settings | When the roll happens | When damage lands |
+| Archetype | Kind | When the roll happens | When damage lands |
 |---|---|---|---|
-| Traditional | telegraph 0, impact delay 0 | the tick the attack is chosen | after `projectile_travel_ticks` (melee: that same tick) |
-| Jad-style | telegraph > 0 | the resolve tick, after a long wind-up | after `projectile_travel_ticks` |
-| Doom-style | impact delay > 0 | `impact_delay_ticks` after resolving | after `projectile_travel_ticks` |
+| Traditional | `Instant` | the tick the attack is chosen | after the projectile's flight (melee: that same tick) |
+| Jad-style | `Telegraphed` | the resolve tick, after a long wind-up | after the projectile's flight |
+| Doom-style | `OnContact` | `impact_delay_ticks` after the attack is released | the moment it rolls |
 
 ### `PendingAttackQueue`: attacks waiting to roll
 
@@ -402,19 +462,18 @@ that reject non-positive numbers. Kinds:
 
 ---
 
-## 4.10 Ground-targeted attacks
+## 4.10 Position specials
 
 Files: [`ground_attack.rs`](../osrs_core/src/combat/ground_attack.rs),
-[`ground_target.rs`](../osrs_core/src/combat/ground_target.rs),
-[`pending_ground_strike.rs`](../osrs_core/src/combat/pending_ground_strike.rs).
+[`ground_target.rs`](../osrs_core/src/combat/ground_target.rs).
 
-An attack of kind `Ground` is aimed at the ground, not at the player: it covers a set of tiles and,
-once its own `impact_delay_ticks` is up, deals its damage to **whoever is standing on them then**.
-Falling rocks, grasping claws and rock falls are all this. It telegraphs, is chosen by patterns,
-and has graphics and sounds like any other attack, but it never rolls accuracy and has no style or
-damage type.
+A special whose resolver is a `PositionResolver` is aimed at the ground, not at the player: it
+covers a set of tiles and, when its own telegraph ends, deals its damage to **whoever is standing on them then**, and is
+gone. Falling rocks, grasping claws and rock falls are all this. It telegraphs, is chosen by
+patterns, and has graphics and sounds like any other attack, but it never rolls accuracy and has
+no style or damage type.
 
-| `GroundAttack` field | Meaning |
+| `PositionResolver` field | Meaning |
 |---|---|
 | `target: GroundTarget` | an `anchor` (`SelfTile` or `Target`, as for a reaction) plus a `TileSelection` |
 | `damage: GroundDamage` | `Fixed(n)`, or `Uniform { max }` (0..=max, one draw) per target |
@@ -425,61 +484,18 @@ damage type.
 | `Offsets(Vec<(dx, dz)>)` | each offset from the anchor: squares (`GroundTarget::square(anchor, 1)` is the 3x3), crosses, lines, claw patterns; need not be contiguous |
 | `Scatter { radius, count }` | `count` distinct random tiles within `radius` of the anchor |
 
-The tiles are fixed when the attack resolves, from the attacker's and target's tiles as they were at
-selection. That tile is all that is taken from the target: the strike carries no target and no
-target stats.
+The tiles come from the attacker's and target's tiles as they were at selection. That tile is all
+that is taken from the target: the attack carries no target and no target stats.
 
-When the attack resolves, `fire_at_ground` announces it like any attack (animation, sound) and
-queues a `PendingGroundStrike` on the **world** (it has no defender, and must still land if its
-attacker dies). `advance_ground_strikes` counts them down from the encounter clock; when one lands,
-`targets_on_tiles` finds everything alive whose footprint overlaps its tiles, those a monster's
-attack may hurt (only the player so far) are kept, and each takes the rolled damage times the
-prayer reduction's multiplier into its damage buffer. A strike with no delay lands the tick it
-resolves. Strikes are cleared when the player respawns.
+When the telegraph ends, `fire_special` announces the attack like any other (animation, sound),
+builds the `SpecialContext` and runs the resolver. `PositionResolver::resolve` picks the tiles, and
+if the player is alive and on one it rolls the damage, applies the prayer reduction's multiplier
+and returns it as a `HurtPlayer` effect, which the world puts in the player's damage buffer. It is
+part of its attacker's own turn, so an attacker that dies mid-telegraph takes it with it. A monster's
+attack only ever hurts the player, so a resolver is only told about the player.
 
-Persistent hazards (Hunllef's tornadoes, Purutu's orbs, fire walls) are a different thing and are
-not this: they live in the world as entities. See issue #72.
-
----|---|
-| `Offsets(Vec<(dx, dz)>)` | each offset from the anchor: squares (`GroundTarget::square(anchor, 1)` is the 3x3), crosses, lines, claw patterns; need not be contiguous |
-| `Scatter { radius, count }` | `count` distinct random tiles within `radius` of the anchor |
-
-The tiles are fixed when the attack resolves, from the attacker's and target's tiles as they were at
-selection. That tile is all that is taken from the target: the strike carries no target and no
-target stats.
-
-When the attack resolves, `fire_at_ground` announces it like any attack (animation, sound) and
-queues a `PendingGroundStrike` on the **world** (it has no defender, and must still land if its
-attacker dies). `advance_ground_strikes` counts them down from the encounter clock; when one lands,
-`targets_on_tiles` finds everything alive whose footprint overlaps its tiles, those a monster's
-attack may hurt (only the player so far) are kept, and `roll_on_player` rolls the attack against
-each. A strike with no delay lands the tick it resolves. Strikes are cleared when the player
-respawns.
-
-Persistent hazards (Hunllef's tornadoes, Purutu's orbs, fire walls) are a different thing and are
-not this: they live in the world as entities. See issue #72.
-
----|---|
-| `delay_ticks` | ticks between being conjured and landing |
-| `area` | tile offsets it covers around where it stands (`square_area(1)` is the 3x3) |
-| `effect` | an ordinary `AttackDefinition` resolved against each valid target found |
-| `movement` | `Stationary`, or `HomeOnTile` (one greedy step per tick, ignoring collision) |
-
-It is conjured on `NpcCombatState::hazard_origin` for its attack: the target's tile at selection
-when the attack's reaction is anchored to the target, otherwise the conjurer's own tile. That tile
-is all that is taken from the target; the hazard carries no target and no target stats. When it
-lands, the world asks `targets_on_tiles` who is on its covered tiles, keeps those a monster's
-hazard may hurt (only the player so far), and resolves the effect against each with `deliver_attack`.
-
-Repeating, or reacting to a hit (Purutu's pulsing, life-extending orb), is deliberately not part of
-a hazard: it would be a behavior of that one hazard. Hazards are cleared when the player respawns.
-No bundled content conjures one yet.
-
----|---|---|
-| `HomeOnTarget` | one greedy step toward the player each tick, ignoring collision (it floats) | Purutu's Slicer orb |
-| `Stationary` | stays where it was conjured | fire walls, acid pools, gas vents |
-
-Hazards are cleared when the player respawns. No bundled content conjures one yet.
+Anything that outlives its telegraph (Hunllef's tornadoes, Purutu's orbs, fire walls) is a
+different thing and is not this: it lives in the world as an entity. See issue #72.
 
 ---
 

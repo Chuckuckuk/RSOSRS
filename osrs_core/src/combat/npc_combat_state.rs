@@ -1,10 +1,9 @@
 use std::rc::Rc;
 
-use super::attack_definition::{AttackDefinition, AttackKind};
+use super::attack_definition::AttackDefinition;
 use super::attack_pattern::AttackPattern;
 use super::attack_selection_context::AttackSelectionContext;
 use super::attack_style::AttackStyle;
-use super::reaction_requirement::{HazardAnchor, ReactionKind};
 use crate::rng::Rng;
 use crate::tiles::TileCoord;
 
@@ -19,13 +18,16 @@ pub enum CombatState {
 /// stays a pure function, reusable across NPCs, while this (one instance per NPC) is where
 /// "which attack number is this for ME" actually lives.
 ///
-/// Deliberately ignorant of `AttackDefinition::impact_delay_ticks` ("Doom-style" attacks):
-/// `advance` always resolves the instant a telegraph ends (an attack without one resolves the tick
-/// it is chosen), full stop. Whether the caller then
-/// applies the roll immediately or hands it off to the DEFENDER's `PendingAttackQueue` for a
-/// deferred roll is the caller's decision, read off `current_attack().impact_delay_ticks` - that
-/// delay belongs to the ATTACK, which outlives this NPC's own turn to act, not to this state
-/// machine.
+/// Deliberately ignorant of an `OnContact` ("Doom-style") attack's impact delay: `advance` always
+/// resolves the instant a telegraph ends (an attack without one resolves the tick it is chosen),
+/// full stop. Whether the caller then applies the roll immediately or hands it off to the
+/// DEFENDER's `PendingAttackQueue` for a deferred roll is the caller's decision, read off
+/// `current_attack().impact_delay_ticks()` - that delay belongs to the ATTACK, which outlives this
+/// NPC's own turn to act, not to this state machine.
+///
+/// The attacker's attack rate is a stat of this state (`with_attack_speed`): the ticks between one
+/// attack resolving and the next. An attack may carry its own `attack_speed` that replaces it for
+/// as long as that attack is the one resolving.
 ///
 /// Once telegraphing starts it commits unconditionally: `advance` ignores `target_engaged` until
 /// it resolves, and the attack selected at telegraph-start is final.
@@ -33,6 +35,8 @@ pub struct NpcCombatState {
     pattern: Rc<dyn AttackPattern>,
     ticks_remaining: i32,
     cooldown_remaining: i32,
+    /// The attacker's own attack speed; 0 means "back-to-back" (no gap).
+    attack_speed: i32,
     selection_counter: i32,
     state: CombatState,
     current_attack: Option<Rc<AttackDefinition>>,
@@ -46,12 +50,30 @@ impl NpcCombatState {
             pattern,
             ticks_remaining: 0,
             cooldown_remaining: 0,
+            attack_speed: 0,
             selection_counter: 0,
             state: CombatState::Idle,
             current_attack: None,
             self_tile_at_selection: TileCoord::default(),
             target_tile_at_selection: TileCoord::default(),
         }
+    }
+
+    /// Sets the attacker's attack speed, in ticks between consecutive attacks resolving (OSRS
+    /// attack speed). An attack without a telegraph resolves on the tick it is chosen; one with a
+    /// telegraph spends its wind-up first, so the fastest speed a telegraphed attack can reach is
+    /// its `telegraph_ticks + 1`.
+    pub fn with_attack_speed(mut self, speed_ticks: i32) -> Self {
+        assert!(speed_ticks >= 0, "attack speed must not be negative");
+        self.attack_speed = speed_ticks;
+        self
+    }
+
+    /// The idle ticks that follow `attack` resolving: its own attack speed if it has one, else
+    /// the attacker's, less the ticks the attack itself already spent winding up.
+    fn cooldown_after(&self, attack: &AttackDefinition) -> i32 {
+        let speed = attack.attack_speed.unwrap_or(self.attack_speed);
+        (speed - 1 - attack.telegraph_ticks().max(0)).max(0)
     }
 
     pub fn state(&self) -> CombatState {
@@ -74,25 +96,6 @@ impl NpcCombatState {
     /// Same snapshot rule as `self_tile_at_selection`, for the target's tile.
     pub fn target_tile_at_selection(&self) -> TileCoord {
         self.target_tile_at_selection
-    }
-
-    /// The tile `attack`'s hazard is centred on: the one a ground attack's target or a targeted
-    /// attack's reaction is anchored to, captured at telegraph start - never a live tile, or
-    /// moving away during the telegraph would never actually dodge a target-anchored hazard.
-    /// Anything not anchored to the target (including attacks with no positional reaction at all)
-    /// uses the attacker's tile at selection.
-    pub fn hazard_origin(&self, attack: &AttackDefinition) -> TileCoord {
-        let anchor = match &attack.kind {
-            AttackKind::Ground(ground) => ground.target.anchor,
-            AttackKind::Targeted(targeted) => match targeted.reaction.kind {
-                ReactionKind::MoveOffTile(anchor) => anchor,
-                _ => HazardAnchor::SelfTile,
-            },
-        };
-        match anchor {
-            HazardAnchor::Target => self.target_tile_at_selection,
-            HazardAnchor::SelfTile => self.self_tile_at_selection,
-        }
     }
 
     /// Wholesale-replaces which pattern future selections draw from, without resetting
@@ -141,13 +144,13 @@ impl NpcCombatState {
             self.self_tile_at_selection = self_tile;
             self.target_tile_at_selection = target_tile;
             // an attack without a telegraph (most melee) resolves on the tick it is chosen
-            if attack.telegraph_ticks <= 0 {
-                self.cooldown_remaining = attack.cooldown_ticks;
+            if attack.telegraph_ticks() <= 0 {
+                self.cooldown_remaining = self.cooldown_after(&attack);
                 self.current_attack = Some(attack);
                 return true;
             }
             self.state = CombatState::Telegraphing;
-            self.ticks_remaining = attack.telegraph_ticks;
+            self.ticks_remaining = attack.telegraph_ticks();
             self.current_attack = Some(attack);
             return false;
         }
@@ -159,7 +162,7 @@ impl NpcCombatState {
         }
 
         self.state = CombatState::Idle;
-        self.cooldown_remaining = self.current_attack.as_ref().map_or(0, |attack| attack.cooldown_ticks);
+        self.cooldown_remaining = self.current_attack.as_ref().map_or(0, |attack| self.cooldown_after(attack));
         true
     }
 }
@@ -168,7 +171,7 @@ impl NpcCombatState {
 mod tests {
     use super::*;
     use crate::combat::test_support::melee_attack;
-    use crate::combat::{FixedRotationPattern, ReactionRequirement};
+    use crate::combat::FixedRotationPattern;
     use crate::rng::DotNetRandom;
 
     fn state_with(attacks: Vec<Rc<AttackDefinition>>) -> NpcCombatState {
@@ -251,22 +254,18 @@ mod tests {
     }
 
     #[test]
-    fn advance_resolves_the_instant_the_telegraph_ends_regardless_of_impact_delay_ticks() {
-        // impact_delay_ticks ("Doom-style") is no longer this type's concern - honoring it is
-        // entirely the caller's job, read off current_attack. This state machine never differs:
-        // Idle -> Telegraphing -> resolve, whether the delay is 0 or 50.
-        let attack = AttackDefinition::targeted("Test Doom-style", 10, 2, AttackStyle::Magic)
-            .with_impact_delay_ticks(5)
-            .shared();
+    fn an_on_contact_attack_resolves_the_tick_it_is_chosen_whatever_its_impact_delay() {
+        // an on-contact ("Doom-style") attack has no telegraph, and its delay is no longer this
+        // type's concern - honoring it is entirely the caller's job, read off current_attack. This
+        // state machine resolves it like any attack with no wind-up, whether the delay is 1 or 50.
+        let attack = AttackDefinition::on_contact("Test Doom-style", Some(10), 5, AttackStyle::Magic).shared();
         let mut state = state_with(vec![attack]);
 
-        assert!(!advance(&mut state, true)); // starts telegraphing
-        assert!(!advance(&mut state, true));
-        assert!(advance(&mut state, true)); // resolves - no travel phase, ever
+        assert!(advance(&mut state, true)); // resolves at once - no travel phase, ever
 
         assert_eq!(state.state(), CombatState::Idle);
         assert_eq!(
-            state.current_attack().unwrap().impact_delay_ticks,
+            state.current_attack().unwrap().impact_delay_ticks(),
             5,
             "The caller still needs to read this off current_attack to know whether to defer the roll."
         );
@@ -297,22 +296,6 @@ mod tests {
     }
 
     #[test]
-    fn hazard_origin_follows_the_reactions_anchor_from_the_telegraph_start_snapshot() {
-        let anchored = |anchor| {
-            melee_attack("A", 1).as_ref().clone().with_reaction(ReactionRequirement::move_off_tile(anchor)).shared()
-        };
-        let (self_tile, target_tile) = (TileCoord::new(1, 1), TileCoord::new(9, 9));
-        let mut state = state_with(vec![melee_attack("A", 1)]);
-        state.advance(true, 1.0, 0, self_tile, target_tile, AttackStyle::Melee, &mut DotNetRandom::new(1));
-        // moving on afterwards must not change what the snapshot says
-        state.advance(true, 1.0, 0, TileCoord::new(5, 5), TileCoord::new(6, 6), AttackStyle::Melee, &mut DotNetRandom::new(1));
-
-        assert_eq!(state.hazard_origin(&anchored(HazardAnchor::Target)), target_tile);
-        assert_eq!(state.hazard_origin(&anchored(HazardAnchor::SelfTile)), self_tile);
-        assert_eq!(state.hazard_origin(&melee_attack("A", 1)), self_tile, "no positional reaction: the attacker's tile");
-    }
-
-    #[test]
     fn attack_speed_spaces_consecutive_resolves_exactly_that_many_ticks_apart() {
         for (telegraph, speed) in [(0, 4), (2, 6), (1, 5), (0, 2)] {
             let attack = melee_attack("A", telegraph).as_ref().clone().with_attack_speed(speed).shared();
@@ -327,6 +310,21 @@ mod tests {
             assert!(!gaps.is_empty());
             assert!(gaps.iter().all(|gap| *gap == speed), "telegraph {telegraph} speed {speed} gaps {gaps:?}");
         }
+    }
+
+    #[test]
+    fn the_attackers_own_attack_speed_spaces_its_attacks_and_an_attack_may_override_it() {
+        let resolves = |attacks: Vec<Rc<AttackDefinition>>, speed: i32| -> Vec<i32> {
+            let mut state = state_with(attacks).with_attack_speed(speed);
+            (0..30).filter(|_| advance(&mut state, true)).collect()
+        };
+        let plain = melee_attack("Plain", 0);
+        let slow = melee_attack("Slow", 0).as_ref().clone().with_attack_speed(6).shared();
+
+        assert_eq!(resolves(vec![plain.clone()], 4), vec![0, 4, 8, 12, 16, 20, 24, 28]);
+        assert_eq!(resolves(vec![slow], 4), vec![0, 6, 12, 18, 24], "the attack's own speed wins");
+        // a rotation: the gap after each attack is that attack's own speed
+        assert_eq!(resolves(vec![plain, melee_attack("Other", 0).as_ref().clone().with_attack_speed(2).shared()], 4), vec![0, 4, 6, 10, 12, 16, 18, 22, 24, 28]);
     }
 
     #[test]

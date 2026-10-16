@@ -22,18 +22,25 @@ pub struct RangeAwarePattern {
     attacks: Vec<(Rc<AttackDefinition>, f32)>,
     mode: RotationMode,
     footprint: i32,
+    /// The attacker's own attack range, which an attack without a range of its own inherits.
+    attack_range: i32,
 }
 
 impl RangeAwarePattern {
     /// Panics if `attacks` is empty (a monster with no attacks should not have a pattern at all).
-    pub fn new(attacks: Vec<(Rc<AttackDefinition>, f32)>, mode: RotationMode, footprint: i32) -> Self {
+    pub fn new(
+        attacks: Vec<(Rc<AttackDefinition>, f32)>,
+        mode: RotationMode,
+        footprint: i32,
+        attack_range: i32,
+    ) -> Self {
         assert!(!attacks.is_empty(), "RangeAwarePattern needs at least one attack.");
-        Self { attacks, mode, footprint }
+        Self { attacks, mode, footprint, attack_range }
     }
 
     fn usable(&self, self_tile: TileCoord, target_tile: TileCoord) -> Vec<usize> {
         (0..self.attacks.len())
-            .filter(|&i| self.attacks[i].0.build_range_check(self_tile, self.footprint).is_satisfied_by(target_tile))
+            .filter(|&i| self.attacks[i].0.is_in_reach(self_tile, self.footprint, self.attack_range, target_tile))
             .collect()
     }
 }
@@ -81,11 +88,11 @@ mod tests {
     use crate::rng::DotNetRandom;
 
     fn melee() -> Rc<AttackDefinition> {
-        AttackDefinition::targeted("Melee", 0, 1, AttackStyle::Melee).shared()
+        AttackDefinition::telegraphed("Melee", None, 1, AttackStyle::Melee).shared()
     }
 
     fn magic() -> Rc<AttackDefinition> {
-        AttackDefinition::targeted("Magic", 10, 1, AttackStyle::Magic).shared()
+        AttackDefinition::telegraphed("Magic", Some(10), 1, AttackStyle::Magic).shared()
     }
 
     fn context(counter: i32, target: TileCoord) -> AttackSelectionContext {
@@ -94,7 +101,7 @@ mod tests {
 
     #[test]
     fn melee_is_only_usable_when_adjacent_but_magic_reaches_further() {
-        let pattern = RangeAwarePattern::new(vec![(melee(), 1.0), (magic(), 1.0)], RotationMode::Fixed, 1);
+        let pattern = RangeAwarePattern::new(vec![(melee(), 1.0), (magic(), 1.0)], RotationMode::Fixed, 1, 1);
 
         assert_eq!(pattern.usable(TileCoord::new(0, 0), TileCoord::new(1, 0)), vec![0, 1]);
         assert_eq!(pattern.usable(TileCoord::new(0, 0), TileCoord::new(6, 0)), vec![1]);
@@ -102,8 +109,17 @@ mod tests {
     }
 
     #[test]
+    fn a_min_range_hides_an_attack_up_close() {
+        let lob = AttackDefinition::telegraphed("Lob", Some(10), 1, AttackStyle::Ranged).with_min_range(4).shared();
+        let pattern = RangeAwarePattern::new(vec![(melee(), 1.0), (lob, 1.0)], RotationMode::Fixed, 1, 1);
+
+        assert_eq!(pattern.usable(TileCoord::new(0, 0), TileCoord::new(1, 0)), vec![0]);
+        assert_eq!(pattern.usable(TileCoord::new(0, 0), TileCoord::new(5, 0)), vec![1]);
+    }
+
+    #[test]
     fn fixed_mode_cycles_only_the_usable_attacks() {
-        let pattern = RangeAwarePattern::new(vec![(melee(), 1.0), (magic(), 1.0)], RotationMode::Fixed, 1);
+        let pattern = RangeAwarePattern::new(vec![(melee(), 1.0), (magic(), 1.0)], RotationMode::Fixed, 1, 1);
         let mut rng = DotNetRandom::new(1);
         let far = TileCoord::new(6, 0);
 
@@ -118,7 +134,7 @@ mod tests {
 
     #[test]
     fn weighted_mode_honours_zero_weights() {
-        let pattern = RangeAwarePattern::new(vec![(melee(), 0.0), (magic(), 1.0)], RotationMode::Weighted, 1);
+        let pattern = RangeAwarePattern::new(vec![(melee(), 0.0), (magic(), 1.0)], RotationMode::Weighted, 1, 1);
         let mut rng = DotNetRandom::new(5);
 
         for _ in 0..50 {
