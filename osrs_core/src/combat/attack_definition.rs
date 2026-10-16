@@ -1,12 +1,10 @@
 use std::rc::Rc;
 
 use super::attack_style::AttackStyle;
-use super::ground_attack::{GroundAttack, GroundDamage, PrayerReduction};
-use super::ground_target::GroundTarget;
+use super::position_resolver::PositionResolver;
 use super::max_hit_source::MaxHitSource;
 use super::projectile_speed::ProjectileSpeed;
-use super::protection_prayer::ProtectionPrayer;
-use super::special_attack::SpecialAttack;
+use super::special_attack::{SpecialAttack, SpecialResolver};
 use super::mitigation::Mitigation;
 use super::status_effect::StatusEffectDefinition;
 use super::targeted_attack::TargetedAttack;
@@ -132,16 +130,14 @@ impl AttackDefinition {
         )
     }
 
-    /// An attack aimed at the ground: when its `telegraph_ticks` end it deals `damage` to whoever
-    /// stands on the tiles `target` picks, and is gone.
-    pub fn ground(
+    /// A special: after `telegraph_ticks` of wind-up its `resolver` decides who is hurt and how.
+    pub fn special(
         name: impl Into<String>,
         range: Option<i32>,
         telegraph_ticks: i32,
-        target: GroundTarget,
-        damage: GroundDamage,
+        resolver: impl SpecialResolver + 'static,
     ) -> Self {
-        Self::with_kind(name.into(), range, AttackKind::Special(SpecialAttack::Ground(GroundAttack::new(telegraph_ticks, target, damage))))
+        Self::with_kind(name.into(), range, AttackKind::Special(SpecialAttack::new(telegraph_ticks, resolver)))
     }
 
     fn with_kind(name: String, range: Option<i32>, kind: AttackKind) -> Self {
@@ -183,11 +179,17 @@ impl AttackDefinition {
         }
     }
 
-    pub fn ground_part(&self) -> Option<&GroundAttack> {
+    /// The special this attack is, if it is one.
+    pub fn special_part(&self) -> Option<&SpecialAttack> {
         match &self.kind {
-            AttackKind::Special(SpecialAttack::Ground(ground)) => Some(ground),
+            AttackKind::Special(special) => Some(special),
             _ => None,
         }
+    }
+
+    /// The position resolver of this attack, if it is a special decided by position.
+    pub fn position_resolver(&self) -> Option<&PositionResolver> {
+        self.special_part().and_then(|special| special.resolver.as_position())
     }
 
     /// The targeted part of an attack that is known to be one: a player's swing, or one waiting in
@@ -212,7 +214,7 @@ impl AttackDefinition {
     pub fn telegraph_ticks(&self) -> i32 {
         match &self.kind {
             AttackKind::Telegraphed(attack) => attack.telegraph_ticks,
-            AttackKind::Special(special) => special.telegraph_ticks(),
+            AttackKind::Special(special) => special.telegraph_ticks,
             AttackKind::Instant(_) | AttackKind::OnContact(_) => 0,
         }
     }
@@ -336,20 +338,6 @@ impl AttackDefinition {
         self
     }
 
-    // ---- ground-only builders ----
-
-    /// The one protection prayer that cuts this ground attack's damage without negating it:
-    /// `penetration` of the damage still gets through when it is active.
-    pub fn with_prayer_reduction(mut self, prayer: ProtectionPrayer, penetration: f32) -> Self {
-        assert!(prayer != ProtectionPrayer::None, "a prayer reduction needs a prayer");
-        assert!((0.0..=1.0).contains(&penetration), "penetration must be within [0, 1]");
-        match &mut self.kind {
-            AttackKind::Special(SpecialAttack::Ground(ground)) => ground.prayer_reduction = Some(PrayerReduction { prayer, penetration }),
-            _ => panic!("`with_prayer_reduction` only applies to a ground attack, and '{}' is not one", self.name),
-        }
-        self
-    }
-
     /// Restricts this attack to targets at least `min_range` tiles away (chebyshev, measured to
     /// the nearest tile of the attacker's footprint). Combined with `range` this is a band.
     pub fn with_min_range(mut self, min_range: i32) -> Self {
@@ -401,10 +389,14 @@ impl AttackDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::HazardAnchor;
+    use crate::combat::{GroundDamage, GroundTarget, HazardAnchor, ProtectionPrayer};
+
+    fn boulder_resolver() -> PositionResolver {
+        PositionResolver::new(GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(30))
+    }
 
     fn boulder() -> AttackDefinition {
-        AttackDefinition::ground("Boulder", Some(10), 2, GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(30))
+        AttackDefinition::special("Boulder", Some(10), 2, boulder_resolver())
     }
 
     #[test]
@@ -432,7 +424,7 @@ mod tests {
         let attack = boulder();
 
         assert!(attack.targeted_part().is_none());
-        assert_eq!(attack.ground_part().expect("ground").damage, GroundDamage::Fixed(30));
+        assert_eq!(attack.position_resolver().expect("position").damage, GroundDamage::Fixed(30));
         assert_eq!(attack.telegraph_ticks(), 2);
         assert_eq!(attack.impact_delay_ticks(), 0);
     }
@@ -456,16 +448,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "is not one")]
-    fn a_prayer_reduction_on_a_targeted_attack_panics() {
-        AttackDefinition::instant("Test", None, AttackStyle::Melee).with_prayer_reduction(ProtectionPrayer::Melee, 0.5);
-    }
+    fn a_position_resolver_takes_a_prayer_reduction() {
+        let resolver = boulder_resolver().with_prayer_reduction(ProtectionPrayer::Melee, 0.5);
 
-    #[test]
-    fn a_ground_attack_takes_a_prayer_reduction() {
-        let attack = boulder().with_prayer_reduction(ProtectionPrayer::Melee, 0.5);
-
-        let reduction = attack.ground_part().unwrap().prayer_reduction.expect("reduction");
+        let reduction = resolver.prayer_reduction.expect("reduction");
         assert_eq!(reduction.prayer, ProtectionPrayer::Melee);
         assert_eq!(reduction.penetration, 0.5);
     }
@@ -522,7 +508,7 @@ mod tests {
 
     #[test]
     fn a_ground_attack_is_measured_by_range_never_by_adjacency() {
-        let attack = AttackDefinition::ground("Slam", None, 1, GroundTarget::square(HazardAnchor::SelfTile, 1), GroundDamage::Fixed(5));
+        let attack = AttackDefinition::special("Slam", None, 1, PositionResolver::new(GroundTarget::square(HazardAnchor::SelfTile, 1), GroundDamage::Fixed(5)));
 
         let check = attack.build_range_check(TileCoord::new(5, 5), 1, 1);
 
@@ -566,7 +552,7 @@ mod tests {
     #[test]
     fn a_special_attack_can_require_a_range_check() {
         let from = TileCoord::new(0, 0);
-        let ground = AttackDefinition::ground("Rockfall", Some(6), 2, GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(10))
+        let ground = AttackDefinition::special("Rockfall", Some(6), 2, PositionResolver::new(GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(10)))
             .with_min_range(2);
 
         for attack in [ground] {

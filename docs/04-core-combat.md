@@ -31,7 +31,8 @@ gear when it swings (chapter 6), then joins the same roll and buffer path.
 
 Files: [`attack_definition.rs`](../osrs_core/src/combat/attack_definition.rs),
 [`targeted_attack.rs`](../osrs_core/src/combat/targeted_attack.rs),
-[`ground_attack.rs`](../osrs_core/src/combat/ground_attack.rs),
+[`position_resolver.rs`](../osrs_core/src/combat/position_resolver.rs),
+[`special_attack.rs`](../osrs_core/src/combat/special_attack.rs),
 [`projectile_speed.rs`](../osrs_core/src/combat/projectile_speed.rs).
 
 An attack is the fields every attack has, plus a `kind` that says *when* it resolves and holds only
@@ -60,9 +61,12 @@ protection prayer. Anything that does not fit those, or that must check anything
 | `OnContact` | the roll waits until it lands, `impact_delay_ticks` after release (Doom-style) | `impact_delay_ticks` |
 | `Special` | resolves itself, by the `SpecialAttack` it carries (below) | its own |
 
-A `SpecialAttack` is the extension point for everything that is not a plain roll against one
-defender. The only one so far is `Ground`: on the tiles it covers, when its telegraph ends (4.10),
-with `telegraph_ticks`, tiles and damage.
+A `SpecialAttack` is a `telegraph_ticks` wind-up plus a **`SpecialResolver`**: when the wind-up ends
+the resolver is given a `SpecialContext` (where the attacker and player stood at selection, where the
+player is now, their prayer) and the encounter's RNG, and returns `SpecialEffect`s (so far only
+`HurtPlayer { damage }`) for the world to apply. The resolver is a trait, like `AttackPattern`: a
+boss can register a special of its own, and the logic bosses share is one reusable implementation.
+The built-in one is `PositionResolver` (who is standing on which tiles, 4.10).
 
 The three standard kinds wrap a **`TargetedAttack`**, which is what is rolled against a defender:
 
@@ -361,7 +365,7 @@ Two things avoid damage, one per kind of attack:
 * **A targeted attack checks the protection prayer for its style.** Melee, ranged and magic attacks
   are all answered by the matching prayer without saying so (`ProtectionPrayer::against(style)`);
   nothing has to be declared.
-* **An area attack is avoided by where the defender stands.** A `GroundAttack` has no mitigation: it
+* **An area attack is avoided by where the defender stands.** A position special has no mitigation: it
   resolves against whoever is on its tiles when it lands (4.10).
 * **Anything else is a special.** A standard attack checks only the overhead protection prayer
   (`Mitigation::Unmitigable` for a typeless one that nothing changes). An attack that must check
@@ -458,20 +462,19 @@ that reject non-positive numbers. Kinds:
 
 ---
 
-## 4.10 Ground-targeted attacks
+## 4.10 Position specials
 
 Files: [`ground_attack.rs`](../osrs_core/src/combat/ground_attack.rs),
 [`ground_target.rs`](../osrs_core/src/combat/ground_target.rs).
 
-A `Special` attack of kind `Ground` is aimed at the ground, not at the player: it covers a set of tiles and,
-when its own telegraph ends, deals its damage to **whoever is standing on them then**, and is
+A special whose resolver is a `PositionResolver` is aimed at the ground, not at the player: it
+covers a set of tiles and, when its own telegraph ends, deals its damage to **whoever is standing on them then**, and is
 gone. Falling rocks, grasping claws and rock falls are all this. It telegraphs, is chosen by
 patterns, and has graphics and sounds like any other attack, but it never rolls accuracy and has
 no style or damage type.
 
-| `GroundAttack` field | Meaning |
+| `PositionResolver` field | Meaning |
 |---|---|
-| `telegraph_ticks` | ticks the tiles stay marked; it resolves, and is gone, when they end |
 | `target: GroundTarget` | an `anchor` (`SelfTile` or `Target`, as for a reaction) plus a `TileSelection` |
 | `damage: GroundDamage` | `Fixed(n)`, or `Uniform { max }` (0..=max, one draw) per target |
 | `prayer_reduction` | optionally one protection prayer that cuts the damage but never negates it (Duke Sucellus' aftershock): the correct prayer lets `penetration` of it through |
@@ -484,11 +487,12 @@ no style or damage type.
 The tiles come from the attacker's and target's tiles as they were at selection. That tile is all
 that is taken from the target: the attack carries no target and no target stats.
 
-When the telegraph ends, `fire_at_ground` announces the attack like any other (animation, sound)
-and lands it at once: `targets_on_tiles` finds everything alive whose footprint overlaps the tiles,
-those a monster's attack may hurt (only the player so far) are kept, and each takes the rolled
-damage times the prayer reduction's multiplier into its damage buffer. It is part of its
-attacker's own turn, so an attacker that dies mid-telegraph takes it with it.
+When the telegraph ends, `fire_special` announces the attack like any other (animation, sound),
+builds the `SpecialContext` and runs the resolver. `PositionResolver::resolve` picks the tiles, and
+if the player is alive and on one it rolls the damage, applies the prayer reduction's multiplier
+and returns it as a `HurtPlayer` effect, which the world puts in the player's damage buffer. It is
+part of its attacker's own turn, so an attacker that dies mid-telegraph takes it with it. A monster's
+attack only ever hurts the player, so a resolver is only told about the player.
 
 Anything that outlives its telegraph (Hunllef's tornadoes, Purutu's orbs, fire walls) is a
 different thing and is not this: it lives in the world as an entity. See issue #72.

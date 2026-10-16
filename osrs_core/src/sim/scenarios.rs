@@ -149,7 +149,7 @@ mod tests {
     use super::*;
     use crate::actors::EntityId;
     use crate::combat::{
-        AttackDefinition, AttackPattern, AttackStyle, FixedRotationPattern, GroundDamage, GroundTarget,
+        AttackDefinition, AttackPattern, AttackStyle, FixedRotationPattern, GroundDamage, GroundTarget, PositionResolver,
         HazardAnchor, ProtectionPrayer,
     };
     use crate::encounters::{Phase, PhaseTrigger, TriggerAction, TriggerBinding};
@@ -375,7 +375,7 @@ mod tests {
     /// A boss at (0, 8), fighting a player at (0, 0), whose only attack is a ground-targeted rock
     /// fall that lands when its 3-tick telegraph ends. The boss has 10 hitpoints so a test can kill it.
     fn rock_fall_world(target: GroundTarget) -> (World, EntityId) {
-        rock_world_with(AttackDefinition::ground("Rock", Some(15), 3, target, GroundDamage::Fixed(30)))
+        rock_world_with(AttackDefinition::special("Rock", Some(15), 3, PositionResolver::new(target, GroundDamage::Fixed(30))))
     }
 
     fn rock_world_with(rock: AttackDefinition) -> (World, EntityId) {
@@ -433,7 +433,7 @@ mod tests {
 
         run_ticks(&mut world, 6);
 
-        assert!(world.log().iter().any(|l| l.starts_with("Boss lands Rock over 1 tile")), "{:?}", world.log());
+        assert!(world.log().iter().any(|l| l.starts_with("Boss lands Rock")), "{:?}", world.log());
         assert_eq!(rock_hits(&world), 0, "{:?}", world.log());
     }
 
@@ -452,8 +452,12 @@ mod tests {
     fn the_one_reducing_prayer_cuts_a_ground_attack_without_negating_it() {
         let target = || GroundTarget::square(HazardAnchor::Target, 0);
         let reducible = || {
-            AttackDefinition::ground("Rock", Some(15), 3, target(), GroundDamage::Fixed(30))
-                .with_prayer_reduction(ProtectionPrayer::Melee, 0.5)
+            AttackDefinition::special(
+                "Rock",
+                Some(15),
+                3,
+                PositionResolver::new(target(), GroundDamage::Fixed(30)).with_prayer_reduction(ProtectionPrayer::Melee, 0.5),
+            )
         };
         let lost = |prayer: Option<ProtectionPrayer>| {
             let (mut world, _) = rock_world_with(reducible());

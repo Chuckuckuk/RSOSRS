@@ -12,7 +12,7 @@ use crate::actors::{ActorKind, EntityId, MovementPolicy, StationaryMovementPolic
 use crate::collision::{CollisionFlag, CollisionMap};
 use crate::data::{EquipSlot, Registry};
 use crate::combat::{
-    AttackDefinition, AttackStyle, CombatState, CombatStats, NpcCombatState, get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor,
+    AttackDefinition, AttackStyle, CombatState, SpecialContext, SpecialEffect, CombatStats, NpcCombatState, get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor,
 };
 use crate::encounters::{EncounterContext, Phase, TriggerAction, TriggerBinding};
 use crate::model::{ConditionContext, Skill};
@@ -1012,30 +1012,36 @@ impl World {
         self.deliver_attack(Some(attacker), attacker_name, attacker_stats, attack, flight);
     }
 
-    /// Resolves a ground-targeted attack whose telegraph has just ended: the attacker is seen and
-    /// heard as for any attack, and the attack lands on whoever stands on `tiles` right now - never
-    /// on whoever it was aimed at, so a player who has stepped off is untouched - and is gone.
-    fn fire_at_ground(
+    /// Resolves a special whose wind-up has just ended: the attacker is seen and heard as for any
+    /// attack, then the special's resolver decides what happens, from where both sides stood when it
+    /// was selected and where the player stands now, and the effects it returns are applied.
+    fn fire_special(
         &mut self,
         attacker: EntityId,
         attacker_name: &str,
         attack: &Rc<AttackDefinition>,
-        tiles: &[TileCoord],
+        self_tile: TileCoord,
+        target_tile: TileCoord,
     ) {
-        let ground = attack.ground_part().expect("only a ground attack is fired at the ground");
+        let special = attack.special_part().expect("only a special is fired as one");
         self.announce_attack(attacker, attack);
         self.play_sound(attack.hit_sound, Combatant::Npc(attacker), 0);
-        self.log_line(format!("{attacker_name} lands {} over {} tile(s).", attack.name, tiles.len()));
-        for target in self.targets_on_tiles(tiles) {
-            // a monster's attack only ever hurts the player (and so never its own helpers)
-            if target == Combatant::Player {
-                // no accuracy roll: standing there is what hurts, less what the one prayer cuts
-                self.show_hit_graphics(attack, 0);
-                let rolled = ground.damage.roll(self.encounter.rng());
-                let multiplier = ground.damage_multiplier(Some(&self.player.reaction_state));
-                let damage = ((rolled as f32 * multiplier) as f64).round() as i32;
-                self.player.damage_buffer.enqueue(damage, 0, attack.on_hit_status_effect);
-                self.log_line(format!("{attacker_name} uses {} on the player for {damage}.", attack.name));
+        self.log_line(format!("{attacker_name} lands {}.", attack.name));
+        let context = SpecialContext {
+            self_tile,
+            target_tile,
+            player_tile: self.player.tile(),
+            player_alive: !self.player.is_dead(),
+            player_reaction: &self.player.reaction_state,
+        };
+        let effects = special.resolver.resolve(&context, self.encounter.rng());
+        for effect in effects {
+            match effect {
+                SpecialEffect::HurtPlayer { damage } => {
+                    self.show_hit_graphics(attack, 0);
+                    self.player.damage_buffer.enqueue(damage, 0, attack.on_hit_status_effect);
+                    self.log_line(format!("{attacker_name} uses {} on the player for {damage}.", attack.name));
+                }
             }
         }
     }
@@ -1051,28 +1057,6 @@ impl World {
             });
             self.play_sound(attack.sound, Combatant::Npc(attacker), 0);
         }
-    }
-
-    /// Everything alive whose footprint overlaps any of `tiles`: the potential targets of an area
-    /// attack, before any rule about who it may hurt.
-    fn targets_on_tiles(&self, tiles: &[TileCoord]) -> Vec<Combatant> {
-        let mut found = Vec::new();
-        if !self.player.is_dead() && tiles.contains(&self.player.tile()) {
-            found.push(Combatant::Player);
-        }
-        for entity in self.entities() {
-            if entity.is_dead() {
-                continue;
-            }
-            let (origin, size) = (entity.tile(), entity.mover.actor.footprint_size());
-            let covered = tiles.iter().any(|tile| {
-                tile.plane == origin.plane && (origin.x..origin.x + size).contains(&tile.x) && (origin.z..origin.z + size).contains(&tile.z)
-            });
-            if covered {
-                found.push(Combatant::Npc(entity.id));
-            }
-        }
-        found
     }
 
     /// The graphics a hit puts on the player: one as the attack is released, one as it lands
@@ -1343,14 +1327,10 @@ impl World {
 
         let attack = Rc::clone(combat_state.current_attack().expect("an attack resolved, so one was selected"));
 
-        if let Some(ground) = attack.ground_part() {
-            // aimed at tiles fixed now, from where both sides stood when the attack was selected
-            let tiles = ground.target.tiles(
-                combat_state.self_tile_at_selection(),
-                combat_state.target_tile_at_selection(),
-                self.encounter.rng(),
-            );
-            self.fire_at_ground(id, &entity.name, &attack, &tiles);
+        if attack.special_part().is_some() {
+            // from where both sides stood when the attack was selected
+            let (self_tile, target_tile) = (combat_state.self_tile_at_selection(), combat_state.target_tile_at_selection());
+            self.fire_special(id, &entity.name, &attack, self_tile, target_tile);
             return;
         }
 
