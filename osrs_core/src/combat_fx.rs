@@ -173,7 +173,12 @@ impl Plugin for CombatFxPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, load_splat_images).add_systems(
             Update,
-            apply_events.after(super::poll_server).before(super::sync_player).before(super::npcs::sync_npcs),
+            apply_events
+                .after(super::poll_server)
+                .before(super::sync_player)
+                .before(super::npcs::sync_npcs)
+                // the ground anchors it spawns for tile effects must exist when they are played
+                .before(super::projectiles::DrawFx),
         )
         .add_systems(Update, (place_splats, place_bars).after(super::map_stream::stream_map));
     }
@@ -184,16 +189,23 @@ pub fn heading_between(from: Vec3, to: Vec3) -> f32 {
     (to.x - from.x).atan2(to.z - from.z)
 }
 
+/// Where the events' effects are queued to be drawn and heard, and the ground they land on.
+#[derive(bevy::ecs::system::SystemParam)]
+struct FxQueues<'w> {
+    projectiles: ResMut<'w, super::projectiles::ProjectileQueue>,
+    spots: ResMut<'w, super::projectiles::SpotQueue>,
+    sounds: ResMut<'w, super::sound_fx::SoundQueue>,
+    arrivals: Res<'w, super::projectiles::Arrivals>,
+    ground: Res<'w, osrs_render::streaming::StreamedWorld>,
+}
+
 /// Turns the server's events into fighter state, hit splats and sounds.
 #[allow(clippy::too_many_arguments)]
 fn apply_events(
     mut commands: Commands,
     time: Res<Time>,
     mut splat_images: ResMut<SplatImages>,
-    mut projectiles: ResMut<super::projectiles::ProjectileQueue>,
-    mut spots: ResMut<super::projectiles::SpotQueue>,
-    mut sounds: ResMut<super::sound_fx::SoundQueue>,
-    arrivals: Res<super::projectiles::Arrivals>,
+    mut fx: FxQueues,
     mut held: Local<Vec<(f32, WorldEvent)>>,
     mut images: ResMut<Assets<Image>>,
     mut server: NonSendMut<ServerLink>,
@@ -251,7 +263,7 @@ fn apply_events(
         };
         held_victim = None;
         if let Some(entity) = victim.and_then(entity_of) {
-            let due = arrivals.0.get(&entity).copied().unwrap_or(0.0);
+            let due = fx.arrivals.0.get(&entity).copied().unwrap_or(0.0);
             // (held events of one target all share its arrival time, so they keep their order)
             if due > now {
                 held.push((due, event));
@@ -288,7 +300,7 @@ fn apply_events(
                 if let (Some(a), Some(t)) = (entity_of(from), entity_of(to)) {
                     // `projectiles` times the release from the draw graphic (or, without one, from
                     // the attack animation) and has the arrow arrive as the hit lands
-                    projectiles.0.push(super::projectiles::Shot {
+                    fx.projectiles.0.push(super::projectiles::Shot {
                         from: a,
                         to: t,
                         graphic,
@@ -300,6 +312,33 @@ fn apply_events(
                         swing: if released { 0.0 } else { length_of(a, clips_of(from).0) },
                         hit_in: ticks as f32 * 0.6,
                     });
+                }
+            }
+            WorldEvent::TileGraphic { tile, graphic, delay_ticks } => {
+                let at = now + delay_ticks as f32 * TICK_SECONDS;
+                if let Some(anchor) = tile_anchor(&mut commands, &fx.ground, tile, at + TILE_EFFECT_SECONDS) {
+                    fx.spots.0.push(super::projectiles::Spot { on: anchor, graphic, at });
+                }
+            }
+            WorldEvent::TileProjectile { from, tile, graphic, ticks, released } => {
+                let Some(a) = entity_of(from) else { continue };
+                let hit_in = ticks as f32 * TICK_SECONDS;
+                if let Some(anchor) = tile_anchor(&mut commands, &fx.ground, tile, now + hit_in + TILE_EFFECT_SECONDS) {
+                    fx.projectiles.0.push(super::projectiles::Shot {
+                        from: a,
+                        to: anchor,
+                        graphic,
+                        draw: None,
+                        from_mouth: mouths.get(a).is_ok(),
+                        swing: if released { 0.0 } else { length_of(a, clips_of(from).0) },
+                        hit_in,
+                    });
+                }
+            }
+            WorldEvent::TileSound { sound, tile, delay_ticks } => {
+                let at = now + delay_ticks as f32 * TICK_SECONDS;
+                if let Some(anchor) = tile_anchor(&mut commands, &fx.ground, tile, at + TILE_EFFECT_SECONDS) {
+                    fx.sounds.0.push(super::sound_fx::PendingSound { sound, from: anchor, at });
                 }
             }
             WorldEvent::Hit { target, damage } => {
@@ -318,7 +357,7 @@ fn apply_events(
             }
             WorldEvent::Graphic { on, graphic, delay_ticks } => {
                 if let Some(e) = entity_of(on) {
-                    spots.0.push(super::projectiles::Spot { on: e, graphic, at: now + delay_ticks as f32 * TICK_SECONDS });
+                    fx.spots.0.push(super::projectiles::Spot { on: e, graphic, at: now + delay_ticks as f32 * TICK_SECONDS });
                 }
             }
             WorldEvent::Heal { healer, target, animation, .. } => {
@@ -345,7 +384,7 @@ fn apply_events(
             }
             WorldEvent::Sound { sound, from, delay_ticks } => {
                 if let Some(e) = entity_of(from) {
-                    sounds.0.push(super::sound_fx::PendingSound { sound, from: e, at: now + delay_ticks as f32 * TICK_SECONDS });
+                    fx.sounds.0.push(super::sound_fx::PendingSound { sound, from: e, at: now + delay_ticks as f32 * TICK_SECONDS });
                 }
             }
             // experience drops and level-up fireworks are not drawn yet
@@ -368,6 +407,25 @@ fn apply_events(
             }
         }
     }
+}
+
+/// How long the marker standing on a tile for an effect there is kept, seconds past the effect.
+const TILE_EFFECT_SECONDS: f32 = 4.0;
+
+/// Something to play an effect on at a tile of the ground: an empty marker at the middle of the
+/// tile, which goes by itself at app time `until`. None if the tile's square is not loaded.
+fn tile_anchor(
+    commands: &mut Commands,
+    ground: &osrs_render::streaming::StreamedWorld,
+    tile: osrs_core::tiles::TileCoord,
+    until: f32,
+) -> Option<Entity> {
+    let position = ground.ground_at(tile.x, tile.z)?;
+    Some(
+        commands
+            .spawn((Transform::from_translation(position), Visibility::default(), super::projectiles::Until(until)))
+            .id(),
+    )
 }
 
 fn spawn_splat(

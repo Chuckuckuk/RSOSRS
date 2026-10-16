@@ -1265,6 +1265,74 @@ mod tests {
     }
 
     #[test]
+    fn a_falling_rider_shows_its_rocks_when_thrown_and_lands_as_the_graphic_ends() {
+        let rocks = PositionResolver::new(GroundTarget::scatter_between(HazardAnchor::Target, 1, 3, 3).including_anchor(), GroundDamage::Fixed(7))
+            .leaving(boulder(), HazardPlacement::AnchorTile)
+            .with_falling_graphic(451);
+        let ranged = AttackDefinition::telegraphed("Ranged", Some(15), 1, AttackStyle::Ranged)
+            .with_rider(crate::combat::SpecialAttack::new(2, rocks));
+        let (mut world, _) = rock_world_with(ranged);
+        let mut thrown = None;
+        for tick in 1..=8 {
+            run_ticks(&mut world, 1);
+            let events = world.take_events();
+            let shown: Vec<TileCoord> = events
+                .iter()
+                .filter_map(|e| match e {
+                    WorldEvent::TileGraphic { tile, graphic: 451, delay_ticks: 0 } => Some(*tile),
+                    _ => None,
+                })
+                .collect();
+            if thrown.is_none() && !shown.is_empty() {
+                thrown = Some(tick);
+                assert_eq!(shown.len(), 3, "three rocks fall");
+                assert!(shown.contains(&tc(0, 0)), "one on the player");
+                assert_eq!(world.hazards().count(), 0);
+            }
+            if thrown.is_some_and(|t| tick == t + 2) {
+                assert_eq!(world.hazards().map(|(_, tile, _)| tile).collect::<Vec<_>>(), vec![tc(0, 0)], "only the player's rock stays");
+                return;
+            }
+        }
+        panic!("the rocks never fell: {:?}", world.log());
+    }
+
+    #[test]
+    fn a_shot_stopped_by_a_boulder_flies_to_it_and_is_heard_there() {
+        use crate::sim::WorldEvent;
+        let blast = PositionResolver::new(GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(100));
+        let hit = crate::combat::TargetedAttack::new(AttackStyle::Magic)
+            .with_always_hits(true)
+            .with_max_hit(crate::combat::MaxHitSource::Fixed(40));
+        let shot = ObstructedShot::new(hit, ProjectileSpeed::tiles_per_tick(3.0), blast).sounding_when_blocked(4031);
+        let magic = AttackDefinition::special("Magic", Some(15), 1, shot).with_graphics(Some(448), None, Some(157));
+        let mut world = tough_arena(tc(0, 0));
+        let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
+        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![magic.shared()]));
+        let boulder_between = rock_leaving(boulder(), HazardPlacement::EveryCoveredTile, GroundTarget::offsets(HazardAnchor::Target, vec![(0, 4)]));
+        let phase = Phase::new("Main", pattern, None).with_periodic(1, boulder_between.shared());
+        world.configure_boss(boss, vec![phase.clone()], phase, vec![]);
+
+        let mut events = Vec::new();
+        for _ in 0..12 {
+            run_ticks(&mut world, 1);
+            events.extend(world.take_events());
+        }
+
+        // eight tiles of shot toward the boulder at (0, 4): the player at the origin is not hit
+        assert!(
+            events.iter().any(|e| matches!(e, WorldEvent::TileProjectile { tile, graphic: 448, .. } if *tile == tc(0, 4))),
+            "the projectile flew to the boulder: {events:?}"
+        );
+        assert!(events.iter().any(|e| matches!(e, WorldEvent::TileSound { sound: 4031, tile, .. } if *tile == tc(0, 4))));
+        assert!(events.iter().any(|e| matches!(e, WorldEvent::TileGraphic { graphic: 157, tile, .. } if *tile == tc(0, 4))));
+        assert!(
+            events.iter().all(|e| !matches!(e, WorldEvent::Projectile { graphic: 448, .. })),
+            "none flew to the player"
+        );
+    }
+
+    #[test]
     fn only_hazards_with_an_object_are_offered_to_clients_to_draw() {
         let drawn = Rc::new(HazardDef::new("Boulder").drawn_as(6950));
         let rock = rock_leaving(drawn, HazardPlacement::AnchorTile, GroundTarget::square(HazardAnchor::Target, 0));

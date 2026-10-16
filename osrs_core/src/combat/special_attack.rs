@@ -54,6 +54,9 @@ pub struct SpecialContext<'a> {
     pub player_reaction: &'a PlayerReactionState,
     /// The tiles that stand in the attacker's line of sight.
     pub sight_blockers: &'a [TileCoord],
+    /// The tiles the special covers, when they were chosen ahead of its landing (so the fall could
+    /// be shown); otherwise it chooses them as it resolves.
+    pub chosen_tiles: Option<&'a [TileCoord]>,
 }
 
 impl SpecialContext<'_> {
@@ -75,8 +78,12 @@ pub enum SpecialEffect {
     BindPlayer { ticks: i32 },
     /// Leaves a hazard on `tile` that takes effect after `armed_in` ticks.
     SpawnHazard { def: Rc<HazardDef>, tile: TileCoord, armed_in: i32 },
-    /// Destroys the attacker's hazard standing on `tile`, if there is one.
-    DestroyHazard { tile: TileCoord },
+    /// Destroys the attacker's hazard standing on `tile`, if there is one, `delay_ticks` from now.
+    DestroyHazard { tile: TileCoord, delay_ticks: i32 },
+    /// The attack's projectile flies to `tile` instead of the player, arriving in `flight_ticks`,
+    /// where its impact graphic plays (and `sound` is heard, if it has one). Any hurt that comes
+    /// with it is the blast there, not a hit from the projectile.
+    Strike { tile: TileCoord, flight_ticks: i32, sound: Option<u32> },
 }
 
 /// Decides what a special does when its wind-up ends. Like `AttackPattern`, an implementation is
@@ -118,6 +125,7 @@ mod tests {
             player_stats: CombatStats::new(50, 50, 50, 50, 50).unwrap(),
             player_reaction: reaction,
             sight_blockers: &[],
+            chosen_tiles: None,
         }
     }
 
@@ -142,5 +150,37 @@ mod tests {
         let mut rng = ScriptedRng::default();
         assert_eq!(on_player.resolve(&context(&reaction), &mut rng), vec![SpecialEffect::HurtPlayer { damage: 30, delay_ticks: 0 }]);
         assert!(on_boss.resolve(&context(&reaction), &mut rng).is_empty());
+    }
+
+    #[test]
+    fn where_it_leaves_a_hazard_only_that_tile_hurts() {
+        use crate::combat::{HazardDef, HazardPlacement};
+        let boulder = Rc::new(HazardDef::new("Boulder"));
+        let rocks = PositionResolver::new(GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(30))
+            .leaving(boulder, HazardPlacement::AnchorTile);
+        let reaction = PlayerReactionState::default();
+        let mut rng = ScriptedRng::default();
+
+        // the rock on the player's tile stays and hurts
+        let effects = rocks.resolve(&context(&reaction), &mut rng);
+        assert!(matches!(effects[0], SpecialEffect::HurtPlayer { damage: 30, .. }), "{effects:?}");
+
+        // the player stepped to a neighbouring tile under the cover: no rock stays there
+        let moved = SpecialContext { player_tile: TileCoord::new(6, 5), ..context(&reaction) };
+        let effects = rocks.resolve(&moved, &mut rng);
+        assert!(effects.iter().all(|e| !matches!(e, SpecialEffect::HurtPlayer { .. })), "{effects:?}");
+        assert!(effects.iter().any(|e| matches!(e, SpecialEffect::SpawnHazard { .. })), "the boulder still lands");
+    }
+
+    #[test]
+    fn tiles_chosen_ahead_of_landing_are_the_ones_it_covers() {
+        let rocks = PositionResolver::new(GroundTarget::square(HazardAnchor::SelfTile, 0), GroundDamage::Fixed(30));
+        let reaction = PlayerReactionState::default();
+        let chosen = [TileCoord::new(5, 5)];
+        let cx = SpecialContext { chosen_tiles: Some(&chosen), ..context(&reaction) };
+
+        let effects = rocks.resolve(&cx, &mut ScriptedRng::default());
+
+        assert_eq!(effects, vec![SpecialEffect::HurtPlayer { damage: 30, delay_ticks: 0 }]);
     }
 }

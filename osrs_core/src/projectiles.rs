@@ -75,7 +75,7 @@ pub struct Arrivals(pub HashMap<Entity, f32>);
 
 /// An effect on a character that goes when its animation has played.
 #[derive(Component)]
-struct Until(f32);
+pub(crate) struct Until(pub(crate) f32);
 
 /// The graphics' definitions and the models built from them so far.
 pub(crate) struct ProjectileArt {
@@ -158,6 +158,10 @@ struct Projectile {
     seconds: f32,
 }
 
+/// The systems that draw queued projectiles and graphics: whatever queues them runs before.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct DrawFx;
+
 pub struct ProjectilePlugin;
 
 impl Plugin for ProjectilePlugin {
@@ -166,7 +170,7 @@ impl Plugin for ProjectilePlugin {
             .init_resource::<SpotQueue>()
             .init_resource::<Arrivals>()
             .add_systems(Startup, open_art)
-            .add_systems(Update, (spawn_projectiles, fly, play_spots).chain());
+            .add_systems(Update, (spawn_projectiles, fly, play_spots).chain().in_set(DrawFx));
     }
 }
 

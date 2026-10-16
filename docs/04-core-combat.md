@@ -528,17 +528,26 @@ ranged and magic attacks need a clear line past other monsters' hazards.
 **Richer specials.** A resolver is also told the attacker's centre and stats, the player's stats and
 the sight blockers, and `SpecialContext::roll_shot` makes the standard accuracy-and-prayer roll for it.
 `SpecialEffect` has `HurtPlayer { damage, delay_ticks }` (a shot's flight), `BindPlayer`,
-`SpawnHazard { armed_in }` and `DestroyHazard`.
+`SpawnHazard { armed_in }`, `DestroyHazard { delay_ticks }` and `Strike`, which sends the attack's
+projectile to a tile instead of the player (see below).
 
 **`ObstructedShot`** is a special that needs a clear line to the player. Clear, it is a normal hit
 that may bind the player until it lands and leave hazards around them (lava). Blocked, it hits the
-blocker: the blocker is destroyed and `on_blocked` goes off on its tile. A boulder stops a shot
-whoever left it; only its owner's own *sight* is unaffected.
+blocker: a `Strike` flies the attack's projectile to the blocker's tile (its impact graphic plays
+there, and `blocked_sound` is heard), and as it arrives the blocker is destroyed and `on_blocked`
+goes off on its tile. A boulder stops a shot whoever left it; only its owner's own *sight* is
+unaffected. Binding the player until the shot lands is optional (`binds_until_landing`); GigaJad's
+shots do not bind.
 
-**Riders.** An attack can carry `riders`: specials with no wind-up of their own that go off with it
-the tick it resolves (the rocks that fall as Jad fires), aimed at where the player is then.
-`PositionResolver::leaving(hazard, placement)` makes a rock leave a boulder behind. Tile selection
-can scatter a *range* of tiles and always include the anchor tile.
+**Riders.** An attack can carry `riders`: specials that go off with it, aimed at where the player is
+when it resolves (the rocks that fall as Jad fires). A rider with a delay waits that long, and if it
+has a `falling_graphic` it chooses its tiles as it is sent and the world reports a
+`WorldEvent::TileGraphic` on each, so the rocks are seen falling and land as the graphic ends (the
+falling-rock graphic, 451, runs 2.2 ticks). `PositionResolver::leaving(hazard, placement)` makes a
+rock leave a boulder behind; where it does, only the tiles that get a boulder hurt, so a rock that
+does not stay is only seen. Tile selection can scatter a *range* of tiles and always include the
+anchor tile. `TileProjectile` and `TileSound` are the matching events for a shot flown or a sound
+heard at a tile; the client plays them on a marker it stands on that tile.
 
 **Phases.** `Phase::with_periodic(every_ticks, special)` fires a special on its own clock while
 the phase lasts, apart from the attack cycle. A data monster with `phases` gets one `Phase` per

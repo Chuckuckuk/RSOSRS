@@ -97,6 +97,8 @@ pub struct World {
     pub(super) ground_items: super::ground_items::GroundItems,
     /// Riders of attacks that have resolved, waiting out their delay.
     pending_specials: Vec<PendingSpecial>,
+    /// Hazards a shot has been sent to destroy, as `(ticks left, owner, tile)`.
+    pending_destroys: Vec<(i32, EntityId, TileCoord)>,
 }
 
 /// A rider waiting to go off: aimed at the tile the player stood on when its attack resolved, and
@@ -108,6 +110,8 @@ struct PendingSpecial {
     special: SpecialAttack,
     origin: Origin,
     target_tile: TileCoord,
+    /// The tiles it covers, when they were chosen as it was sent (so the fall could be shown).
+    tiles: Option<Vec<TileCoord>>,
 }
 
 fn slot_index(id: EntityId) -> Option<usize> {
@@ -235,6 +239,7 @@ impl World {
             scenery_state: SceneryState::new(),
             ground_items: Default::default(),
             pending_specials: Vec::new(),
+            pending_destroys: Vec::new(),
         }
     }
 
@@ -1195,9 +1200,20 @@ impl World {
         let target_tile = self.player.tile();
         for rider in &attack.riders {
             if rider.telegraph_ticks == 0 {
-                self.resolve_special(attacker, attacker_name, None, rider, origin, target_tile, registrar);
+                self.resolve_special(attacker, attacker_name, None, rider, origin, target_tile, None, registrar);
             } else {
+                // a fall that is drawn is aimed now, so that it can be seen coming down and lands
+                // as its graphic ends
+                let tiles = rider.resolver.as_position().and_then(|position| {
+                    let graphic = position.falling_graphic?;
+                    let tiles = position.target.tiles(origin.tile, target_tile, self.encounter.rng());
+                    for tile in &tiles {
+                        self.events.push(WorldEvent::TileGraphic { tile: *tile, graphic, delay_ticks: 0 });
+                    }
+                    Some(tiles)
+                });
                 self.pending_specials.push(PendingSpecial {
+                    tiles,
                     // counted down in the Regen phase, which ends the tick this one began in
                     ticks_left: rider.telegraph_ticks + 1,
                     attacker,
@@ -1213,6 +1229,15 @@ impl World {
     /// Counts the waiting riders down a tick; those whose delay is up go off, unless the attacker
     /// died first.
     fn advance_pending_specials(&mut self, registrar: &mut TickRegistrar<EntityId>) {
+        for destroy in &mut self.pending_destroys {
+            destroy.0 -= 1;
+        }
+        let (due_destroys, waiting_destroys): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.pending_destroys).into_iter().partition(|(ticks, ..)| *ticks <= 0);
+        self.pending_destroys = waiting_destroys;
+        for (_, owner, tile) in due_destroys {
+            self.destroy_hazard_at(owner, tile);
+        }
         for pending in &mut self.pending_specials {
             pending.ticks_left -= 1;
         }
@@ -1229,6 +1254,7 @@ impl World {
                 &pending.special,
                 &pending.origin,
                 pending.target_tile,
+                pending.tiles.as_deref(),
                 registrar,
             );
         }
@@ -1250,7 +1276,7 @@ impl World {
         self.announce_attack(attacker, attack);
         self.play_sound(attack.hit_sound, Combatant::Npc(attacker), 0);
         self.log_line(format!("{attacker_name} lands {}.", attack.name));
-        self.resolve_special(attacker, attacker_name, Some(attack), special, origin, target_tile, registrar);
+        self.resolve_special(attacker, attacker_name, Some(attack), special, origin, target_tile, None, registrar);
         self.fire_riders(attacker, attacker_name, attack, origin, registrar);
     }
 
@@ -1266,6 +1292,7 @@ impl World {
         special: &SpecialAttack,
         origin: &Origin,
         target_tile: TileCoord,
+        chosen_tiles: Option<&[TileCoord]>,
         registrar: &mut TickRegistrar<EntityId>,
     ) {
         // a boulder stops a shot whoever left it: only the owner's own sight passes it
@@ -1280,12 +1307,15 @@ impl World {
             player_stats: self.player.mover.actor.stats(),
             player_reaction: &self.player.reaction_state,
             sight_blockers: &blockers,
+            chosen_tiles,
         };
         let effects = special.resolver.resolve(&context, self.encounter.rng());
+        // a blast at a struck tile is not a hit from the projectile, which went to the tile
+        let struck = effects.iter().any(|effect| matches!(effect, SpecialEffect::Strike { .. }));
         for effect in effects {
             match effect {
                 SpecialEffect::HurtPlayer { damage, delay_ticks } => {
-                    if let Some(attack) = presented {
+                    if let (Some(attack), false) = (presented, struck) {
                         self.show_hit_graphics(attack, delay_ticks);
                         if let (Some(graphic), true) = (attack.projectile, delay_ticks > 0) {
                             self.events.push(WorldEvent::Projectile {
@@ -1309,7 +1339,34 @@ impl World {
                 SpecialEffect::SpawnHazard { def, tile, armed_in } => {
                     self.spawn_hazard(&def, tile, attacker, armed_in, registrar);
                 }
-                SpecialEffect::DestroyHazard { tile } => self.destroy_hazard_at(attacker, tile),
+                SpecialEffect::DestroyHazard { tile, delay_ticks } => {
+                    if delay_ticks <= 0 {
+                        self.destroy_hazard_at(attacker, tile);
+                    } else {
+                        // counted down in the Regen phase, which ends the tick this one began in
+                        self.pending_destroys.push((delay_ticks + 1, attacker, tile));
+                    }
+                }
+                SpecialEffect::Strike { tile, flight_ticks, sound } => {
+                    if let Some(attack) = presented {
+                        if let Some(graphic) = attack.projectile {
+                            self.events.push(WorldEvent::TileProjectile {
+                                from: Combatant::Npc(attacker),
+                                tile,
+                                graphic,
+                                ticks: flight_ticks.max(1),
+                                released: attack.telegraph_ticks() > 0,
+                            });
+                        }
+                        if let Some(graphic) = attack.impact_graphic {
+                            self.events.push(WorldEvent::TileGraphic { tile, graphic, delay_ticks: flight_ticks });
+                        }
+                    }
+                    if let Some(sound) = sound {
+                        self.events.push(WorldEvent::TileSound { sound, tile, delay_ticks: flight_ticks });
+                    }
+                    self.log_line(format!("{attacker_name} fires at a rock."));
+                }
             }
         }
     }

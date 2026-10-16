@@ -133,6 +133,9 @@ pub struct PositionData {
     pub prayer_reduction: Option<PrayerReductionData>,
     #[serde(default)]
     pub leaves: Option<LeavesData>,
+    /// The cache graphic shown falling on each tile while it waits to land (a rider with a delay).
+    #[serde(default)]
+    pub falling_graphic: Option<u32>,
 }
 
 /// Hazards a shot leaves around the player when it lands.
@@ -157,6 +160,8 @@ pub struct ObstructedShotData {
     pub landing_hazards: Option<LandingHazardsData>,
     /// What goes off on the blocker's tile when the shot is stopped, centred on that tile.
     pub on_blocked: Option<PositionData>,
+    /// The cache sound heard where the shot strikes what blocks it.
+    pub blocked_sound: Option<u32>,
 }
 
 /// A special attack, named by the kind of resolver it uses.

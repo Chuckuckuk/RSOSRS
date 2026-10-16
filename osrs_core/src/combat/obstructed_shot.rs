@@ -33,6 +33,8 @@ pub struct ObstructedShot {
     /// Holds the player in place until the shot lands.
     pub binds_until_landing: bool,
     pub landing_hazards: Option<LandingHazards>,
+    /// The sound heard where the shot strikes what blocks it.
+    pub blocked_sound: Option<u32>,
     /// What goes off on the blocker's tile when the shot is stopped: aimed at the blocker, so it
     /// is anchored on the target tile of the context it is given.
     pub on_blocked: PositionResolver,
@@ -40,11 +42,17 @@ pub struct ObstructedShot {
 
 impl ObstructedShot {
     pub fn new(shot: TargetedAttack, projectile_speed: ProjectileSpeed, on_blocked: PositionResolver) -> Self {
-        Self { shot, projectile_speed, binds_until_landing: false, landing_hazards: None, on_blocked }
+        Self { shot, projectile_speed, binds_until_landing: false, landing_hazards: None, blocked_sound: None, on_blocked }
     }
 
     pub fn binding_until_landing(mut self) -> Self {
         self.binds_until_landing = true;
+        self
+    }
+
+    /// Heard where the shot strikes a blocker.
+    pub fn sounding_when_blocked(mut self, sound: u32) -> Self {
+        self.blocked_sound = Some(sound);
         self
     }
 
@@ -62,10 +70,23 @@ impl SpecialResolver for ObstructedShot {
         }
         match line_of_sight(context.attacker_centre, context.player_tile, context.sight_blockers) {
             LineOfSight::Blocked { at } => {
-                // it hits what is in the way: the blocker goes, and its tile is where it goes off
-                let aimed_at_blocker = SpecialContext { self_tile: at, target_tile: at, ..*context };
-                let mut effects = self.on_blocked.resolve(&aimed_at_blocker, rng);
-                effects.push(SpecialEffect::DestroyHazard { tile: at });
+                // it hits what is in the way: the shot flies to the blocker, which goes as it
+                // arrives, and its tile is where it goes off
+                let flight = self.projectile_speed.flight_ticks(context.attacker_centre.chebyshev_distance_to(at));
+                let aimed_at_blocker = SpecialContext { self_tile: at, target_tile: at, chosen_tiles: None, ..*context };
+                let mut effects = vec![SpecialEffect::Strike { tile: at, flight_ticks: flight, sound: self.blocked_sound }];
+                for effect in self.on_blocked.resolve(&aimed_at_blocker, rng) {
+                    effects.push(match effect {
+                        SpecialEffect::HurtPlayer { damage, delay_ticks } => {
+                            SpecialEffect::HurtPlayer { damage, delay_ticks: delay_ticks + flight }
+                        }
+                        SpecialEffect::SpawnHazard { def, tile, armed_in } => {
+                            SpecialEffect::SpawnHazard { def, tile, armed_in: armed_in + flight }
+                        }
+                        other => other,
+                    });
+                }
+                effects.push(SpecialEffect::DestroyHazard { tile: at, delay_ticks: flight });
                 effects
             }
             LineOfSight::Clear => {
@@ -129,6 +150,7 @@ mod tests {
             player_stats: stats(1),
             player_reaction: reaction,
             sight_blockers: blockers,
+            chosen_tiles: None,
         }
     }
 
@@ -157,7 +179,11 @@ mod tests {
         // a boulder two tiles in front of the shooter; the player is 9 away and out of the blast
         let effects = shot().resolve(&context(&reaction, &[tc(2, 0)]), &mut DotNetRandom::new(3));
 
-        assert_eq!(effects, vec![SpecialEffect::DestroyHazard { tile: tc(2, 0) }]);
+        // 2 tiles at 3 per tick is one tick of flight
+        assert_eq!(
+            effects,
+            vec![SpecialEffect::Strike { tile: tc(2, 0), flight_ticks: 1, sound: None }, SpecialEffect::DestroyHazard { tile: tc(2, 0), delay_ticks: 1 }]
+        );
     }
 
     #[test]
@@ -170,7 +196,11 @@ mod tests {
 
         assert_eq!(
             effects,
-            vec![SpecialEffect::HurtPlayer { damage: 120, delay_ticks: 0 }, SpecialEffect::DestroyHazard { tile: tc(8, 0) }]
+            vec![
+                SpecialEffect::Strike { tile: tc(8, 0), flight_ticks: 3, sound: None },
+                SpecialEffect::HurtPlayer { damage: 120, delay_ticks: 3 },
+                SpecialEffect::DestroyHazard { tile: tc(8, 0), delay_ticks: 3 },
+            ]
         );
     }
 

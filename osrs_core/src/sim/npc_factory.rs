@@ -57,6 +57,9 @@ fn attack_sounding(def: &NpcAttackDef, fallback_sound: Option<u32>, hazards: &[H
             if shot.binds_until_landing {
                 resolver = resolver.binding_until_landing();
             }
+            if let Some(sound) = shot.blocked_sound {
+                resolver = resolver.sounding_when_blocked(sound);
+            }
             if let Some(landing) = &shot.landing_hazards {
                 let min = landing.min as usize;
                 resolver = resolver.leaving_hazards(hazard_named(hazards, &landing.hazard), landing.radius, min, landing.max as usize);
@@ -165,6 +168,9 @@ fn position_from_data(position: &PositionData, hazards: &[HazardData]) -> Positi
             PlacementData::EveryCoveredTile => HazardPlacement::EveryCoveredTile,
         };
         resolver = resolver.leaving(hazard_named(hazards, &leaves.hazard), placement);
+    }
+    if let Some(graphic) = position.falling_graphic {
+        resolver = resolver.with_falling_graphic(graphic);
     }
     resolver
 }

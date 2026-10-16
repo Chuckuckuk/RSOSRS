@@ -4,6 +4,7 @@
 
 use crate::actors::EntityId;
 use crate::model::Skill;
+use crate::tiles::TileCoord;
 
 /// A fighter: the player or one of the world's NPCs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,6 +28,13 @@ pub enum WorldEvent {
     /// The cache graphic `graphic` plays on `on`, starting in `delay_ticks` (0 = now): the rocks of
     /// Jad's stomp, a spell's splash as it lands.
     Graphic { on: Combatant, graphic: u32, delay_ticks: i32 },
+    /// The cache graphic `graphic` plays on the ground at `tile`, starting in `delay_ticks`: a rock
+    /// falling, a spell going off where it struck.
+    TileGraphic { tile: TileCoord, graphic: u32, delay_ticks: i32 },
+    /// `from` loosed a projectile at the ground at `tile`; it arrives in `ticks`. As `Projectile`.
+    TileProjectile { from: Combatant, tile: TileCoord, graphic: u32, ticks: i32, released: bool },
+    /// The cache sound effect `sound` is heard from `tile`, starting in `delay_ticks`.
+    TileSound { sound: u32, tile: TileCoord, delay_ticks: i32 },
     /// `healer` restored `amount` hitpoints to `target`, playing the cache sequence `animation`.
     Heal { healer: Combatant, target: Combatant, amount: i32, animation: Option<u32> },
     /// A hit landed on `target`; 0 is a block.
