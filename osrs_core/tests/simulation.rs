@@ -513,12 +513,12 @@ fn the_phoenix_necklace_heals_wipes_the_queue_and_is_used_up() {
 #[test]
 fn aggressive_monsters_start_fights_within_range_and_passive_ones_wait_to_be_hit() {
     let mut world = world_with(config(CombatLevels::new(10, 10, 10, 1, 1)));
-    world.spawn_npc_def("abyssal_demon", TileCoord::new(3, 0)).unwrap(); // aggressive, level 124
+    world.spawn_npc_def("kalphite_soldier", TileCoord::new(3, 0)).unwrap(); // aggressive, level 85
     let dummy = world.spawn_npc_def("combat_dummy", TileCoord::new(0, 3)).unwrap();
 
     run(&mut world, 12);
 
-    assert!(world.log().iter().any(|l| l.starts_with("Abyssal demon uses")), "{:?}", world.log());
+    assert!(world.log().iter().any(|l| l.starts_with("Kalphite soldier uses")), "{:?}", world.log());
     assert_eq!(hp(&world, dummy), 10_000);
 }
 
@@ -616,9 +616,9 @@ fn ten_minutes_near_aggressive_monsters_makes_them_tolerant_and_leaving_resets_i
     assert!(world.player_is_tolerated(), "1000 ticks = 10 minutes");
 
     // Now a monster that WOULD attack arrives, but the player is tolerated.
-    world.spawn_npc_def("abyssal_demon", TileCoord::new(0, 3)).unwrap();
+    world.spawn_npc_def("kalphite_soldier", TileCoord::new(0, 3)).unwrap();
     run(&mut world, 15);
-    assert!(!world.log().iter().any(|l| l.starts_with("Abyssal demon uses")), "{:?}", world.log());
+    assert!(!world.log().iter().any(|l| l.starts_with("Kalphite soldier uses")), "{:?}", world.log());
 
     // Walking away from every aggressive monster resets the timer.
     world.player_request_walk_to(TileCoord::new(-19, -19), false);

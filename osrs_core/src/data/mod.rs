@@ -9,6 +9,7 @@ mod doors;
 mod gathering;
 mod items;
 mod npcs;
+mod spawns;
 mod prayers;
 mod scenario;
 mod spells;
@@ -24,7 +25,13 @@ pub use firemaking::LogDef;
 pub use doors::{DoorDef, DoorLeafDef, DoorSwing, LeafMove};
 pub use gathering::{DepletionDef, GatheringNodeDef, NodeLocDef, PetDropDef, Requirement, ToolDef};
 pub use items::{AmmoDef, AmmoWeight, EquipSlot, ItemDef, SetDef, SpecialAttackDef, StanceDef, StanceKind, WeaponDef};
-pub use npcs::{AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef, NpcLevels, NpcMovementDef, NpcSounds, RotationDef, SummonDef};
+pub use npcs::{
+    cache_npc_def, cache_npc_id, cache_npc_key, cache_npc_variant, AggressionDef, CombatAnimations, HealDef, NpcAttackDef, NpcDef,
+    NpcLevels, NpcMovementDef, NpcSounds, RotationDef, SummonDef,
+};
+pub use spawns::{
+    default_npc_spawns, read_json_file, read_npc_spawns, resolve_spawns, write_npc_spawns, CacheNpc, NpcSpawnPoint, ResolvedSpawns,
+};
 pub use prayers::PrayerDef;
 pub use scenario::{builtin_scenarios, load_scenario, InventoryStack, NpcSpawn, PlayerSetup, ScenarioDef, SkillLevelsDef};
 pub use spells::{LevelScaling, SpellDef};
@@ -242,6 +249,12 @@ impl Registry {
         self.npcs.get(id)
     }
 
+    /// The curated monster that cache NPC `id` is (drawn as it, or listing it in `cache_ids`), if
+    /// `npcs.json` has one: a spawn of `cache:<id>` fights with its stats.
+    pub fn npc_for_cache_id(&self, id: u32) -> Option<&NpcDef> {
+        self.npcs.values().find(|d| npcs::covers_cache_npc(d, id))
+    }
+
     /// Replaces (or adds) a monster definition: tests tweak a bundled one this way.
     #[cfg(test)]
     pub(crate) fn insert_npc_for_test(&mut self, def: NpcDef) {
@@ -273,7 +286,7 @@ impl Registry {
     }
 
     /// Every cache sound effect id the data names (weapons, stances, spells, prayers, monsters,
-    /// their attacks, consumables, doors) and the game's own (`sim::sounds`), sorted and without repeats.
+    /// their attacks, consumables, doors, gathering nodes) and the game's own (`sim::sounds`), sorted and without repeats.
     pub fn named_sounds(&self) -> Vec<u32> {
         let mut sounds: std::collections::BTreeSet<u32> = crate::sim::sounds::ALL.into_iter().collect();
         for item in self.items() {
@@ -288,6 +301,7 @@ impl Registry {
         sounds.extend(self.prayers().filter_map(|prayer| prayer.sound));
         sounds.extend(self.consumables().filter_map(|consumable| consumable.sound));
         sounds.extend(self.doors().flat_map(|door| [door.open_sound, door.close_sound]).flatten());
+        sounds.extend(self.gathering_nodes().flat_map(|node| [node.attempt_sound, node.depleted_sound]).flatten());
         for npc in self.npcs() {
             sounds.extend([npc.sounds.attack, npc.sounds.hit, npc.sounds.death].into_iter().flatten());
             for attack in &npc.attacks {
@@ -359,8 +373,23 @@ impl Registry {
     pub fn validate(&self) -> Result<(), DataError> {
         let mut problems = Vec::new();
 
+        // a cache NPC is one monster at most, or its spawns' stats would depend on lookup order
+        let mut claimed: BTreeMap<u32, &str> = BTreeMap::new();
+        for npc in self.npcs.values() {
+            for id in npc.appearance.iter().chain(&npc.cache_ids) {
+                if let Some(other) = claimed.insert(*id, &npc.id) {
+                    if other != npc.id {
+                        problems.push(format!("npc '{}': cache NPC {id} is also '{other}'", npc.id));
+                    }
+                }
+            }
+        }
+
         for item in self.items.values() {
             let who = format!("item '{}'", item.id);
+            if let Some(npc) = item.follower.as_ref().filter(|npc| !self.npcs.contains_key(*npc)) {
+                problems.push(format!("{who}: follows as unknown monster '{npc}'"));
+            }
             if let Some(weapon) = &item.weapon {
                 if item.slot != Some(EquipSlot::Weapon) {
                     problems.push(format!("{who}: has weapon data but is not in the weapon slot"));
@@ -569,10 +598,14 @@ impl Registry {
                     problems.push(format!("{who}: chances for '{tool}' need 0 <= low <= high"));
                 }
             }
-            if let DepletionDef::Timer { ticks } = node.depletion {
-                if ticks < 1 {
+            match node.depletion {
+                DepletionDef::Timer { ticks } if ticks < 1 => {
                     problems.push(format!("{who}: a despawn timer needs at least 1 tick"));
                 }
+                DepletionDef::Chance { one_in } if one_in < 1 => {
+                    problems.push(format!("{who}: a depletion chance needs one_in >= 1"));
+                }
+                _ => {}
             }
             let [min, max] = node.respawn_ticks;
             if min < 1 || max < min {
@@ -759,6 +792,26 @@ mod tests {
         assert_eq!(tree.chances["crystal_axe"], [250, 800]);
         assert_eq!(tree.pet.as_ref().map(|p| (p.item.as_str(), p.base_chance)), Some(("beaver", 317_647)));
         assert!(registry.gathering_node_for(1276, "Examine").is_none());
+        assert_eq!(registry.gathering_node_for(1282, "Chop down").map(|n| n.id.as_str()), Some("regular_tree"), "a dead tree");
+    }
+
+    #[test]
+    fn the_other_trees_follow_the_wiki() {
+        let registry = Registry::builtin();
+        let node = |loc, action| registry.gathering_node_for(loc, action).unwrap_or_else(|| panic!("object {loc} is a tree"));
+
+        let oak = node(10820, "Chop down");
+        assert_eq!((oak.product.as_str(), oak.xp_tenths, oak.depletion), ("oak_logs", 375, DepletionDef::Timer { ticks: 45 }));
+        assert_eq!(oak.chances["crystal_axe"], [125, 400]);
+        assert_eq!(oak.requirements[0].refusal(), "You need a Woodcutting level of 15 to chop down this tree.");
+
+        let juniper = node(27499, "Chop down");
+        assert_eq!(juniper.depletion, DepletionDef::Chance { one_in: 16 });
+        assert_eq!(node(29668, "Cut").product, "redwood_logs");
+        assert_eq!(node(3037, "Cut down").product, "arctic_pine_logs");
+        assert_eq!(node(2023, "Chop").product, "achey_tree_logs");
+        assert_eq!(node(10822, "Chop down").pet.as_ref().map(|p| p.base_chance), Some(145_013));
+        assert!(registry.gathering_nodes().all(|n| n.attempt_sound == Some(2735) && n.depleted_sound == Some(2734)));
         assert_eq!(registry.tool("rune_axe").map(|t| t.level), Some(41));
         assert!(registry.item("logs").is_some_and(|i| i.slot.is_none()));
     }

@@ -41,6 +41,9 @@ pub struct SquareData {
     pub deck_heights: Vec<i32>,
     /// Whether the tile at index `x * 64 + z` is a bridge deck, so its surface is `deck_heights`.
     pub bridges: Vec<bool>,
+    /// Whether the ground-level tile at index `x * 64 + z` has a roof over it (tile flag 4): the
+    /// client takes the roofs off when the view into the building crosses such a tile.
+    pub roofs: Vec<bool>,
 }
 
 /// Which map square a world tile is in.
@@ -63,8 +66,14 @@ pub struct SquareLoader {
 }
 
 impl SquareLoader {
+    /// A loader reading the active cache (`Cache::open_default`).
     pub fn open() -> osrs_cache::Result<SquareLoader> {
-        let source = MapSource::open()?;
+        SquareLoader::from_cache(osrs_cache::Cache::open_default()?)
+    }
+
+    /// A loader reading `cache` (one with an overlay, say: the map editor's uncompiled edits).
+    pub fn from_cache(cache: osrs_cache::Cache) -> osrs_cache::Result<SquareLoader> {
+        let source = MapSource::from_cache(cache)?;
         let texture_hsl = Configs::new(source.cache())?.texture_average_hsl()?;
         Ok(SquareLoader { source, texture_hsl, models: HashMap::new(), items: None })
     }
@@ -157,8 +166,14 @@ impl SquareLoader {
                 bridges.push(present && around.grid.tile(1, x0 + x, z0 + z).settings & 2 != 0);
             }
         }
+        let mut roofs = Vec::with_capacity(side * side);
+        for x in 0..side {
+            for z in 0..side {
+                roofs.push(present && around.grid.tile(0, x0 + x, z0 + z).settings & 4 != 0);
+            }
+        }
         eprintln!("square ({sx}, {sy}) loaded in {:.2?}", started.elapsed());
-        Ok(SquareData { square: (sx, sy), present, terrain, objects: Arc::new(objects), heights, deck_heights, bridges })
+        Ok(SquareData { square: (sx, sy), present, terrain, objects: Arc::new(objects), heights, deck_heights, bridges, roofs })
     }
 }
 
@@ -186,11 +201,23 @@ pub struct SquareStream {
 }
 
 impl SquareStream {
+    /// A loading thread reading the active cache.
     pub fn spawn() -> SquareStream {
+        SquareStream::spawn_with(SquareLoader::open)
+    }
+
+    /// A loading thread reading `cache`.
+    pub fn spawn_with_cache(cache: osrs_cache::Cache) -> SquareStream {
+        SquareStream::spawn_with(move || SquareLoader::from_cache(cache))
+    }
+
+    /// A loading thread whose loader `make` builds (on that thread: a loader cannot move between
+    /// threads).
+    fn spawn_with(make: impl FnOnce() -> osrs_cache::Result<SquareLoader> + Send + 'static) -> SquareStream {
         let (request_tx, request_rx) = mpsc::channel::<Request>();
         let (result_tx, result_rx) = mpsc::channel();
         thread::spawn(move || {
-            let mut loader = match SquareLoader::open() {
+            let mut loader = match make() {
                 Ok(loader) => loader,
                 Err(e) => {
                     // nothing can be loaded; report every request as failed
@@ -258,6 +285,7 @@ struct Resident {
     heights: Vec<i32>,
     deck_heights: Vec<i32>,
     bridges: Vec<bool>,
+    roofs: Vec<bool>,
     entities: Vec<Entity>,
 }
 
@@ -296,6 +324,7 @@ impl StreamedWorld {
                     heights: data.heights.clone(),
                     deck_heights: data.deck_heights.clone(),
                     bridges: data.bridges.clone(),
+                    roofs: data.roofs.clone(),
                     entities,
                 },
             );
@@ -322,6 +351,13 @@ impl StreamedWorld {
         self.squares.keys().copied()
     }
 
+    /// Whether world tile (`x`, `z`) has a roof over it, if its square is loaded.
+    pub fn roofed(&self, x: i32, z: i32) -> bool {
+        let Some(resident) = self.squares.get(&square_of(x, z)) else { return false };
+        let (lx, lz) = (x.rem_euclid(SQUARE) as usize, z.rem_euclid(SQUARE) as usize);
+        resident.roofs.get(lx * SQUARE as usize + lz).copied().unwrap_or(false)
+    }
+
     /// Heights (client units) of the four corners of world tile (`x`, `z`) as it is drawn, in the
     /// order south-west, south-east, north-west, north-east, if its square is loaded. A bridge
     /// deck is drawn from the heights of the plane above, not the ground under it.
@@ -334,6 +370,20 @@ impl StreamedWorld {
         let heights = if resident.bridges[lx * SQUARE as usize + lz] { &resident.deck_heights } else { &resident.heights };
         let at = |dx: usize, dz: usize| heights[(lx + dx) * CORNERS + lz + dz];
         Some([at(0, 0), at(1, 0), at(0, 1), at(1, 1)])
+    }
+
+    /// The four outer corners (south-west, south-east, north-east, north-west, so they draw as a
+    /// loop) in render space of the `w` x `h` block of tiles whose south-west tile is (`x`, `z`),
+    /// raised `lift` tiles off the ground, if its squares are loaded. A tile outline is a 1 x 1
+    /// block.
+    pub fn block_corners(&self, x: i32, z: i32, w: i32, h: i32, lift: f32) -> Option<[Vec3; 4]> {
+        let y = |tx: i32, tz: i32, corner: usize| self.tile_corners(tx, tz).map(|c| -(c[corner] as f32) / 128.0 + lift);
+        Some([
+            Vec3::new(x as f32, y(x, z, 0)?, -(z as f32)),
+            Vec3::new((x + w) as f32, y(x + w - 1, z, 1)?, -(z as f32)),
+            Vec3::new((x + w) as f32, y(x + w - 1, z + h - 1, 3)?, -((z + h) as f32)),
+            Vec3::new(x as f32, y(x, z + h - 1, 2)?, -((z + h) as f32)),
+        ])
     }
 
     /// Where an object `w` x `h` tiles placed with its south-west tile at (`x`, `z`) stands: the
@@ -384,6 +434,7 @@ mod tests {
             heights: vec![height; CORNERS * CORNERS],
             deck_heights: vec![height; CORNERS * CORNERS],
             bridges: vec![false; (SQUARE * SQUARE) as usize],
+            roofs: vec![false; (SQUARE * SQUARE) as usize],
         }
     }
 
@@ -393,6 +444,7 @@ mod tests {
             heights: data.heights,
             deck_heights: data.deck_heights,
             bridges: data.bridges,
+            roofs: data.roofs,
             entities: Vec::new(),
         }
     }
@@ -437,6 +489,17 @@ mod tests {
         assert!(world.ground_at(3199, 3218).is_none(), "square 49 is not loaded");
         assert!(world.surface_y(0, 3199.5, 3218.0).is_none());
         assert!(world.surface_y(1, 3222.0, 3218.0).is_none(), "only ground level is kept");
+    }
+
+    #[test]
+    fn a_roofed_tile_is_found_by_its_world_tile() {
+        let mut data = flat_square((50, 50), 0);
+        data.roofs[3 * SQUARE as usize + 4] = true;
+        let mut world = StreamedWorld::default();
+        world.squares.insert((50, 50), resident(data));
+        assert!(world.roofed(3200 + 3, 3200 + 4));
+        assert!(!world.roofed(3200 + 4, 3200 + 3));
+        assert!(!world.roofed(0, 0), "an unloaded square has no roof");
     }
 
     #[test]

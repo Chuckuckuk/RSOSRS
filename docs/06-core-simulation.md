@@ -518,7 +518,7 @@ rule. Everything a resource does differently is data:
 | File | Holds |
 |---|---|
 | [`data/tools.json`](../osrs_core/data/tools.json) | `ToolDef`: item, category (`"axe"`), skill, level, the animation the player loops |
-| [`data/gathering.json`](../osrs_core/data/gathering.json) | `GatheringNodeDef`: the option that starts it (`"Chop down"`), the scenery ids and what each becomes while depleted, requirements, tool category, roll interval, XP, product, the per-tool `[low, high]` success chances, depletion rule, respawn range, pet, messages |
+| [`data/gathering.json`](../osrs_core/data/gathering.json) | `GatheringNodeDef`: the option that starts it (`"Chop down"`, `"Cut"`), the scenery ids and what each becomes while depleted, requirements, tool category, roll interval, XP, product, the per-tool `[low, high]` success chances, depletion rule, respawn range, pet, messages, the sounds of an attempt and of depleting, and `notes` on where the values came from. Every woodcutting tree is there, from regular trees to rosewood. |
 
 `Requirement` (level, tool of a category, free slots) is checked when the player clicks, on
 arrival and before every attempt; its refusal is the game's message, overridable per entry.
@@ -530,15 +530,36 @@ The loop runs in the player's PlayerQueue phase, from the **one action slot**
 2. on arrival say the start message and start the best usable tool's animation (`best_tool`:
    the highest success chance at the player's level);
 3. roll whenever the **skill clock** is 0: it is set to the node's interval (4 ticks for trees)
-   and counts down every tick, so re-clicking never resets it;
-4. a success gives the product and XP, rolls the pet (1 in `base - 25 x level`; pets are items
-   only for now), and depletes the object if the rule says so. `EverySuccess` fells a regular
-   tree with its one log; `Timer { ticks }` is the oak-and-up despawn timer (runs down while
-   chopped, back up while not, fells on the first success after it runs out).
+   and counts down every tick, so re-clicking never resets it. Arriving with the clock idle sets
+   it to `interval - 1` instead: the swing starts the next tick and the first roll comes 3 ticks
+   after arriving, as in the game's woodcutting script. Each roll plays `attempt_sound`;
+4. a success gives the XP, rolls the pet (1 in `base - 25 x level`), then gives the product, and
+   depletes the object if the rule says so (playing `depleted_sound`). `EverySuccess` fells a
+   regular tree with its one log; `Timer { ticks }` is the oak-and-up despawn timer (runs down
+   while chopped, back up while not, fells on the first success after it runs out);
+   `Chance { one_in }` fells it on a 1 in N roll (mature juniper).
+
+A rolled pet follows the player if none is out, goes into the backpack if one is, and is missed
+if the player already has it (or has a follower out and no room). A pet put into the backpack
+takes the last slot ahead of the product, which falls to the ground.
 
 The success chance is `rules::success_numerator(low, high, level)` over 256 (the wiki's skilling
 success formula). Draws come from the player's own `skilling_rng`, never the encounter's, so
 gathering cannot change a fight's rolls.
+
+### Followers: [`sim/followers.rs`](../osrs_core/src/sim/followers.rs)
+
+A pet is an item whose `ItemDef::follower` names the monster (`npcs.json`) it is while out; the
+beaver is the only one. At most one follows the player (`World::follower`). It is an `Entity`
+with `Behavior::Follower`: it ticks only in NpcMovement, never marks the collision map (it blocks
+nobody), walks beside the player at walking pace (`walk_beside`, shared with healers walking to
+their leader; the wiki's Pet page) and appears beside them once more than `CATCH_UP_DISTANCE` (15)
+tiles behind, on another plane, or stuck. It faces the player and cannot be attacked.
+
+* Dropping a pet item lets it out (refused with "You already have a follower." if one is).
+* Its "Pick-up" option (`InteractNpc { option: "Pick-up" }`) is `PlayerAction::PickUp`: walk up
+  to it, then `World::remove_entity` takes it out of the world and the item goes back into the
+  backpack.
 
 ### Ground items: [`sim/ground_items.rs`](../osrs_core/src/sim/ground_items.rs)
 
@@ -708,7 +729,7 @@ The rest of the codebase cannot mutate the world through a `Server`: `world()` o
 |---|---|
 | session | `Login { name }` |
 | movement | `WalkTo { tile, force_inverse }`, `SetRunning(bool)` |
-| NPCs | `Attack { target }`, `InteractNpc { target }`, `ExamineNpc { target }` |
+| NPCs | `Attack { target }`, `InteractNpc { target, option }` ("Pick-up" on the follower; any other option walks up and faces it), `ExamineNpc { target }` |
 | scenery | `ExamineObject { id }`, `InteractObject { id, tile, action }` (the server finds the placement covering `tile` and dispatches the option: gathering nodes today, "Nothing interesting happens." otherwise) |
 | items | `Equip`, `Unequip { slot }`, `InventoryOption { slot, option }`, `MoveInventoryItem { from, to }`, `UseConsumable`, `ExamineItem` |
 | combat setup | `SetStance`, `TogglePrayer`, `SetPrayer(ProtectionPrayer)` (direct, no drain), `SelectSpell`, `SetSpecial`, `SetOnTask` |

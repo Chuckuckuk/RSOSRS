@@ -80,7 +80,7 @@ impl TerrainGrid {
         for ry in 0..ny {
             for rx in 0..nx {
                 let (wx, wy) = (region_x + rx as i32, region_y + ry as i32);
-                let gid = ((wx << 8) | wy) as u32;
+                let gid = crate::squares::map_group(wx, wy);
                 let terrain = match cache.read_files(&maps, gid) {
                     Ok(files) if !files.is_empty() => {
                         Terrain::decode(&files[0].1, wx * REGION as i32, wy * REGION as i32).ok()
@@ -444,7 +444,7 @@ impl PlacedObjects {
         for ry in 0..grid.ny {
             for rx in 0..grid.nx {
                 let (wx, wy) = (grid.region_x + rx as i32, grid.region_y + ry as i32);
-                let gid = ((wx << 8) | wy) as u32;
+                let gid = crate::squares::map_group(wx, wy);
                 let Ok(files) = cache.read_files(&maps, gid) else { continue };
                 if files.len() < 2 {
                     continue;

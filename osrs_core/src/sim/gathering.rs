@@ -6,20 +6,25 @@
 //! The loop, run in the player's PlayerQueue phase:
 //!
 //! 1. Walk until next to the object (orthogonally, as for an NPC).
-//! 2. On arrival, check the requirements again, say the start message and start the tool's
-//!    animation.
+//! 2. On arrival, check the requirements again; then say the start message and start the tool's
+//!    animation (the tick after, when the skill clock was idle; see 3).
 //! 3. Every tick the skill clock is at 0, roll: the clock is set to the node's interval (4 ticks
 //!    for trees) and counts down one per tick whatever the player does, so re-clicking does not
-//!    reset it. A player whose clock is idle rolls on the tick they start.
+//!    reset it. A player whose clock is idle when they arrive has it set to `interval - 1`
+//!    instead, starts swinging the next tick and rolls first 3 ticks after arriving, as the
+//!    game's woodcutting script does (`%action_delay = map_clock + 3`, LostCity's
+//!    `woodcut.rs2`; rsmod's `Woodcutting.kt` the same).
 //! 4. A success gives the product and the experience, rolls for the pet, and depletes the
 //!    resource if its depletion rule says so, which ends the action. A full inventory ends it too.
 //!
 //! Random draws come from the player's own skilling generator, never the encounter's, so
 //! gathering cannot change a fight's rolls. Per attempt they are drawn in this order: the attempt
-//! (`0..256`), then on a success the pet (`0..N`), then if it depletes the respawn time.
+//! (`0..256`), then on a success the pet (`0..N`), then for a node that depletes by chance the
+//! depletion (`0..N`), then if it depletes the respawn time.
 
 use std::rc::Rc;
 
+use super::events::Combatant;
 use super::objects::{Approach, PlayerAction};
 use super::player::Player;
 use super::scenery::Loc;
@@ -72,26 +77,35 @@ fn first_unmet(player: &Player, registry: &Registry, requirements: &[Requirement
     requirements.iter().find(|r| !meets(player, registry, r)).map(Requirement::refusal)
 }
 
-/// Where a pet that was rolled goes. Followers are not modelled, so it is always an item.
+/// Where a pet that was rolled goes (OSRS wiki, Pet and Beaver).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PetOutcome {
-    /// Into the backpack.
+    /// No follower is out: it appears beside the player and follows them.
+    Follower,
+    /// A follower is out already: into the backpack.
     Backpack,
-    /// The player already has it, or has no room: no pet, only the message.
+    /// The player already has it, or has a follower out and no room: no pet, only the message.
     Missed,
 }
 
 impl PetOutcome {
-    fn for_player(player: &Player, pet_item: &str) -> PetOutcome {
-        if player.has_item(pet_item) || player.inventory.free_slots() == 0 {
+    fn for_player(world: &World, pet_item: &str) -> PetOutcome {
+        let player = &world.player;
+        let owned = player.has_item(pet_item) || world.follower_item() == Some(pet_item);
+        if owned {
             PetOutcome::Missed
-        } else {
+        } else if world.follower().is_none() && world.is_pet(pet_item) {
+            PetOutcome::Follower
+        } else if player.inventory.free_slots() > 0 {
             PetOutcome::Backpack
+        } else {
+            PetOutcome::Missed
         }
     }
 
     fn message(self) -> &'static str {
         match self {
+            PetOutcome::Follower => "You have a funny feeling like you're being followed.",
             PetOutcome::Backpack => "You feel something weird sneaking into your backpack.",
             PetOutcome::Missed => "You have a funny feeling like you would have been followed...",
         }
@@ -143,14 +157,24 @@ impl World {
             self.player.action = None;
             return true;
         };
+        // the despawn timer starts on the first tick of interaction (OSRS wiki, Woodcutting)
+        if let DepletionDef::Timer { ticks } = node.depletion {
+            self.scenery_state.work_timer(&gather.loc, ticks);
+        }
         if !gather.started {
+            // Arriving with the skill clock idle sets it to one less than the interval: the
+            // swing begins next tick and the first roll comes `interval - 1` ticks after arrival
+            // (the game's woodcutting script, `%action_delay = map_clock + 3`). Arriving while it
+            // still runs (straight from another tree) swings at once.
+            if self.player.skill_clock == 0 && node.roll_interval_ticks > 1 {
+                self.player.skill_clock = node.roll_interval_ticks - 1;
+                self.player.action = Some(PlayerAction::Gather(gather));
+                return true;
+            }
             gather.started = true;
             if let Some(message) = &node.start_message {
                 self.game_message(message.clone());
             }
-        }
-        if let DepletionDef::Timer { ticks } = node.depletion {
-            self.scenery_state.work_timer(&gather.loc, ticks);
         }
 
         if self.player.skill_clock > 0 {
@@ -158,6 +182,7 @@ impl World {
             return true;
         }
         self.player.skill_clock = node.roll_interval_ticks;
+        self.play_sound(node.attempt_sound, Combatant::Player, 0);
         let draw = self.player.skilling_rng.next_range(0, 256);
         if !rules::attempt_succeeds(numerator, draw) {
             self.player.action = Some(PlayerAction::Gather(gather));
@@ -174,9 +199,8 @@ impl World {
     fn gathered(&mut self, node: &GatheringNodeDef, loc: &Loc) -> bool {
         // The free-slot requirement is checked before every attempt, so this only happens for a
         // node whose data leaves it out. As in the game, there is no experience without the
-        // product: the player is told and stops. (Overflow onto the ground needs ground items.)
-        let left_over = self.give_item(&node.product, node.product_quantity).unwrap_or(node.product_quantity);
-        if left_over == node.product_quantity {
+        // product: the player is told and stops.
+        if !self.room_for(&node.product) {
             let room = node.requirements.iter().find(|r| matches!(r, Requirement::FreeSlots { .. }));
             let refusal = room.map_or_else(|| "You don't have enough inventory space.".to_owned(), Requirement::refusal);
             self.game_message(refusal);
@@ -187,22 +211,37 @@ impl World {
         }
         self.grant_xp(node.skill, node.xp_tenths);
 
+        // the pet comes first: one going into the backpack takes the last slot ahead of the
+        // product, which then falls to the ground (OSRS wiki, Beaver)
         if let Some(pet) = &node.pet {
             let denominator = rules::pet_chance_denominator(pet.base_chance, self.player.skills.base(node.skill));
             if one_in(&mut self.player.skilling_rng, denominator) {
-                let outcome = PetOutcome::for_player(&self.player, &pet.item);
-                if outcome == PetOutcome::Backpack {
-                    let _ = self.give_item(&pet.item, 1);
+                let outcome = PetOutcome::for_player(self, &pet.item);
+                match outcome {
+                    PetOutcome::Follower => {
+                        self.call_follower(&pet.item);
+                    }
+                    PetOutcome::Backpack => {
+                        let _ = self.give_item(&pet.item, 1);
+                    }
+                    PetOutcome::Missed => {}
                 }
                 self.game_message(outcome.message().to_owned());
             }
+        }
+        let left_over = self.give_item(&node.product, node.product_quantity).unwrap_or(0);
+        if left_over > 0 {
+            let tile = self.player.tile();
+            self.drop_ground_item(&node.product, left_over, tile);
         }
 
         let depletes = match node.depletion {
             DepletionDef::EverySuccess => true,
             DepletionDef::Timer { .. } => self.scenery_state.timer_expired(loc),
+            DepletionDef::Chance { one_in: n } => one_in(&mut self.player.skilling_rng, n),
         };
         if depletes {
+            self.play_sound(node.depleted_sound, Combatant::Player, 0);
             if let Some(replacement) = node.depleted_form(loc.id) {
                 let [min, max] = node.respawn_ticks;
                 let respawn = self.player.skilling_rng.next_range(min, max + 1);
@@ -228,7 +267,7 @@ impl World {
             Some(PlayerAction::Light(light)) => return light.started.then_some(super::firemaking::LIGHTING_ANIMATION),
             Some(PlayerAction::Tend(tend)) => return tend.started.then_some(super::firemaking::TENDING_ANIMATION),
             Some(PlayerAction::Rest(rest)) => return rest.resting.then_some(super::firemaking::RESTING_ANIMATION),
-            Some(PlayerAction::Door(_)) | Some(PlayerAction::Take { .. }) | None => return None,
+            Some(PlayerAction::Door(_)) | Some(PlayerAction::Take { .. }) | Some(PlayerAction::PickUp { .. }) | None => return None,
         };
         let node = self.registry().gathering_node(&gather.node).filter(|_| gather.started)?;
         best_tool(&self.player, self.registry(), node)?.0.animation
@@ -387,8 +426,25 @@ mod tests {
     }
 
     #[test]
+    fn the_first_roll_comes_three_ticks_after_arriving_and_the_swing_one() {
+        let mut world = woods_with(1, &["bronze_axe"], &[sure_tree(|_| {})]);
+        world.player.mover.teleport_to(&mut world.map, TileCoord::new(4, 0)); // already beside it
+        chop(&mut world).unwrap();
+
+        world.run_tick(); // arrives: the skill clock is set, nothing shown yet
+        assert_eq!(world.player_action_animation(), None);
+        world.run_tick();
+        assert_eq!(world.player_action_animation(), Some(879), "swinging the tick after");
+        assert!(world.take_messages().contains(&"You swing your axe at the tree.".to_owned()));
+        world.run_tick();
+        assert_eq!(logs(&world), 0);
+        world.run_tick();
+        assert_eq!(logs(&world), 1, "rolled 3 ticks after arriving");
+    }
+
+    #[test]
     fn a_despawn_timer_fells_the_tree_on_the_first_success_after_it_runs_out() {
-        // 8 ticks of chopping: attempts on the first tick, the 5th and the 9th (when it has run out)
+        // an 8-tick timer: attempts 3, 7 and 11 ticks after arriving, the last after it has run out
         let node = sure_tree(|n| n.depletion = DepletionDef::Timer { ticks: 8 });
         let mut world = woods_with(1, &["bronze_axe"], &[node]);
         chop(&mut world).unwrap();
@@ -397,6 +453,52 @@ mod tests {
 
         assert_eq!(logs(&world), 3);
         assert!(world.player.action().is_none());
+    }
+
+    #[test]
+    fn a_tree_that_depletes_by_chance_falls_on_a_success_that_rolls_it() {
+        // one_in 1: the first log fells it; a huge one_in: it never falls
+        let sure_fall = sure_tree(|n| n.depletion = DepletionDef::Chance { one_in: 1 });
+        let mut world = woods_with(1, &["bronze_axe"], &[sure_fall]);
+        chop(&mut world).unwrap();
+        run_until(&mut world, 20, |w| logs(w) == 1);
+        assert!(world.scenery_changes().next().is_some(), "felled by its first log");
+
+        let never = sure_tree(|n| n.depletion = DepletionDef::Chance { one_in: i32::MAX });
+        let mut world = woods_with(1, &["bronze_axe"], &[never]);
+        chop(&mut world).unwrap();
+        run_until(&mut world, 40, |w| logs(w) == 5);
+        assert_eq!(logs(&world), 5);
+        assert!(world.scenery_changes().next().is_none(), "still standing");
+    }
+
+    /// The sounds among the events since the last call.
+    fn sounds(world: &mut World) -> Vec<u32> {
+        world
+            .take_events()
+            .into_iter()
+            .filter_map(|event| match event {
+                WorldEvent::Sound { sound, from: Combatant::Player, .. } => Some(sound),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_swing_sounds_and_the_tree_falls_with_a_crash() {
+        let mut world = woods_with(1, &["bronze_axe"], &[hopeless_tree()]);
+        chop(&mut world).unwrap();
+        run_until(&mut world, 20, |w| w.player_action_animation().is_some());
+        sounds(&mut world);
+        for _ in 0..8 {
+            world.run_tick();
+        }
+        assert_eq!(sounds(&mut world), vec![2735, 2735], "a chop with each of the two attempts");
+
+        let mut world = woods_with(1, &["bronze_axe"], &[sure_tree(|_| {})]);
+        chop(&mut world).unwrap();
+        run_until(&mut world, 20, |w| logs(w) == 1);
+        assert_eq!(sounds(&mut world), vec![2735, 2734], "the chop that got the log, then the fall");
     }
 
     #[test]
@@ -511,22 +613,66 @@ mod tests {
         assert!(world.player_interact_object(TREE, TileCoord::new(7, 7), "Chop down").is_err(), "no tree there");
     }
 
+    /// The regular tree where every attempt succeeds and gives the pet (base 26 at level 1 is a
+    /// 1 in 1 chance).
+    fn pet_tree() -> GatheringNodeDef {
+        sure_tree(|n| n.pet.as_mut().unwrap().base_chance = 26)
+    }
+
     #[test]
-    fn a_pet_goes_into_the_backpack_unless_the_player_has_one_or_no_room() {
-        // base 26 at level 1 is a 1 in 1 chance
-        let node = sure_tree(|n| n.pet.as_mut().unwrap().base_chance = 26);
-        let mut world = woods_with(1, &["bronze_axe"], &[node]);
+    fn a_pet_follows_the_player_when_none_is_out() {
+        let mut world = woods_with(1, &["bronze_axe"], &[pet_tree()]);
         chop(&mut world).unwrap();
         run_until(&mut world, 20, |w| logs(w) == 1);
 
-        assert_eq!(world.player.inventory.count("beaver"), 1);
-        assert!(world.take_messages().contains(&"You feel something weird sneaking into your backpack.".to_owned()));
+        let follower = world.follower().expect("the beaver came out");
+        assert_eq!(world.follower_item(), Some("beaver"));
+        assert_eq!(world.player.inventory.count("beaver"), 0);
+        let beaver = world.entity(follower).unwrap();
+        assert_eq!(beaver.name, "Beaver");
+        assert!(beaver.tile().chebyshev_distance_to(world.player.tile()) <= 1, "beside the player");
+        assert!(world.take_messages().contains(&"You have a funny feeling like you're being followed.".to_owned()));
 
-        assert_eq!(PetOutcome::for_player(&world.player, "beaver"), PetOutcome::Missed, "one is enough");
-        let mut full = woods(1, &[]);
-        assert_eq!(PetOutcome::for_player(&full.player, "beaver"), PetOutcome::Backpack);
-        full.give_item("shark", 28).unwrap();
-        assert_eq!(PetOutcome::for_player(&full.player, "beaver"), PetOutcome::Missed, "no room");
+        // spawned in the middle of a tick, it still ticks: it follows the player away
+        world.player.is_running = false;
+        world.player_request_walk_to(TileCoord::new(0, 3), false);
+        run_until(&mut world, 20, |w| w.player.tile() == TileCoord::new(0, 3));
+        world.run_tick();
+        let beaver = world.entity(follower).unwrap();
+        assert!(beaver.tile().chebyshev_distance_to(world.player.tile()) <= 1, "followed to {:?}", beaver.tile());
+    }
+
+    #[test]
+    fn with_a_follower_out_the_pet_goes_into_the_backpack_unless_owned_or_no_room() {
+        let mut world = woods(1, &[]);
+        assert_eq!(PetOutcome::for_player(&world, "beaver"), PetOutcome::Follower);
+        world.give_item("beaver", 1).unwrap();
+        assert_eq!(PetOutcome::for_player(&world, "beaver"), PetOutcome::Missed, "one is enough");
+
+        let mut world = woods(1, &[]);
+        assert!(world.call_follower("beaver"));
+        assert_eq!(PetOutcome::for_player(&world, "beaver"), PetOutcome::Missed, "the one following counts");
+
+        // another pet out (a stand-in: the beaver's own item under another id)
+        let mut world = woods(1, &[]);
+        world.follower = Some(crate::sim::Follower { entity: crate::actors::EntityId(77), item: "other_pet".into() });
+        assert_eq!(PetOutcome::for_player(&world, "beaver"), PetOutcome::Backpack);
+        world.give_item("shark", 28).unwrap();
+        assert_eq!(PetOutcome::for_player(&world, "beaver"), PetOutcome::Missed, "no room");
+    }
+
+    #[test]
+    fn a_pet_into_the_backpack_takes_the_last_slot_and_the_log_falls() {
+        let mut world = woods_with(1, &["bronze_axe"], &[pet_tree()]);
+        world.follower = Some(crate::sim::Follower { entity: crate::actors::EntityId(77), item: "other_pet".into() });
+        world.give_item("shark", 26).unwrap(); // the axe and 26 sharks: one slot left
+        chop(&mut world).unwrap();
+        run_until(&mut world, 20, |w| w.player.inventory.count("beaver") == 1);
+
+        assert_eq!(logs(&world), 0);
+        let on_the_ground: Vec<_> = world.ground_items().map(|g| (g.item.as_str(), g.tile)).collect();
+        assert_eq!(on_the_ground, vec![("logs", world.player.tile())]);
+        assert_eq!(world.player.skills.xp_tenths(Skill::Woodcutting), 250, "the log still counts");
     }
 
     #[test]
@@ -536,7 +682,7 @@ mod tests {
         });
         let mut world = woods_with(1, &["iron_axe", "bronze_axe"], &[node]);
         chop(&mut world).unwrap();
-        run_until(&mut world, 20, |w| w.player_action_animation().is_some() || logs(w) > 0);
+        run_until(&mut world, 20, |w| logs(w) > 0);
 
         assert_eq!(logs(&world), 1, "chopped with the bronze axe");
     }

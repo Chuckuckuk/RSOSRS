@@ -172,6 +172,8 @@ pub struct ItemDef {
     pub tags: Vec<String>,
     pub weapon: Option<WeaponDef>,
     pub ammo: Option<AmmoDef>,
+    /// For a pet: the monster (`npcs.json`) it is while it follows the player.
+    pub follower: Option<String>,
     /// Free-form provenance (wiki page, whether the numbers are verified).
     pub notes: String,
 }
@@ -188,6 +190,7 @@ impl Default for ItemDef {
             tags: Vec::new(),
             weapon: None,
             ammo: None,
+            follower: None,
             notes: String::new(),
         }
     }

@@ -2,7 +2,12 @@
 //!
 //! Layers: [`Cache`] (sector/container IO) -> [`Index`] (reference table) ->
 //! typed decoders ([`model`], [`terrain`], [`config`], [`locs`]).
+//!
+//! Writing: every layer has an inverse (`container::encode`, `cache::join_files`, `locs::encode`,
+//! [`reftable`]), and [`writer`] writes groups into a copy of a cache, never into the installed
+//! one. [`active`] picks which cache the game reads; an [`overlay`] replaces groups in memory.
 
+pub mod active;
 pub mod anim;
 pub mod bundle;
 pub mod buf;
@@ -23,6 +28,8 @@ pub mod locs;
 pub mod minimap;
 pub mod model;
 pub mod npc;
+pub mod overlay;
+pub mod reftable;
 pub mod terrain;
 pub mod scene;
 pub mod sound;
@@ -30,7 +37,10 @@ pub mod spotanim;
 pub mod squares;
 pub mod terrain_mesh;
 pub mod textures;
+#[doc(hidden)]
+pub mod testing;
 pub mod ui;
+pub mod writer;
 pub mod xtea;
 
 pub use cache::{Cache, Index};

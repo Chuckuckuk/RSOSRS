@@ -336,5 +336,8 @@ fn play_animations(time: Res<Time>, mut models: Query<&mut AnimatedModel>, mut m
 
 pub mod world;
 
+pub mod fly;
+
 pub mod pick;
 pub mod streaming;
+pub mod occlusion;

@@ -40,15 +40,24 @@ Vocabulary:
 
 ### Reading a group: [`cache.rs`](../osrs_cache/src/cache.rs)
 
-`Cache::open(dir)` opens `main_file_cache.dat2`. `Cache::open_default()` looks under
-`%USERPROFILE%\.runelite\jagexcache\oldschool\LIVE` and then `~/jagexcache/oldschool/LIVE`.
+`Cache::open(dir)` opens `main_file_cache.dat2`. `Cache::open_default()` opens the *active*
+cache (chapter 11.4): `OSRS_CACHE_DIR`, else the one chosen in `~/.rsosrs/active_cache`, else the
+installed game's under `%USERPROFILE%\.runelite\jagexcache\oldschool\LIVE` (then
+`~/jagexcache/oldschool/LIVE`). `Cache::open_live()` always opens the installed one.
+
+The crate also writes caches, for the map editor: every layer below has an inverse
+(`locs::encode`, `cache::join_files`, `container::encode`, `reftable::RefTable::encode`,
+`writer::CacheWriter`), described in chapter 11.3. Writing only ever targets a copy; the installed
+cache is read only. A cache opened `with_overlay(Arc<overlay::Overlay>)` answers reads of the
+groups the overlay holds from memory instead of its files (the map editor's uncompiled edits,
+chapter 11.5).
 
 1. **Index entry.** `main_file_cache.idxN` is an array of 6-byte records, one per group: a 24-bit
    length and a 24-bit first sector number. The whole idx file is read once and memoised behind
    a `Mutex`.
 2. **Sector chain.** `.dat2` is divided into 520-byte sectors. Each sector starts with a header
    (group id, chunk number, next sector, archive id; 8 bytes, or 10 when the group id needs 32
-   bits) followed by data. `read_raw` follows the chain, checking every header, until it has
+   bits) followed by data. The reader follows the chain, checking every header, until it has
    `length` bytes. The file handle is behind a `Mutex` because seeking mutates it.
 3. **Container.** [`container::decode`](../osrs_cache/src/container.rs) reads
    `[compression u8][length u32][uncompressed length u32, if compressed][payload]`. Compression 0
@@ -60,7 +69,8 @@ Vocabulary:
    file from its chunks.
 
 `Cache::index(archive)` parses that archive's reference table (protocols 5-7; protocol 7 uses
-"big smart" ids). `Index::group_by_name` finds a group by the Jagex string hash
+"big smart" ids) through [`reftable::RefTable`](../osrs_cache/src/reftable.rs), which keeps every
+column so a table can be written back byte for byte. `Index::group_by_name` finds a group by the Jagex string hash
 ([`name_hash`](../osrs_cache/src/lib.rs)).
 
 Convenience methods: `read_group(archive, group)`, `read_files(&index, group)` and
@@ -259,7 +269,17 @@ client's `getModel` and `light` routines:
    of each vertex colour is scaled by it. Flat-shaded faces use the face normal.
 8. **Texture coordinates** for textured faces: a planar projection where u runs from the
    texture triangle's P to M and v from P to N (least squares in the face plane).
-9. **Split** into a `LocMesh`: `opaque`, `translucent` (faces with alpha) and `textured` (one
+9. **Lift overlapping faces.** Models layer faces on one plane on purpose (a banner's cloth over its
+   backing, a sink's taps over its rim). The client paints faces in order (higher priority over
+   lower, later over earlier in the model), which a depth buffer cannot reproduce: it fights.
+   A face that shares its plane and facing with other faces is moved along its normal by
+   `LIFT_PER_RANK` (0.15 model units, a thousandth of a tile) times its rank: the number of
+   distinct looks (colour, texture, alpha) painted before it on that plane, by priority and then
+   model order, capped at `MAX_LIFT_RANK`. Faces alone on their plane do not move. The step has
+   to exceed what the graphics card can resolve at world coordinates (an `f32` near x = 3200
+   moves in steps of 0.00024 tile), or the layers snap back onto each other. Animated meshes
+   re-pose from the rig and lose the lift, as nothing in them layers faces that way.
+10. **Split** into a `LocMesh`: `opaque`, `translucent` (faces with alpha) and `textured` (one
    `MeshData` per texture id). Each output vertex records which merged vertex it came from
    (`MeshData::source`), and with `keep_rig` the merged vertices and their labels are kept as a
    `Rig` so animations can re-pose them later.

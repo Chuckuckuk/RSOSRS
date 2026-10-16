@@ -40,13 +40,14 @@ Read these in order the first time. Each one assumes the ones before it.
 | 8 | [08-cache-decoding.md](08-cache-decoding.md) | `osrs_cache`: the OSRS cache file format and every decoder built on it (terrain, models, animations, items...). |
 | 9 | [09-rendering-and-viewer.md](09-rendering-and-viewer.md) | `osrs_render` (turning decoded meshes into Bevy entities, picking, map streaming) and the `osrs_viewer` debug tool. |
 | 10 | [10-testing-and-workflows.md](10-testing-and-workflows.md) | How the tests are organised, how to run things, the debugging environment variables, and step-by-step recipes for common changes. |
+| 11 | [11-map-editor.md](11-map-editor.md) | `osrs_map_editor`: editing the world, compiling the edits into a new cache, and switching the game between caches. |
 | - | [glossary.md](glossary.md) | OSRS, Rust and project terms in one place. |
 
 ## Repository map
 
 ```
 RSOSRS/
-├── Cargo.toml            workspace: lists the four crates, sets build profiles
+├── Cargo.toml            workspace: lists the five crates, sets build profiles
 ├── osrs_core/            the game rules and server, plus the game client binary
 │   ├── src/lib.rs        library root: the simulation (no graphics)
 │   ├── src/main.rs       binary root: the Bevy game client
@@ -60,6 +61,7 @@ RSOSRS/
 │   └── README.md         cache-format findings log
 ├── osrs_render/          bridges decoded meshes into Bevy; shared by client and viewer
 ├── osrs_viewer/          a free-flying map viewer for debugging rendering
+├── osrs_map_editor/      edits the world and compiles the edits into a new cache
 ├── unity_context/        specs and notes from the original C# project
 └── shots/                screenshots taken while developing
 ```

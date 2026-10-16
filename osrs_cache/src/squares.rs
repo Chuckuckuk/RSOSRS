@@ -16,6 +16,11 @@ use std::collections::HashMap;
 /// Tiles along one side of a map square.
 pub const SQUARE: i32 = REGION as i32;
 
+/// The group in the maps archive (5) that holds map square (`sx`, `sy`).
+pub fn map_group(sx: i32, sy: i32) -> u32 {
+    ((sx << 8) | sy) as u32
+}
+
 /// The cache plus the definitions every square needs, decoded once.
 pub struct MapSource {
     cache: Cache,

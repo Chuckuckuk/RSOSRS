@@ -26,7 +26,8 @@
 //!        OSRS_UI_SCALE=n                 whole-number interface scale (default: largest that fits 765x503)
 //!        OSRS_WINDOW=WxH                 window size in pixels (scale factor forced to 1), e.g. 900x600 to test
 //!                                        the modern layout's narrow stone arrangement (< 948 px wide)
-//!        OSRS_MAX_PLANE=n                hide terrain and scenery above plane n (to look under roofs)
+//!        OSRS_MAX_PLANE=n                hide terrain and scenery above plane n (to look under roofs;
+//!                                        roofs also come off by themselves when the view crosses one)
 //! controls: F10 cycles the interface layout (fixed, classic, modern); G toggles the tile grid; left-click ground to walk there; right-click ground for the "Walk here" menu;
 //!           hold right mouse and drag to orbit the character, scroll to zoom
 //!
@@ -335,6 +336,13 @@ fn main() {
         osrs_cache::bundle::start_recording();
     }
     let launch = launch(bundled);
+    if !bundled {
+        // which world this is: the installed game's, or a map editor build (see osrs_cache::active)
+        match osrs_cache::active::active_dir() {
+            Some(dir) => println!("[cache] reading {}", dir.display()),
+            None => eprintln!("[cache] no game cache found"),
+        }
+    }
     let radius = launch.stream_radius();
     // the tile grid is for the open world; a fight shows only the floor (G still toggles it, and
     // OSRS_GRID=1 starts with it on)
@@ -363,19 +371,26 @@ fn main() {
         let (first_collision, mut first_locs) = square_map(&source, (sx, sy));
         let mut map = CollisionMap::new(first_collision).expect("a square's arrays match its size");
         let mut loaded: HashSet<(i32, i32)> = HashSet::from([(sx, sy)]);
-        for dz in -radius..=radius {
-            for dx in -radius..=radius {
-                let square = (sx + dx, sy + dz);
-                if loaded.insert(square) {
-                    let (collision, locs) = square_map(&source, square);
-                    first_locs.extend(locs);
-                    if let Err(e) = map.merge(collision) {
-                        eprintln!("[server] map square ({}, {}) rejected: {e}", square.0, square.1);
-                    }
+        let around = (-radius..=radius).flat_map(|dz| (-radius..=radius).map(move |dx| (sx + dx, sy + dz)));
+        merge_squares(&source, &mut map, &mut loaded, &mut first_locs, around);
+        let mut registry = Registry::builtin();
+
+        // who stands where in the open world: what a cache built by the map editor says, else the
+        // default man. Their squares are loaded now so each NPC has ground under it, however far
+        // from the player.
+        let mut npc_spawns = Vec::new();
+        if scenario.is_none() {
+            npc_spawns = match osrs_core::data::read_npc_spawns(source.cache().dir()) {
+                Some(spawns) => {
+                    println!("[server] {} NPCs from the cache's npc_spawns.json", spawns.len());
+                    spawns
                 }
-            }
+                None => osrs_core::data::default_npc_spawns((spawn.x, spawn.z)),
+            };
+            resolve_cache_npcs(&mut registry, &source, &mut npc_spawns);
         }
-        let registry = std::rc::Rc::new(Registry::builtin());
+        let registry = std::rc::Rc::new(registry);
+        merge_squares(&source, &mut map, &mut loaded, &mut first_locs, npc_spawns.iter().map(|s| square_of(s.x, s.z)));
 
         let mut server = match &scenario {
             Some(scenario) => {
@@ -394,12 +409,17 @@ fn main() {
                 world.set_registry(registry);
                 // enough Firemaking for the bonfire logs (level 50 is maple and below)
                 world.player.skills.set_base(osrs_core::model::Skill::Firemaking, 50);
-                // a man (level 2) stands about in Lumbridge square, a few tiles from where you arrive
-                let man_at = nearest_open_tile(&world.map, TileCoord::new(spawn.x + 4, spawn.z - 3));
-                match man_at.map(|at| world.spawn_npc_def("man", at)) {
-                    Some(Ok(id)) => println!("[server] a man (entity {}) stands at ({}, {})", id.0, man_at.unwrap().x, man_at.unwrap().z),
-                    Some(Err(e)) => eprintln!("[server] could not place the man: {e}"),
-                    None => eprintln!("[server] no open tile near the spawn for the man"),
+                for s in &npc_spawns {
+                    if s.plane != 0 {
+                        eprintln!("[server] {} at ({}, {}) is on plane {}; only ground-level NPCs are placed", s.npc, s.x, s.z, s.plane);
+                        continue;
+                    }
+                    let at = nearest_open_tile(&world.map, TileCoord::new(s.x, s.z));
+                    match at.map(|at| (at, world.spawn_npc_def(&s.npc, at))) {
+                        Some((at, Ok(id))) => println!("[server] {} (entity {}) stands at ({}, {})", s.npc, id.0, at.x, at.z),
+                        Some((_, Err(e))) => eprintln!("[server] could not place {} at ({}, {}): {e}", s.npc, s.x, s.z),
+                        None => eprintln!("[server] no open tile near ({}, {}) for {}", s.x, s.z, s.npc),
+                    }
                 }
                 // a starter kit for the mock server, so the inventory has something in it
                 for (item, quantity) in [
@@ -467,7 +487,7 @@ fn main() {
         primary_window: Some(window_from_env(window_title(&launch))),
         ..default()
     }))
-    .add_plugins((WorldRenderPlugin, ModelAnimationPlugin, ground_click::GroundClickPlugin, click_cross::ClickCrossPlugin, chat::ChatPlugin, combat_fx::CombatFxPlugin, interface::InterfacePlugin, overheads::OverheadPlugin, player_look::PlayerLookPlugin, projectiles::ProjectilePlugin, sound_fx::SoundPlugin, tile_marks::TileMarksPlugin))
+    .add_plugins((WorldRenderPlugin, osrs_render::occlusion::OcclusionPlugin, ModelAnimationPlugin, ground_click::GroundClickPlugin, click_cross::ClickCrossPlugin, chat::ChatPlugin, combat_fx::CombatFxPlugin, interface::InterfacePlugin, overheads::OverheadPlugin, player_look::PlayerLookPlugin, projectiles::ProjectilePlugin, sound_fx::SoundPlugin, tile_marks::TileMarksPlugin))
     .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.03)))
     .insert_resource(ScreenshotState { path: std::env::var("OSRS_SCREENSHOT").ok(), shot: false })
     .insert_resource(scene)
@@ -562,6 +582,31 @@ fn start_scenario(
     }
 }
 
+/// Settles the spawns of cache NPCs (`cache:<id>`) with `osrs_core::data::resolve_spawns`, which
+/// reads what the game cache says of the ones nobody has written stats for (decoded only if one is
+/// needed).
+fn resolve_cache_npcs(registry: &mut Registry, source: &MapSource, spawns: &mut [osrs_core::data::NpcSpawnPoint]) {
+    let mut cache_defs = None;
+    let resolved = osrs_core::data::resolve_spawns(registry, spawns, |id| {
+        let defs = cache_defs.get_or_insert_with(|| {
+            osrs_cache::config::Configs::new(source.cache()).and_then(|c| c.npcs()).unwrap_or_else(|e| {
+                eprintln!("[server] could not read the cache's NPC definitions: {e}");
+                Default::default()
+            })
+        });
+        let def = defs.get(&id)?;
+        Some(osrs_core::data::CacheNpc { name: def.name.clone(), combat_level: def.combat_level, size: def.size })
+    });
+    if resolved.variants + resolved.plain > 0 {
+        println!(
+            "[server] {} cache NPC kinds: {} sharing a monster's stats, {} without combat stats",
+            resolved.variants + resolved.plain,
+            resolved.variants,
+            resolved.plain
+        );
+    }
+}
+
 /// The open tile nearest `wanted` (searching outwards a few tiles), if there is one.
 fn nearest_open_tile(map: &CollisionMap, wanted: TileCoord) -> Option<TileCoord> {
     use osrs_core::collision::CollisionFlag;
@@ -589,6 +634,35 @@ fn open_world_seed() -> i32 {
 /// `CollisionMap` takes, and its ground-level objects that can change (free-standing ones such
 /// as trees, and wall pieces with an option such as doors), for the scenery index. A square that cannot be decoded is solid and empty, so nobody is ever walked onto
 /// ground nobody has seen.
+/// Loads each of `squares` not `loaded` yet into `map`, its interactive objects into `locs`. The
+/// squares are decoded in parallel (each reads the nine squares around it from the cache).
+fn merge_squares(
+    source: &MapSource,
+    map: &mut CollisionMap,
+    loaded: &mut HashSet<(i32, i32)>,
+    locs: &mut Vec<Loc>,
+    squares: impl IntoIterator<Item = (i32, i32)>,
+) {
+    let fresh: Vec<(i32, i32)> = squares.into_iter().filter(|&square| loaded.insert(square)).collect();
+    if fresh.is_empty() {
+        return;
+    }
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let decoded: Vec<(CollisionMapData, Vec<Loc>)> = std::thread::scope(|scope| {
+        let jobs: Vec<_> = fresh
+            .chunks(fresh.len().div_ceil(threads))
+            .map(|chunk| scope.spawn(move || chunk.iter().map(|&square| square_map(source, square)).collect::<Vec<_>>()))
+            .collect();
+        jobs.into_iter().flat_map(|job| job.join().expect("decoding a map square panicked")).collect()
+    });
+    for (square, (collision, square_locs)) in fresh.into_iter().zip(decoded) {
+        locs.extend(square_locs);
+        if let Err(e) = map.merge(collision) {
+            eprintln!("[server] map square ({}, {}) rejected: {e}", square.0, square.1);
+        }
+    }
+}
+
 fn square_map(source: &MapSource, square: (i32, i32)) -> (CollisionMapData, Vec<Loc>) {
     let cells = (SQUARE * SQUARE) as usize;
     let (flags, locs) = match source.neighbourhood(square.0, square.1) {
@@ -733,12 +807,14 @@ fn orbit_camera(
     scroll: Res<AccumulatedMouseScroll>,
     players: Query<&Transform, (With<Player>, Without<OrbitCamera>)>,
     mut cams: Query<(&mut Transform, &mut OrbitCamera), Without<Player>>,
+    mut occlusion: ResMut<osrs_render::occlusion::OcclusionTarget>,
 ) {
     let Ok((mut tf, mut cam)) = cams.single_mut() else { return };
     // follow the character (about 1.5 tiles tall) as the server moves it
     if let Ok(player) = players.single() {
         cam.target = player.translation + Vec3::Y * 0.75;
     }
+    occlusion.point = Some(cam.target);
     // the middle button turns the camera; the right one is the context menu's
     if buttons.pressed(MouseButton::Middle) {
         cam.yaw -= motion.delta.x * 0.005;

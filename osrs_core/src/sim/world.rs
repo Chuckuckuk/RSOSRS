@@ -10,7 +10,7 @@ use super::scenery::{Loc, LocChange, SceneryIndex, SceneryState};
 use super::sounds;
 use crate::actors::{ActorKind, EntityId, MovementPolicy, StationaryMovementPolicy};
 use crate::collision::{CollisionFlag, CollisionMap};
-use crate::data::{EquipSlot, Registry};
+use crate::data::{EquipSlot, NpcDef, Registry};
 use crate::combat::{
     AttackDefinition, AttackStyle, CombatState, SpecialContext, SpecialEffect, CombatStats, NpcCombatState, get_damage_multiplier, resolve_heal, roll_damage, roll_damage_with_floor,
 };
@@ -95,6 +95,11 @@ pub struct World {
     pub(super) scenery_state: SceneryState,
     /// Items lying on the ground.
     pub(super) ground_items: super::ground_items::GroundItems,
+    /// The pet following the player.
+    pub(super) follower: Option<super::followers::Follower>,
+    /// Ground-targeted attacks released and waiting out their delay. They belong to the world, not
+    /// to whoever released them, so they still land if it dies.
+    ground_strikes: Vec<PendingGroundStrike>,
 }
 
 fn slot_index(id: EntityId) -> Option<usize> {
@@ -116,7 +121,7 @@ fn entity_is_dead(entities: &[Slot], id: EntityId) -> bool {
 /// Up to `count` open tiles around a monster of footprint `size` whose south-west tile is `origin`
 /// for its helpers to appear on, avoiding `taken`: the middles of its four sides first, then its
 /// corners, then a ring further out.
-fn summon_spots(map: &CollisionMap, origin: TileCoord, size: i32, taken: &[TileCoord], count: usize) -> Vec<TileCoord> {
+pub(super) fn summon_spots(map: &CollisionMap, origin: TileCoord, size: i32, taken: &[TileCoord], count: usize) -> Vec<TileCoord> {
     let mid = size / 2;
     let mut candidates = Vec::new();
     for ring in 1..=3 {
@@ -126,7 +131,7 @@ fn summon_spots(map: &CollisionMap, origin: TileCoord, size: i32, taken: &[TileC
     }
     let mut spots = Vec::new();
     for (dx, dz) in candidates {
-        let tile = TileCoord::new(origin.x + dx, origin.z + dz);
+        let tile = TileCoord::with_plane(origin.x + dx, origin.z + dz, origin.plane);
         let open = map.flags_at(tile) & CollisionFlag::BLOCK_FULL == 0;
         if open && !taken.contains(&tile) && !spots.contains(&tile) {
             spots.push(tile);
@@ -151,7 +156,7 @@ fn monster_distance_to_player(entity: &Entity, player: &Player) -> i32 {
 
 fn hook_phases(behavior: &Behavior) -> &'static [TickPhase] {
     match behavior {
-        Behavior::Passive => &[TickPhase::NpcMovement],
+        Behavior::Passive | Behavior::Follower => &[TickPhase::NpcMovement],
         _ => &[TickPhase::NpcAi, TickPhase::NpcMovement],
     }
 }
@@ -162,6 +167,7 @@ enum Kind {
     Boss,
     Healer,
     Passive,
+    Follower,
 }
 
 impl World {
@@ -199,6 +205,8 @@ impl World {
             scenery: SceneryIndex::new(),
             scenery_state: SceneryState::new(),
             ground_items: Default::default(),
+            follower: None,
+            ground_strikes: Vec::new(),
         }
     }
 
@@ -333,6 +341,21 @@ impl World {
         id
     }
 
+    /// Puts a pet following the player on `at`.
+    pub(super) fn add_follower_entity(&mut self, at: TileCoord, def: &Rc<NpcDef>) -> EntityId {
+        let entity = Entity::new_follower(self.next_id(), at, def, &mut self.map);
+        self.add_entity(entity)
+    }
+
+    /// Takes entity `id` out of the world for good: it stops ticking and is no longer drawn.
+    pub(super) fn remove_entity(&mut self, id: EntityId) {
+        let Some(mut entity) = self.take_entity(id) else { return };
+        entity.mover.leave_map(&mut self.map);
+        for &phase in hook_phases(&entity.behavior) {
+            self.scheduler.unregister(phase, id);
+        }
+    }
+
     /// TODO: support respawning dead NPCs
     pub fn spawn_npc(&mut self, name: &str, start: TileCoord, config: NpcConfig) -> EntityId {
         let entity = Entity::new_npc(self.next_id(), name, start, &config, &mut self.map);
@@ -377,7 +400,11 @@ impl World {
 
     // ---- player commands (the public API of PlayerMover) ----
 
+    /// Attacks `target`; a pet following the player is not something to fight.
     pub fn player_set_attack_target(&mut self, target: EntityId) {
+        if self.entity(target).is_some_and(Entity::is_follower) {
+            return;
+        }
         self.player.set_attack_target(target);
     }
 
@@ -437,6 +464,11 @@ impl World {
         Ok(self.player.inventory.add(item_id, quantity, stackable))
     }
 
+    /// Whether one more `item_id` fits in the inventory (a free slot, or a stack to join).
+    pub(super) fn room_for(&self, item_id: &str) -> bool {
+        self.player.inventory.free_slots() > 0 || (self.item_is_stackable(item_id) && self.player.inventory.count(item_id) > 0)
+    }
+
     /// Choosing `option` ("Wield", "Eat", "Drop", ...) on the item in inventory `slot`.
     /// TODO: generalize this to allow for custom/item-specific click options, and for the player to click on items in the world (e.g. a dropped item).
     pub fn player_inventory_option(&mut self, slot: usize, option: &str) {
@@ -494,6 +526,14 @@ impl World {
                         self.game_message(message);
                     }
                     Err(message) => self.game_message(format!("You can't do that: {message}.")),
+                }
+            }
+            // a pet dropped comes out to follow, unless one already is
+            "drop" if self.is_pet(&stack.item) => {
+                if self.call_follower(&stack.item) {
+                    self.player.inventory.take(slot);
+                } else {
+                    self.game_message("You already have a follower.".to_owned());
                 }
             }
             "drop" => {
@@ -670,7 +710,10 @@ impl World {
     pub fn run_tick(&mut self) {
         let mut scheduler = std::mem::take(&mut self.scheduler);
         scheduler.run_tick(|phase, id, tick, registrar| self.dispatch(phase, id, tick, registrar));
-        self.scheduler = scheduler;
+        // entities added or removed during the tick (a pet rolled while chopping) registered on
+        // the stand-in left in `self.scheduler`: carry those over to the real one
+        let stand_in = std::mem::replace(&mut self.scheduler, scheduler);
+        self.scheduler.adopt_pending(stand_in);
         self.count_down_respawn();
         self.settle_deaths();
     }
@@ -739,6 +782,7 @@ impl World {
             Behavior::Boss(_) => Kind::Boss,
             Behavior::Healer(_) => Kind::Healer,
             Behavior::Passive => Kind::Passive,
+            Behavior::Follower => Kind::Follower,
         };
 
         match (kind, phase) {
@@ -749,6 +793,7 @@ impl World {
             (Kind::Healer, TickPhase::NpcAi) => self.run_heal_ai(&mut entity),
             (Kind::Healer, TickPhase::NpcMovement) => self.run_healer_movement(&mut entity),
             (Kind::Passive, TickPhase::NpcMovement) => self.run_passive_movement(&mut entity),
+            (Kind::Follower, TickPhase::NpcMovement) => self.run_follower_movement(&mut entity),
             _ => {}
         }
 
@@ -1226,16 +1271,25 @@ impl World {
         if leader.is_dead() {
             return false;
         }
-        let size = leader.mover.actor.footprint_size();
-        let beside = TargetSpec::adjacent(leader.tile(), size, size);
+        let (tile, size) = (leader.tile(), leader.mover.actor.footprint_size());
+        self.walk_beside(entity, tile, size);
+        true
+    }
+
+    /// Walks `entity` (one tile a tick) to stand next to whatever of footprint `size` stands on
+    /// `tile`, re-planning when that has moved. Returns false when there is no way there.
+    pub(super) fn walk_beside(&mut self, entity: &mut Entity, tile: TileCoord, size: i32) -> bool {
+        let beside = TargetSpec::adjacent(tile, size, size);
         if beside.is_satisfied_by(entity.tile()) {
             entity.mover.step(&mut self.map, 0);
-        } else {
-            if entity.mover.destination().is_none() {
-                entity.mover.request_move(&mut self.pathfinder, &mut self.map, beside);
-            }
-            entity.mover.step(&mut self.map, 1);
+            return true;
         }
+        let heading_there = entity.mover.destination().is_some_and(|end| beside.is_satisfied_by(end));
+        if !heading_there && !entity.mover.request_move(&mut self.pathfinder, &mut self.map, beside) {
+            entity.mover.step(&mut self.map, 0);
+            return false;
+        }
+        entity.mover.step(&mut self.map, 1);
         true
     }
 
