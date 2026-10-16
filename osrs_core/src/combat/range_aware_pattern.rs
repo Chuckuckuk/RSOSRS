@@ -88,11 +88,11 @@ mod tests {
     use crate::rng::DotNetRandom;
 
     fn melee() -> Rc<AttackDefinition> {
-        AttackDefinition::targeted("Melee", None, 1, AttackStyle::Melee).shared()
+        AttackDefinition::telegraphed("Melee", None, 1, AttackStyle::Melee).shared()
     }
 
     fn magic() -> Rc<AttackDefinition> {
-        AttackDefinition::targeted("Magic", Some(10), 1, AttackStyle::Magic).shared()
+        AttackDefinition::telegraphed("Magic", Some(10), 1, AttackStyle::Magic).shared()
     }
 
     fn context(counter: i32, target: TileCoord) -> AttackSelectionContext {
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn a_min_range_hides_an_attack_up_close() {
-        let lob = AttackDefinition::targeted("Lob", Some(10), 1, AttackStyle::Ranged).with_min_range(4).shared();
+        let lob = AttackDefinition::telegraphed("Lob", Some(10), 1, AttackStyle::Ranged).with_min_range(4).shared();
         let pattern = RangeAwarePattern::new(vec![(melee(), 1.0), (lob, 1.0)], RotationMode::Fixed, 1, 1);
 
         assert_eq!(pattern.usable(TileCoord::new(0, 0), TileCoord::new(1, 0)), vec![0]);

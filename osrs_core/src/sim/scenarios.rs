@@ -302,7 +302,7 @@ mod tests {
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig::default());
 
-        let slam = AttackDefinition::targeted("Slam", Some(15), 2, AttackStyle::Ranged)
+        let slam = AttackDefinition::telegraphed("Slam", Some(15), 2, AttackStyle::Ranged)
             .shared();
         let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![slam]));
         let phase = Phase::new("Main", pattern, None);
@@ -355,7 +355,7 @@ mod tests {
     fn a_when_entity_died_trigger_fires_on_the_tick_of_the_killing_blow() {
         let mut world = tough_arena(tc(0, 0));
         let boss = world.spawn_boss("Boss", tc(0, 8), BossConfig { max_health: 10, ..Default::default() });
-        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![AttackDefinition::targeted(
+        let pattern: Rc<dyn AttackPattern> = Rc::new(FixedRotationPattern::new(vec![AttackDefinition::telegraphed(
             "Slam",
             Some(15),
             2,

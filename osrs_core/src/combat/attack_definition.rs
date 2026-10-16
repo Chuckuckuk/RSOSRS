@@ -132,17 +132,6 @@ impl AttackDefinition {
         )
     }
 
-    /// A targeted attack from a wind-up length: no wind-up is an `Instant` attack, any is
-    /// `Telegraphed`. For data, where the length is a number.
-    pub fn targeted(name: impl Into<String>, range: Option<i32>, telegraph_ticks: i32, style: AttackStyle) -> Self {
-        assert!(telegraph_ticks >= 0, "telegraph_ticks must not be negative");
-        if telegraph_ticks == 0 {
-            Self::instant(name, range, style)
-        } else {
-            Self::telegraphed(name, range, telegraph_ticks, style)
-        }
-    }
-
     /// An attack aimed at the ground: when its `telegraph_ticks` end it deals `damage` to whoever
     /// stands on the tiles `target` picks, and is gone.
     pub fn ground(
@@ -436,12 +425,6 @@ mod tests {
 
         assert_eq!((telegraphed.telegraph_ticks(), telegraphed.impact_delay_ticks()), (3, 0));
         assert_eq!((on_contact.telegraph_ticks(), on_contact.impact_delay_ticks()), (0, 4));
-    }
-
-    #[test]
-    fn the_data_constructor_picks_instant_or_telegraphed_from_the_wind_up() {
-        assert!(matches!(AttackDefinition::targeted("A", None, 0, AttackStyle::Melee).kind, AttackKind::Instant(_)));
-        assert!(matches!(AttackDefinition::targeted("A", None, 2, AttackStyle::Melee).kind, AttackKind::Telegraphed(_)));
     }
 
     #[test]

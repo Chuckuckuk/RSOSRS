@@ -7,11 +7,22 @@ use crate::actors::{
     StyleReactiveMovementPolicy,
 };
 use crate::combat::{
-    AttackDefinition, CombatStats, MaxHitSource, ProjectileSpeed, RangeAwarePattern,
+    AttackDefinition, AttackStyle, CombatStats, MaxHitSource, ProjectileSpeed, RangeAwarePattern,
     Mitigation, RotationMode,
 };
 use crate::data::{NpcAttackDef, NpcDef, NpcMovementDef, RotationDef};
 use crate::model::{DamageType, StanceBonuses};
+
+/// A standard attack that rolls the tick it is chosen when `telegraph_ticks` is 0, else after that
+/// many ticks of wind-up: how data and config, which only have the number, name a timing.
+pub fn timed_attack(name: impl Into<String>, range: Option<i32>, telegraph_ticks: i32, style: AttackStyle) -> AttackDefinition {
+    assert!(telegraph_ticks >= 0, "telegraph_ticks must not be negative");
+    if telegraph_ticks == 0 {
+        AttackDefinition::instant(name, range, style)
+    } else {
+        AttackDefinition::telegraphed(name, range, telegraph_ticks, style)
+    }
+}
 
 /// One of a monster's attacks as a runtime `AttackDefinition`. Assumes the definition has been
 /// through `Registry::validate`.
@@ -26,7 +37,7 @@ fn attack_sounding(def: &NpcAttackDef, fallback_sound: Option<u32>) -> Rc<Attack
     let mut attack = if def.impact_delay_ticks > 0 {
         AttackDefinition::on_contact(def.name.clone(), def.range, def.impact_delay_ticks, def.style)
     } else {
-        AttackDefinition::targeted(def.name.clone(), def.range, def.telegraph_ticks, def.style)
+        timed_attack(def.name.clone(), def.range, def.telegraph_ticks, def.style)
     }
     .with_damage_type(def.damage_type.unwrap_or_else(|| DamageType::default_for(def.style)))
     .with_max_hit(MaxHitSource::Fixed(def.max_hit))
@@ -88,8 +99,13 @@ pub fn stats_from_def(def: &NpcDef) -> CombatStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::AttackStyle;
     use crate::data::Registry;
+
+    #[test]
+    fn the_wind_up_number_picks_instant_or_telegraphed() {
+        assert!(matches!(timed_attack("A", None, 0, AttackStyle::Melee).kind, crate::combat::AttackKind::Instant(_)));
+        assert!(matches!(timed_attack("A", None, 2, AttackStyle::Melee).kind, crate::combat::AttackKind::Telegraphed(_)));
+    }
 
     #[test]
     fn jads_attacks_carry_their_listed_numbers() {

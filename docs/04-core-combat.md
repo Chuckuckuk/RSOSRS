@@ -92,8 +92,9 @@ ranged and magic weapons override the default with the game's own flight formula
 Constructors: `AttackDefinition::instant(name, range, style)`, `telegraphed(name, range,
 telegraph_ticks, style)`, `on_contact(name, range, impact_delay_ticks, style)` and `ground(name,
 range, telegraph_ticks, target, damage)`, where `range` is an `Option` (`None` inherits the
-attacker's). `targeted(name, range, telegraph_ticks, style)` picks
-`Instant` or `Telegraphed` from the number, for data. The `with_*` methods set the rest (primer 1.4).
+attacker's). Data and config, which only have a wind-up number, use
+`npc_factory::timed_attack(name, range, telegraph_ticks, style)`, which picks `Instant` or
+`Telegraphed` from it. The `with_*` methods set the rest (primer 1.4).
 They validate their input and panic on nonsense, including a builder for a field the attack's kind
 does not have (`with_always_hits` on a ground attack, `with_projectile_speed` on an `OnContact`
 one), because a bad attack is a bug in data or code, not something a player can cause.

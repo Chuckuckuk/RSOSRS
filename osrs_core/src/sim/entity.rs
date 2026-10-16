@@ -141,7 +141,7 @@ impl Entity {
     pub fn new_npc(id: EntityId, name: &str, start: TileCoord, config: &NpcConfig, map: &mut CollisionMap) -> Self {
         let actor = Actor::new(ActorKind::Npc, start, config.footprint_size, config.max_health, config.levels.to_stats());
         let mover = Mover::new(actor, map);
-        let attack = AttackDefinition::targeted("Melee", None, config.melee_telegraph_ticks, AttackStyle::Melee)
+        let attack = npc_factory::timed_attack("Melee", None, config.melee_telegraph_ticks, AttackStyle::Melee)
             .shared();
         // Only one attack exists, so a one-entry FixedRotationPattern is just "always this attack".
         let combat_state = NpcCombatState::new(Rc::new(FixedRotationPattern::new(vec![Rc::clone(&attack)])));

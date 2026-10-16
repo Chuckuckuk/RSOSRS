@@ -31,7 +31,10 @@ fn make_melee_attack(telegraph_ticks: i32, impact_delay_ticks: i32) -> Rc<Attack
         assert_eq!(telegraph_ticks, 0, "an on-contact attack has no wind-up");
         AttackDefinition::on_contact("Test Melee", None, impact_delay_ticks, AttackStyle::Melee)
     } else {
-        AttackDefinition::targeted("Test Melee", None, telegraph_ticks, AttackStyle::Melee)
+        match telegraph_ticks {
+            0 => AttackDefinition::instant("Test Melee", None, AttackStyle::Melee),
+            _ => AttackDefinition::telegraphed("Test Melee", None, telegraph_ticks, AttackStyle::Melee),
+        }
     };
     attack
         .with_prayer_penetration(0.0)

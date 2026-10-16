@@ -398,7 +398,7 @@ impl Player {
         };
         let modifiers = modifiers.iter().map(|m| m.resolved(&scaling)).collect();
 
-        let mut definition = AttackDefinition::targeted(name, Some(range), 0, style)
+        let mut definition = AttackDefinition::instant(name, Some(range), style)
             .with_damage_type(damage_type)
             .with_max_hit(max_hit)
             .with_modifiers(modifiers)
