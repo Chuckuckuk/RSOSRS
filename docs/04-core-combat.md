@@ -544,8 +544,8 @@ when it resolves (the rocks that fall as Jad fires). A rider with a delay waits 
 has a `falling_graphic` it chooses its tiles as it is sent and the world reports a
 `WorldEvent::TileGraphic` on each, so the rocks are seen falling and land as the graphic ends (the
 falling-rock graphic, 451, runs 2.2 ticks). `PositionResolver::leaving(hazard, placement)` makes a
-rock leave a boulder behind; where it does, only the tiles that get a boulder hurt, so a rock that
-does not stay is only seen. Tile selection can scatter a *range* of tiles and always include the
+rock leave a boulder behind (on the anchor tile or every covered tile); every covered tile hurts a
+player standing on it either way. Tile selection can scatter a *range* of tiles and always include the
 anchor tile. `TileProjectile` and `TileSound` are the matching events for a shot flown or a sound
 heard at a tile; the client plays them on a marker it stands on that tile.
 

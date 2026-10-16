@@ -1290,7 +1290,7 @@ mod tests {
                 assert_eq!(world.hazards().count(), 0);
             }
             if thrown.is_some_and(|t| tick == t + 2) {
-                assert_eq!(world.hazards().map(|(_, tile, _)| tile).collect::<Vec<_>>(), vec![tc(0, 0)], "only the player's rock stays");
+                assert_eq!(world.hazards().map(|(_, tile, _)| tile).collect::<Vec<_>>(), vec![tc(0, 0)], "only the rock on the player's tile leaves a boulder");
                 return;
             }
         }

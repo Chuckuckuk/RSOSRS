@@ -61,8 +61,8 @@ pub struct PositionResolver {
     pub damage: GroundDamage,
     /// The one prayer that reduces (but never negates) the damage, if any.
     pub prayer_reduction: Option<PrayerReduction>,
-    /// A hazard it leaves where it lands (the boulder a rock becomes). When it leaves one, only
-    /// the tiles that get one hurt: a rock that does not stay is only seen falling.
+    /// A hazard it leaves where it lands (the boulder a rock becomes). Every covered tile hurts
+    /// whether or not it gets one.
     pub leaves: Option<LeftBehind>,
     /// The cache graphic shown falling on each tile from the moment it is sent, so that it lands
     /// as the graphic ends (a rock). Needs the special to wait: see `SpecialAttack`.
@@ -120,21 +120,19 @@ impl SpecialResolver for PositionResolver {
             Some(chosen) => chosen.to_vec(),
             None => self.target.tiles(context.self_tile, context.target_tile, rng),
         };
-        // where it leaves a hazard, only that hurts
-        let places = self.leaves.as_ref().map(|left| match left.placement {
-            HazardPlacement::AnchorTile => vec![self.target.anchor_tile(context.self_tile, context.target_tile)],
-            HazardPlacement::EveryCoveredTile => tiles.clone(),
-        });
-        let hurts = places.as_ref().unwrap_or(&tiles);
         let mut effects = Vec::new();
-        if context.player_alive && hurts.contains(&context.player_tile) {
+        if context.player_alive && tiles.contains(&context.player_tile) {
             // no accuracy roll: standing there is what hurts, less what the one prayer cuts
             let rolled = self.damage.roll(rng);
             let multiplier = self.damage_multiplier(Some(context.player_reaction));
             let damage = ((rolled as f32 * multiplier) as f64).round() as i32;
             effects.push(SpecialEffect::HurtPlayer { damage, delay_ticks: 0 });
         }
-        if let (Some(left), Some(places)) = (&self.leaves, places) {
+        if let Some(left) = &self.leaves {
+            let places = match left.placement {
+                HazardPlacement::AnchorTile => vec![self.target.anchor_tile(context.self_tile, context.target_tile)],
+                HazardPlacement::EveryCoveredTile => tiles,
+            };
             effects.extend(places.into_iter().map(|tile| SpecialEffect::SpawnHazard { def: Rc::clone(&left.def), tile, armed_in: 0 }));
         }
         effects

@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn where_it_leaves_a_hazard_only_that_tile_hurts() {
+    fn every_covered_tile_hurts_though_only_the_anchor_gets_a_hazard() {
         use crate::combat::{HazardDef, HazardPlacement};
         let boulder = Rc::new(HazardDef::new("Boulder"));
         let rocks = PositionResolver::new(GroundTarget::square(HazardAnchor::Target, 1), GroundDamage::Fixed(30))
@@ -165,11 +165,15 @@ mod tests {
         let effects = rocks.resolve(&context(&reaction), &mut rng);
         assert!(matches!(effects[0], SpecialEffect::HurtPlayer { damage: 30, .. }), "{effects:?}");
 
-        // the player stepped to a neighbouring tile under the cover: no rock stays there
-        let moved = SpecialContext { player_tile: TileCoord::new(6, 5), ..context(&reaction) };
-        let effects = rocks.resolve(&moved, &mut rng);
-        assert!(effects.iter().all(|e| !matches!(e, SpecialEffect::HurtPlayer { .. })), "{effects:?}");
+        // on a neighbouring covered tile no rock stays, but it still hurts
+        let beside = SpecialContext { player_tile: TileCoord::new(6, 5), ..context(&reaction) };
+        let effects = rocks.resolve(&beside, &mut rng);
+        assert!(matches!(effects[0], SpecialEffect::HurtPlayer { damage: 30, .. }), "{effects:?}");
         assert!(effects.iter().any(|e| matches!(e, SpecialEffect::SpawnHazard { .. })), "the boulder still lands");
+
+        // off the covered tiles altogether nothing hurts
+        let away = SpecialContext { player_tile: TileCoord::new(9, 9), ..context(&reaction) };
+        assert!(rocks.resolve(&away, &mut rng).iter().all(|e| !matches!(e, SpecialEffect::HurtPlayer { .. })));
     }
 
     #[test]
