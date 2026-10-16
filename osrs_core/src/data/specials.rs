@@ -13,6 +13,8 @@ pub struct HazardData {
     pub name: String,
     /// Stands in the way of line of sight for everything but the monster that left it.
     pub blocks_line_of_sight: bool,
+    /// Players see and shoot past it all the same.
+    pub players_see_past: bool,
     /// Stands in players' way (monsters walk through it).
     pub blocks_players: bool,
     /// Damage to a player standing on it, each tick.
@@ -34,6 +36,7 @@ impl Default for HazardData {
             id: String::new(),
             name: "Hazard".into(),
             blocks_line_of_sight: false,
+            players_see_past: false,
             blocks_players: false,
             damage_per_tick: 0,
             lifetime_ticks: None,

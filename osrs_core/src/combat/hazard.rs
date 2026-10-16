@@ -9,6 +9,8 @@ pub struct HazardDef {
     pub name: String,
     /// Blocks line of sight for everyone but its owner.
     pub blocks_line_of_sight: bool,
+    /// Players see and shoot past it all the same (it still stops everything else's shots).
+    pub players_see_past: bool,
     /// Stands in players' way (NPCs walk through it).
     pub blocks_players: bool,
     /// Damage to a player standing on it, each tick; 0 for none.
@@ -28,6 +30,7 @@ impl HazardDef {
         Self {
             name: name.into(),
             blocks_line_of_sight: false,
+            players_see_past: false,
             blocks_players: false,
             damage_per_tick: 0,
             lifetime_ticks: None,
@@ -39,6 +42,11 @@ impl HazardDef {
 
     pub fn blocking_line_of_sight(mut self) -> Self {
         self.blocks_line_of_sight = true;
+        self
+    }
+
+    pub fn seen_past_by_players(mut self) -> Self {
+        self.players_see_past = true;
         self
     }
 

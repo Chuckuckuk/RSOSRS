@@ -415,19 +415,21 @@ impl World {
     /// The tiles of every live hazard that stands in `shooter`'s line of sight: all that block
     /// sight, except the ones the shooter itself left.
     pub fn sight_blockers_against(&self, shooter: Combatant) -> Vec<TileCoord> {
-        self.sight_blocking_hazards(|owner| Combatant::Npc(owner) != shooter)
+        self.sight_blocking_hazards(|owner, def| {
+            Combatant::Npc(owner) != shooter && !(shooter == Combatant::Player && def.players_see_past)
+        })
     }
 
     /// The tiles of every live hazard that blocks line of sight, whoever left it: what a
     /// projectile in flight runs into (a boulder stops its own owner's spell).
     pub fn sight_blockers(&self) -> Vec<TileCoord> {
-        self.sight_blocking_hazards(|_| true)
+        self.sight_blocking_hazards(|_, _| true)
     }
 
-    fn sight_blocking_hazards(&self, counts: impl Fn(EntityId) -> bool) -> Vec<TileCoord> {
+    fn sight_blocking_hazards(&self, counts: impl Fn(EntityId, &HazardDef) -> bool) -> Vec<TileCoord> {
         self.entities()
             .filter_map(|entity| match &entity.behavior {
-                Behavior::Hazard(state) if !state.gone && state.def.blocks_line_of_sight && counts(state.owner) => Some(entity.tile()),
+                Behavior::Hazard(state) if !state.gone && state.def.blocks_line_of_sight && counts(state.owner, &state.def) => Some(entity.tile()),
                 _ => None,
             })
             .collect()

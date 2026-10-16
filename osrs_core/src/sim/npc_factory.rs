@@ -113,6 +113,9 @@ fn hazard_named(hazards: &[HazardData], id: &str) -> Rc<HazardDef> {
     if data.blocks_line_of_sight {
         def = def.blocking_line_of_sight();
     }
+    if data.players_see_past {
+        def = def.seen_past_by_players();
+    }
     if data.blocks_players {
         def = def.blocking_players();
     }

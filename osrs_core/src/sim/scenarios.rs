@@ -1041,6 +1041,17 @@ mod tests {
     }
 
     #[test]
+    fn a_boulder_players_see_past_still_stops_a_shot_but_not_the_players_sight() {
+        let see_through = Rc::new(HazardDef::new("Boulder").blocking_line_of_sight().seen_past_by_players());
+        let rock = rock_leaving(see_through, HazardPlacement::AnchorTile, GroundTarget::square(HazardAnchor::Target, 0));
+        let (mut world, _) = world_with_periodic(rock, 1);
+        run_ticks(&mut world, 1);
+
+        assert!(world.sight_blockers_against(Combatant::Player).is_empty());
+        assert_eq!(world.sight_blockers(), vec![tc(0, 0)], "it still stops a shot in flight");
+    }
+
+    #[test]
     fn a_player_never_steps_onto_a_boulder_that_was_already_there() {
         // a boulder two tiles east of the player, every tick, wherever they have got to
         let rock = rock_leaving(
