@@ -21,8 +21,8 @@
       "armadyl_helmet",
       "avas_assembler",
       "necklace_of_anguish",
-      "rune_bolts",
-      "rune_crossbow",
+      "dragon_arrow",
+      "twisted_bow",
       "armadyl_chestplate",
       "twisted_buckler",
       "armadyl_chainskirt",
@@ -86,5 +86,5 @@
       "hostile": true
     }
   ],
-  "notes": "A made-up boss built from the generic engine parts (hazards, line of sight, obstructed shots, riders, phases). Switch protection prayers as with Jad. Boulders block your line of sight (your ranged and magic attacks need a clear line) and block your path; his magic hits a boulder in its way instead of you. Below 60% he fires a three-shot magic volley, below 40% he walks at you, below 20% his healers come and a boulder falls near you every 3 ticks. Headless: `cargo run -p osrs_core --bin simulate -- gigajad --ticks 300`. The client does not draw hazards yet, so boulders and lava are invisible there."
+  "notes": "A made-up boss built from the generic engine parts (hazards, line of sight, obstructed shots, riders, phases). Switch protection prayers as with Jad. Boulders block your line of sight (your ranged and magic attacks need a clear line) and block your path; his magic hits a boulder in its way instead of you. Below 60% he fires a three-shot magic volley, below 40% he walks at you, below 20% his healers come and a boulder falls near you every 3 ticks. Headless: `cargo run -p osrs_core --bin simulate -- gigajad --ticks 300`."
 }
